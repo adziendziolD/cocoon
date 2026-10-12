@@ -5,7 +5,7 @@ import type { EventBus } from './events.ts';
 import { currentLanguage, isMessageKey, t, type MessageKey } from './i18n.ts';
 import { newId } from './ids.ts';
 import type { Notifier } from './notifications.ts';
-import type { SandboxManager } from './sandbox/manager.ts';
+import { reposOf, type SandboxManager } from './sandbox/manager.ts';
 import type { WorkspaceService as FilesService } from './sandbox/workspace.ts';
 import type { SettingsService } from './settings.ts';
 import type { Store } from './store.ts';
@@ -152,7 +152,7 @@ export class TaskService {
     return localizeTask(task, currentLanguage());
   }
 
-  approve(taskId: string): Task {
+  async approve(taskId: string): Promise<Task> {
     const task = this.record(taskId);
     if (task.status !== 'review') throw new CocoonError('conflict', t('error.taskNotInReview', { title: task.title }));
     const stages = this.stages(task);
@@ -160,15 +160,41 @@ export class TaskService {
       task.stage += 1;
       this.launch(task);
     } else {
+      // Fails (task stays in review) if the work cannot be pushed, e.g. without a GitHub token.
+      const published = await this.publishOwnSandbox(task);
       task.status = 'done';
       task.attention = false;
-      clearNote(task);
+      if (published) setNote(task, published.key, published.params);
+      else clearNote(task);
       task.order = this.nextOrder(task.workspaceId, 'done');
       this.save(task);
       this.notifier.notify('task.done', 'notify.taskDone', { title: task.title }, `/tasks?task=${task.id}`);
       void this.schedule();
     }
     return localizeTask(task, currentLanguage());
+  }
+
+  /**
+   * A sandbox created for this task alone is done once the task is approved: commit everything, push it to a task branch
+   * and remove the sandbox. Shared or hand-picked sandboxes and sandboxes without a repository stay untouched.
+   */
+  private async publishOwnSandbox(task: Task): Promise<{ key: MessageKey; params: Record<string, string> } | undefined> {
+    const sandbox = task.sandboxId ? this.store.sandbox(task.sandboxId) : undefined;
+    if (!sandbox || sandbox.taskId !== task.id || !reposOf(sandbox).length) return undefined;
+    const branch = `cocoon/${slug(task.title)}-${task.id.slice(-4)}`;
+    if (sandbox.status !== 'running') await this.sandboxes.start(sandbox.id);
+    let pushed: string[];
+    try {
+      ({ pushed } = await this.files.publish(sandbox.id, task.title, branch));
+    } catch (err) {
+      throw new CocoonError('bad_request', t('error.taskPublishFailed', { error: (err as Error).message }));
+    }
+    if (task.status === 'running' || task.agentId) this.stopAgent(task);
+    await this.sandboxes.delete(sandbox.id);
+    delete task.sandboxId;
+    return pushed.length
+      ? { key: 'note.published', params: { branch, repos: pushed.map((p) => p || '.').join(', ') } }
+      : { key: 'note.publishedNothing', params: {} };
   }
 
   async reject(taskId: string, feedback: string): Promise<Task> {
@@ -366,8 +392,16 @@ export class TaskService {
     const own = await usable(task.sandboxId);
     if (own) return own;
     if (workspace.sandboxMode === 'shared') {
-      const shared = await usable(workspace.sharedSandboxId);
-      if (shared) return this.assignSandbox(task, shared);
+      // The shared sandbox, else one that already exists in the workspace (running first), else a new one.
+      const existing = this.store
+        .sandboxes()
+        .filter((s) => s.workspaceId === workspace.id && !s.taskId && (s.status === 'running' || s.status === 'stopped'))
+        .sort((a, b) => Number(b.status === 'running') - Number(a.status === 'running') || b.createdAt.localeCompare(a.createdAt));
+      const shared = (await usable(workspace.sharedSandboxId)) ?? (await usable(existing[0]?.id));
+      if (shared) {
+        if (shared !== workspace.sharedSandboxId) this.workspaces.update({ workspaceId: workspace.id, sharedSandboxId: shared });
+        return this.assignSandbox(task, shared);
+      }
       const created = await this.createSandbox(workspace, `${slug(workspace.name)}-shared`);
       this.workspaces.update({ workspaceId: workspace.id, sharedSandboxId: created });
       return this.assignSandbox(task, created);

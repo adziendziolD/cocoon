@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { Task, TaskPriority } from '@cocoon/protocol';
+import type { Sandbox, Task, TaskPriority, Workspace } from '@cocoon/protocol';
 import { Bot, ChevronDown, ChevronRight, Lightbulb, ListPlus, Inbox, Search, Workflow as WorkflowIcon } from 'lucide-react';
-import { useSettings, useTasks, useWorkspaces } from '../../api/queries';
+import { useSandboxes, useSettings, useTasks, useWorkspaces } from '../../api/queries';
 import { rpc } from '../../api/rpc';
 import { useAction } from '../../api/useAction';
 import { rich, useT } from '../../i18n';
@@ -30,6 +30,21 @@ interface Draft {
   providers: string[] | null;
   model: string;
   dependsOn: string[];
+  /** '' = a new sandbox for this task (or the workspace's shared one). */
+  sandboxId: string;
+}
+
+/** Sandboxes of a workspace a task can work in (not the private sandbox of another task). */
+function sandboxChoices(sandboxes: Sandbox[] | undefined, workspaceId: string, taskId?: string): Sandbox[] {
+  return (sandboxes ?? [])
+    .filter((s) => s.workspaceId === workspaceId && (s.status === 'running' || s.status === 'stopped') && (!s.taskId || s.taskId === taskId))
+    .sort((a, b) => Number(b.status === 'running') - Number(a.status === 'running') || b.createdAt.localeCompare(a.createdAt));
+}
+
+/** Preselection for a new task: a running sandbox of the workspace, unless every task gets its own on purpose (shared mode picks itself). */
+function defaultSandbox(sandboxes: Sandbox[] | undefined, ws: Workspace | undefined): string {
+  if (!ws || ws.sandboxMode === 'shared') return '';
+  return sandboxChoices(sandboxes, ws.id).find((s) => s.status === 'running')?.id ?? '';
 }
 
 /**
@@ -55,6 +70,7 @@ export function TaskDialog({
   const settings = useSettings();
   const workspaces = useWorkspaces();
   const tasks = useTasks();
+  const sandboxes = useSandboxes();
   const store = useStoreTask();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [advanced, setAdvanced] = useState(false);
@@ -81,6 +97,7 @@ export function TaskDialog({
         providers: task.providers ?? null,
         model: task.model ?? '',
         dependsOn: [...task.dependsOn],
+        sandboxId: task.sandboxId ?? '',
       });
       return;
     }
@@ -99,6 +116,7 @@ export function TaskDialog({
       providers: null,
       model: '',
       dependsOn: [],
+      sandboxId: defaultSandbox(sandboxes.data, ws),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, task?.id, workspaceId, !!settings.data]);
@@ -116,6 +134,8 @@ export function TaskDialog({
         providers: d.providers ?? undefined,
         model: d.model.trim() || undefined,
         dependsOn: d.dependsOn,
+        // '' clears a chosen sandbox when editing; a new task simply gets none.
+        sandboxId: d.sandboxId || (task?.sandboxId ? '' : undefined),
       };
       return task ? rpc('task.update', { taskId: task.id, ...common }) : rpc('task.create', { workspaceId: d.workspaceId, status: v.status, ...common });
     },
@@ -205,7 +225,12 @@ export function TaskDialog({
           {!task && !workspaceId && (
             <Field label={t('taskDialog.workspace')}>
               {workspaces.data?.length ? (
-                <Select value={d.workspaceId} onChange={(e) => set({ workspaceId: e.target.value, dependsOn: [] })}>
+                <Select
+                  value={d.workspaceId}
+                  onChange={(e) =>
+                    set({ workspaceId: e.target.value, dependsOn: [], sandboxId: defaultSandbox(sandboxes.data, workspaces.data?.find((w) => w.id === e.target.value)) })
+                  }
+                >
                   <option value="">{t('taskDialog.chooseWorkspace')}</option>
                   {workspaces.data.map((w) => (
                     <option key={w.id} value={w.id}>
@@ -283,6 +308,8 @@ export function TaskDialog({
               ))}
             </div>
           </Field>
+
+          {d.workspaceId && <SandboxField draft={d} set={set} workspace={ws} sandboxes={sandboxChoices(sandboxes.data, d.workspaceId, task?.id)} />}
 
           <div>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -400,5 +427,34 @@ export function TaskDialog({
         </div>
       )}
     </Dialog>
+  );
+}
+
+/** Where the task's agent works: a new sandbox for the task (the workspace's shared one) or an existing sandbox. */
+function SandboxField({
+  draft: d,
+  set,
+  workspace,
+  sandboxes,
+}: {
+  draft: Draft;
+  set: (patch: Partial<Draft>) => void;
+  workspace: Workspace | undefined;
+  sandboxes: Sandbox[];
+}) {
+  const t = useT();
+  const shared = workspace?.sandboxMode === 'shared';
+  const hint = d.sandboxId ? t('taskDialog.sandboxExistingHint') : shared ? t('taskDialog.sandboxSharedHint') : t('taskDialog.sandboxNewHint');
+  return (
+    <Field label={t('taskDialog.sandbox')} hint={hint}>
+      <Select value={d.sandboxId} onChange={(e) => set({ sandboxId: e.target.value })}>
+        <option value="">{shared ? t('taskDialog.sandboxShared') : t('taskDialog.sandboxNew')}</option>
+        {sandboxes.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.name} ({s.status === 'running' ? t('taskDialog.sandboxRunning') : t('taskDialog.sandboxStopped')})
+          </option>
+        ))}
+      </Select>
+    </Field>
   );
 }

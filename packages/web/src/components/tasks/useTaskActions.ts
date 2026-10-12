@@ -37,7 +37,7 @@ export function useTaskActions() {
 
   const start = useAction((taskId: string) => rpc('task.start', { taskId }), { success: t('taskAction.started'), error: t('taskAction.startFailed'), onSuccess: store });
   const approve = useAction((taskId: string) => rpc('task.approve', { taskId }), {
-    success: (task) => (task.status === 'done' ? t('taskAction.approvedDone') : t('taskAction.approvedNext')),
+    success: (task) => (task.status === 'done' ? (task.note ?? t('taskAction.approvedDone')) : t('taskAction.approvedNext')),
     error: t('taskAction.approveFailed'),
     onSuccess: store,
   });
