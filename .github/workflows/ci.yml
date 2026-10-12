@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Typecheck, unit tests, web build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # No "version" input: pnpm/action-setup uses the "packageManager" field of package.json (pnpm@12.11.2).
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build:web
+
+  integration:
+    name: Integration tests (Docker)
+    runs-on: ubuntu-latest
+    needs: check
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Sandbox image (the test server would build it too; doing it first gives readable build logs).
+      - run: pnpm build:image
+      # Real server with its own instance name: sandboxes, agents, egress/credential proxy and API translation,
+      # several repositories, shared services (PostgreSQL, Redis, WireMock).
+      - run: pnpm test:integration
+      - name: Server log on failure
+        if: failure()
+        run: cat /tmp/cocoon-it-*/server.log || true

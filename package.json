@@ -1,0 +1,40 @@
+{
+  "name": "cocoon",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Self-hosted control plane for running coding agents in isolated sandboxes",
+  "license": "MIT",
+  "author": "Alexander Dziendziol-Dickopf",
+  "type": "module",
+  "packageManager": "pnpm@12.11.2",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "setup": "pnpm install && pnpm build:web",
+    "start": "pnpm --filter @cocoon/server start",
+    "dev": "pnpm --filter @cocoon/server dev",
+    "dev:web": "pnpm --filter @cocoon/web dev",
+    "build:web": "pnpm --filter @cocoon/web build",
+    "cocoon": "pnpm --silent --filter @cocoon/cli start",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build:image": "docker build -t cocoon/sandbox:latest images/sandbox",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/adziendziolD/cocoon.git"
+  },
+  "homepage": "https://github.com/adziendziolD/cocoon#readme",
+  "bugs": {
+    "url": "https://github.com/adziendziolD/cocoon/issues"
+  }
+}

@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CoCoon – AI coding agents in isolated sandboxes on your own server</title>
+  <meta name="description" content="CoCoon is a self-hosted control center for AI coding agents (Claude Code, Codex, OpenCode, …): isolated sandboxes, a multi-agent cockpit, a task board, network control and a credential proxy." />
+  <meta property="og:title" content="CoCoon – AI coding agents in isolated sandboxes" />
+  <meta property="og:description" content="Self-hosted control center for Claude Code, Codex and other coding agents." />
+  <meta property="og:image" content="assets/cockpit-dark.webp" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%236366f1'/%3E%3Cstop offset='1' stop-color='%237c3aed'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cg fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' transform='translate(4 4) scale(1)'%3E%3Cellipse cx='12' cy='12' rx='6' ry='9'/%3E%3Cpath d='M7 8.5c3 1.5 7 1.5 10 0M6.5 13c3.5 1.6 7.5 1.6 11 0'/%3E%3C/g%3E%3C/svg%3E" />
+  <style>
+    :root {
+      --bg: #f7f7fb; --surface: #fff; --surface-2: #f1f2f7; --fg: #111827; --muted: #4b5563; --subtle: #6b7280;
+      --line: #e5e7eb; --accent: #4f46e5; --accent-2: #7c3aed; --accent-soft: #eef2ff; --code: #0b1020;
+      --radius: 16px; --shadow: 0 1px 2px rgba(16,24,40,.05), 0 12px 32px -12px rgba(16,24,40,.18);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0b0d14; --surface: #12151f; --surface-2: #1a1e2b; --fg: #eef0f6; --muted: #a8afc0; --subtle: #8a92a6;
+        --line: #262b3a; --accent: #8b8cf8; --accent-2: #a78bfa; --accent-soft: #1e1f3d; --code: #070910;
+        --shadow: 0 1px 2px rgba(0,0,0,.4), 0 16px 40px -16px rgba(0,0,0,.7); }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    img { max-width: 100%; height: auto; display: block; }
+    html[data-lang="en"] [lang="de"], html[data-lang="de"] [lang="en"] { display: none !important; }
+
+    .wrap { max-width: 1160px; margin: 0 auto; padding: 0 24px; }
+    header.nav { position: sticky; top: 0; z-index: 20; backdrop-filter: saturate(180%) blur(12px); background: color-mix(in srgb, var(--bg) 82%, transparent); border-bottom: 1px solid var(--line); }
+    header.nav .wrap { display: flex; align-items: center; gap: 24px; height: 64px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; color: var(--fg); font-size: 17px; }
+    .brand:hover { text-decoration: none; }
+    .mark { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, #6366f1, #7c3aed); box-shadow: 0 4px 12px -4px rgba(99,102,241,.6); }
+    .mark svg { width: 18px; height: 18px; }
+    nav.links { display: flex; gap: 20px; margin-left: auto; font-size: 14.5px; }
+    nav.links a { color: var(--muted); }
+    nav.links a:hover { color: var(--fg); text-decoration: none; }
+    .lang { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .lang button { all: unset; cursor: pointer; padding: 3px 9px; font-size: 12.5px; font-weight: 600; color: var(--subtle); }
+    .lang button[aria-pressed="true"] { background: var(--surface); color: var(--fg); }
+    @media (max-width: 760px) { nav.links a.hide-sm { display: none; } }
+
+    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 11px; font-weight: 600; font-size: 15px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); }
+    .btn:hover { text-decoration: none; border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+    .btn.primary { background: linear-gradient(135deg, #6366f1, #7c3aed); color: #fff; border-color: transparent; box-shadow: 0 8px 24px -10px rgba(99,102,241,.8); }
+    .btn svg { width: 18px; height: 18px; }
+
+    .hero { padding: 80px 0 40px; text-align: center; position: relative; overflow: hidden; }
+    .hero::before { content: ""; position: absolute; inset: -40% -10% auto; height: 620px; background: radial-gradient(closest-side, color-mix(in srgb, #6366f1 24%, transparent), transparent 70%); z-index: -1; }
+    .pill { display: inline-flex; gap: 8px; align-items: center; padding: 5px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 13px; font-weight: 600; }
+    h1 { font-size: clamp(36px, 5.6vw, 64px); line-height: 1.05; letter-spacing: -.03em; margin: 22px auto 18px; max-width: 900px; }
+    h1 .grad { background: linear-gradient(120deg, #6366f1, #a855f7 60%, #ec4899); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .lead { font-size: clamp(17px, 2vw, 20px); color: var(--muted); max-width: 760px; margin: 0 auto 30px; }
+    .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .agents-row { margin: 28px auto 0; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; color: var(--subtle); font-size: 14px; }
+    .agents-row span { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
+    .hero-shot { margin: 56px auto 0; max-width: 1120px; }
+
+    .frame { border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow); cursor: zoom-in; }
+    .frame .bar { display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+    .frame .bar i { width: 10px; height: 10px; border-radius: 50%; background: #e5484d; }
+    .frame .bar i:nth-child(2) { background: #f5a524; } .frame .bar i:nth-child(3) { background: #30a46c; }
+
+    section { padding: 72px 0; }
+    .eyebrow { color: var(--accent); font-weight: 650; font-size: 13.5px; letter-spacing: .06em; text-transform: uppercase; }
+    h2 { font-size: clamp(28px, 3.4vw, 40px); letter-spacing: -.02em; line-height: 1.15; margin: 10px 0 14px; }
+    h3 { font-size: 19px; margin: 0 0 6px; letter-spacing: -.01em; }
+    .center { text-align: center; }
+    .sub { color: var(--muted); max-width: 720px; font-size: 17.5px; }
+    .center .sub { margin: 0 auto; }
+
+    .feature { display: grid; grid-template-columns: 5fr 7fr; gap: 56px; align-items: center; padding: 44px 0; }
+    .feature.flip { grid-template-columns: 7fr 5fr; }
+    .feature.flip .text { order: 2; }
+    .feature ul { padding: 0; margin: 18px 0 0; list-style: none; display: grid; gap: 10px; }
+    .feature li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; color: var(--muted); }
+    .feature li::before { content: ""; width: 18px; height: 18px; margin-top: 3px; border-radius: 6px; background: var(--accent-soft) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center/12px no-repeat; }
+    .feature li b { color: var(--fg); font-weight: 600; }
+    @media (max-width: 900px) { .feature, .feature.flip { grid-template-columns: 1fr; gap: 28px; } .feature.flip .text { order: 0; } }
+
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 40px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+    .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; }
+    .card p { margin: 0; color: var(--muted); font-size: 15px; }
+    .icon { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); margin-bottom: 14px; }
+    .icon svg { width: 20px; height: 20px; }
+
+    .gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 40px; }
+    @media (max-width: 900px) { .gallery { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 600px) { .gallery { grid-template-columns: 1fr; } }
+    .gallery figure { margin: 0; }
+    .gallery figcaption { margin-top: 10px; font-size: 14px; color: var(--muted); }
+    .gallery figcaption b { color: var(--fg); }
+
+    .arch { margin-top: 36px; display: grid; gap: 14px; }
+    .arch .row { display: grid; gap: 14px; grid-template-columns: repeat(var(--n), 1fr); }
+    .arch .box { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; }
+    .arch .box b { display: block; margin-bottom: 4px; }
+    .arch .box span { color: var(--muted); font-size: 14px; }
+    .arch .box.core { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: linear-gradient(180deg, var(--accent-soft), var(--surface)); }
+    .arch .down { text-align: center; color: var(--subtle); font-size: 13px; }
+    @media (max-width: 760px) { .arch .row { grid-template-columns: 1fr; } }
+
+    .quick { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: start; }
+    @media (max-width: 900px) { .quick { grid-template-columns: 1fr; } }
+    pre.term { margin: 0; background: var(--code); color: #d6dbf5; border-radius: var(--radius); padding: 22px 24px; overflow-x: auto; font-size: 14px; line-height: 1.75; border: 1px solid #1f2437; box-shadow: var(--shadow); }
+    pre.term .c { color: #6b7394; } pre.term .p { color: #8b8cf8; user-select: none; } pre.term .g { color: #4ade80; }
+    .steps { counter-reset: s; display: grid; gap: 16px; margin: 22px 0 0; padding: 0; list-style: none; }
+    .steps li { counter-increment: s; display: grid; grid-template-columns: 34px 1fr; gap: 12px; color: var(--muted); }
+    .steps li::before { content: counter(s); width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 14px; }
+    .steps b { color: var(--fg); }
+
+    footer { border-top: 1px solid var(--line); padding: 36px 0 48px; color: var(--subtle); font-size: 14px; }
+    footer .wrap { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+
+    .lightbox { position: fixed; inset: 0; z-index: 50; background: rgba(5,7,12,.86); display: none; align-items: center; justify-content: center; padding: 3vw; cursor: zoom-out; }
+    .lightbox.open { display: flex; }
+    .lightbox img { max-height: 92vh; width: auto; border-radius: 12px; box-shadow: 0 30px 80px rgba(0,0,0,.6); }
+  </style>
+</head>
+<body>
+  <header class="nav">
+    <div class="wrap">
+      <a class="brand" href="#">
+        <span class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><ellipse cx="12" cy="12" rx="6" ry="9" /><path d="M7 8.5c3 1.5 7 1.5 10 0M6.5 13c3.5 1.6 7.5 1.6 11 0" /></svg></span>
+        CoCoon
+      </a>
+      <nav class="links">
+        <a class="hide-sm" href="#features"><span lang="en">Features</span><span lang="de">Funktionen</span></a>
+        <a class="hide-sm" href="#screenshots">Screenshots</a>
+        <a class="hide-sm" href="#quickstart">Quickstart</a>
+        <a href="https://github.com/adziendziolD/cocoon">GitHub</a>
+      </nav>
+      <div class="lang" role="group" aria-label="Language">
+        <button type="button" data-set-lang="en" aria-pressed="true">EN</button>
+        <button type="button" data-set-lang="de" aria-pressed="false">DE</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero -->
+    <div class="hero">
+      <div class="wrap">
+        <span class="pill"><span lang="en">Self-hosted · open source · MIT</span><span lang="de">Selbst gehostet · Open Source · MIT</span></span>
+        <h1>
+          <span lang="en">Your AI coding agents,<br /><span class="grad">safely in a cocoon.</span></span>
+          <span lang="de">Deine KI-Coding-Agenten,<br /><span class="grad">sicher im Kokon.</span></span>
+        </h1>
+        <p class="lead">
+          <span lang="en">CoCoon runs Claude Code, Codex and other coding agents in isolated sandboxes on your own server – and gives you one place to plan their work, watch them live and decide what makes it into your code.</span>
+          <span lang="de">CoCoon lässt Claude Code, Codex und andere Coding-Agenten in isolierten Sandboxes auf deinem eigenen Server arbeiten – und gibt dir einen Ort, an dem du ihre Arbeit planst, sie live beobachtest und entscheidest, was in deinen Code kommt.</span>
+        </p>
+        <div class="cta">
+          <a class="btn primary" href="#quickstart"><span lang="en">Get started</span><span lang="de">Loslegen</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg></a>
+          <a class="btn" href="https://github.com/adziendziolD/cocoon">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.25.45-2.28 1.19-3.08-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.8 1.19 1.83 1.19 3.08 0 4.41-2.69 5.38-5.25 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z" /></svg>
+            <span lang="en">View on GitHub</span><span lang="de">Auf GitHub ansehen</span></a>
+        </div>
+        <div class="agents-row">
+          <span>Claude Code</span><span>OpenAI Codex</span><span>OpenCode</span><span>Pi</span><span>Qwen Code</span><span>Gemini CLI</span><span lang="en">plain shells</span><span lang="de">einfache Shells</span>
+        </div>
+        <div class="hero-shot">
+          <div class="frame" data-zoom="assets/cockpit-dark.webp">
+            <div class="bar"><i></i><i></i><i></i></div>
+            <img src="assets/cockpit-dark.webp" width="1800" height="1125" alt="CoCoon cockpit with several live agent terminals, a workspace tree and an attention queue" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Features -->
+    <section id="features">
+      <div class="wrap">
+        <div class="center">
+          <div class="eyebrow"><span lang="en">What you get</span><span lang="de">Was du bekommst</span></div>
+          <h2><span lang="en">Mission control for coding agents</span><span lang="de">Die Kommandozentrale für Coding-Agenten</span></h2>
+          <p class="sub"><span lang="en">Written for people who want results, not infrastructure – with a web UI, a CLI, an API and an MCP server for everyone else.</span><span lang="de">Gemacht für Leute, die Ergebnisse wollen, keine Infrastruktur – mit Web-Oberfläche, CLI, API und MCP-Server für alle anderen.</span></p>
+        </div>
+
+        <div class="feature">
+          <div class="text">
+            <div class="eyebrow">Cockpit</div>
+            <h2><span lang="en">Many agents. One screen.</span><span lang="de">Viele Agenten. Ein Bildschirm.</span></h2>
+            <p class="sub"><span lang="en">Tiled live terminals of all your agents, grouped by workspace and sandbox. Whoever needs you shows up at the top.</span><span lang="de">Live-Terminals aller Agenten nebeneinander, gruppiert nach Workspace und Sandbox. Wer dich braucht, steht ganz oben.</span></p>
+            <ul>
+              <li><span lang="en"><b>Split, resize, maximize</b> – layouts are saved per workspace</span><span lang="de"><b>Teilen, vergrößern, maximieren</b> – Layouts werden pro Workspace gespeichert</span></li>
+              <li><span lang="en"><b>Attention queue</b> with approve and review right next to the terminal</span><span lang="de"><b>„Wartet auf dich"</b> mit Freigeben und Prüfen direkt neben dem Terminal</span></li>
+              <li><span lang="en"><b>Broadcast input</b> to several agents and full keyboard control</span><span lang="de"><b>Eingabe an mehrere Agenten</b> gleichzeitig und komplette Tastatursteuerung</span></li>
+            </ul>
+          </div>
+          <div class="frame" data-zoom="assets/cockpit.webp"><img src="assets/cockpit.webp" loading="lazy" width="1800" height="1125" alt="Cockpit in light mode" /></div>
+        </div>
+
+        <div class="feature flip">
+          <div class="text">
+            <div class="eyebrow"><span lang="en">Orchestration</span><span lang="de">Orchestrierung</span></div>
+            <h2><span lang="en">Plan the work, let agents do it</span><span lang="de">Arbeit planen, Agenten machen lassen</span></h2>
+            <p class="sub"><span lang="en">A task board from backlog to done. Drag a card to “Running” and an agent starts in its own sandbox; finished work lands in “Review”.</span><span lang="de">Ein Aufgaben-Board vom Backlog bis „Fertig". Zieh eine Karte auf „Läuft", und ein Agent startet in seiner eigenen Sandbox; fertige Arbeit landet in „Prüfen".</span></p>
+            <ul>
+              <li><span lang="en"><b>Workflows</b> with several stages, e.g. plan → build → review, with approvals</span><span lang="de"><b>Abläufe</b> mit mehreren Stufen, z. B. planen → bauen → prüfen, mit Freigaben</span></li>
+              <li><span lang="en"><b>Feedback loop</b>: request changes and the agent continues</span><span lang="de"><b>Feedback-Schleife</b>: Änderungen anfordern, der Agent macht weiter</span></li>
+              <li><span lang="en"><b>Dependencies, auto-run</b> and limits for parallel agents, webhook notifications</span><span lang="de"><b>Abhängigkeiten, Auto-Start</b> und Limits für parallele Agenten, Webhook-Benachrichtigungen</span></li>
+            </ul>
+          </div>
+          <div class="frame" data-zoom="assets/tasks.webp"><img src="assets/tasks.webp" loading="lazy" width="1800" height="1125" alt="Task board with backlog, ready, running, review and done columns" /></div>
+        </div>
+
+        <div class="feature">
+          <div class="text">
+            <div class="eyebrow"><span lang="en">Human in the loop</span><span lang="de">Du entscheidest</span></div>
+            <h2><span lang="en">Agents ask, you decide</span><span lang="de">Agenten fragen, du entscheidest</span></h2>
+            <p class="sub"><span lang="en">CoCoon knows whether an agent is working, done or waiting for permission – from native hooks of Claude Code and Codex plus screen heuristics.</span><span lang="de">CoCoon weiß, ob ein Agent arbeitet, fertig ist oder auf eine Erlaubnis wartet – über die Hooks von Claude Code und Codex plus Bildschirm-Heuristik.</span></p>
+            <ul>
+              <li><span lang="en"><b>Yes / No buttons</b> right where the agent asks</span><span lang="de"><b>Ja-/Nein-Knöpfe</b> genau da, wo der Agent fragt</span></li>
+              <li><span lang="en"><b>Type into the live terminal</b>, send messages or keys from any device</span><span lang="de"><b>Direkt ins Live-Terminal tippen</b>, Nachrichten oder Tasten von jedem Gerät senden</span></li>
+              <li><span lang="en"><b>Agents keep running</b> in tmux – through restarts and closed browsers</span><span lang="de"><b>Agenten laufen weiter</b> in tmux – auch bei Neustarts und geschlossenem Browser</span></li>
+            </ul>
+          </div>
+          <div class="frame" data-zoom="assets/agent-blocked.webp"><img src="assets/agent-blocked.webp" loading="lazy" width="1800" height="1125" alt="Agent detail page with a waiting-for-your-decision banner" /></div>
+        </div>
+
+        <div class="feature flip">
+          <div class="text">
+            <div class="eyebrow"><span lang="en">Results</span><span lang="de">Ergebnisse</span></div>
+            <h2><span lang="en">Nothing leaves the sandbox unseen</span><span lang="de">Nichts verlässt ungesehen die Sandbox</span></h2>
+            <p class="sub"><span lang="en">Every change is visible as a diff. You choose: download a patch, commit, push a branch or open a GitHub pull request.</span><span lang="de">Jede Änderung ist als Diff sichtbar. Du wählst: Patch herunterladen, committen, Branch hochladen oder einen Pull Request auf GitHub öffnen.</span></p>
+            <ul>
+              <li><span lang="en"><b>Several repositories</b> per sandbox, e.g. API and web</span><span lang="de"><b>Mehrere Repositories</b> pro Sandbox, z. B. API und Web</span></li>
+              <li><span lang="en"><b>File browser and editor</b>, console and interactive terminal</span><span lang="de"><b>Dateibrowser und Editor</b>, Konsole und interaktives Terminal</span></li>
+              <li><span lang="en"><b>Switch agents</b> at any time, with handover of task and changes</span><span lang="de"><b>Agent jederzeit wechseln</b>, mit Übergabe von Aufgabe und Änderungen</span></li>
+            </ul>
+          </div>
+          <div class="frame" data-zoom="assets/sandbox-changes.webp"><img src="assets/sandbox-changes.webp" loading="lazy" width="1800" height="1125" alt="Changes tab of a sandbox with a diff and actions for patch, commit, push and pull request" /></div>
+        </div>
+
+        <div class="feature">
+          <div class="text">
+            <div class="eyebrow"><span lang="en">Security</span><span lang="de">Sicherheit</span></div>
+            <h2><span lang="en">Isolated by default</span><span lang="de">Standardmäßig isoliert</span></h2>
+            <p class="sub"><span lang="en">Each sandbox is a hardened container (or a bubblewrap process sandbox). Internet access is restricted to an allowlist, and API keys never enter the sandbox.</span><span lang="de">Jede Sandbox ist ein gehärteter Container (oder eine bubblewrap-Prozess-Sandbox). Internetzugang nur über eine Freigabeliste, und API-Keys kommen nie in die Sandbox.</span></p>
+            <ul>
+              <li><span lang="en"><b>Egress proxy</b>: blocked connections are logged and can be allowed with one click</span><span lang="de"><b>Egress-Proxy</b>: blockierte Verbindungen werden protokolliert und lassen sich mit einem Klick erlauben</span></li>
+              <li><span lang="en"><b>Credential proxy</b>: agents only see placeholders, the real key is added on the way out</span><span lang="de"><b>Credential-Proxy</b>: Agenten sehen nur Platzhalter, der echte Key kommt erst auf dem Weg nach draußen dazu</span></li>
+              <li><span lang="en"><b>Non-root, no capabilities</b>, CPU/RAM/PID limits, optional gVisor or Kata</span><span lang="de"><b>Kein Root, keine Capabilities</b>, CPU-/RAM-/PID-Limits, optional gVisor oder Kata</span></li>
+            </ul>
+          </div>
+          <div class="frame" data-zoom="assets/network.webp"><img src="assets/network.webp" loading="lazy" width="1800" height="1125" alt="Network settings with the allowlist, credential proxy and blocked connections" /></div>
+        </div>
+
+        <div class="feature flip">
+          <div class="text">
+            <div class="eyebrow"><span lang="en">Bring your own model</span><span lang="de">Eigene Modelle</span></div>
+            <h2><span lang="en">Any model, any API</span><span lang="de">Jedes Modell, jede API</span></h2>
+            <p class="sub"><span lang="en">Use Anthropic or OpenAI, a company gateway, OpenRouter – or your own llama.cpp, vLLM or LM Studio. CoCoon detects which APIs a server speaks and translates where needed.</span><span lang="de">Nutze Anthropic oder OpenAI, ein Firmen-Gateway, OpenRouter – oder dein eigenes llama.cpp, vLLM oder LM Studio. CoCoon erkennt, welche APIs ein Server spricht, und übersetzt bei Bedarf.</span></p>
+            <ul>
+              <li><span lang="en"><b>Claude Code and Codex with local models</b> via Messages/Responses → Chat translation</span><span lang="de"><b>Claude Code und Codex mit lokalen Modellen</b> über Übersetzung Messages/Responses → Chat</span></li>
+              <li><span lang="en"><b>Connection test</b> with model list and context-window detection</span><span lang="de"><b>Verbindungstest</b> mit Modellliste und Erkennung der Kontextgröße</span></li>
+              <li><span lang="en"><b>HTTP APIs</b> for agents, with keys that stay on the server</span><span lang="de"><b>HTTP-APIs</b> für Agenten, mit Keys, die auf dem Server bleiben</span></li>
+            </ul>
+          </div>
+          <div class="frame" data-zoom="assets/providers.webp"><img src="assets/providers.webp" loading="lazy" width="1800" height="1125" alt="API providers: a local llama.cpp server and OpenRouter" /></div>
+        </div>
+
+        <div class="feature">
+          <div class="text">
+            <div class="eyebrow"><span lang="en">Shared services</span><span lang="de">Gemeinsame Dienste</span></div>
+            <h2><span lang="en">Databases with one click</span><span lang="de">Datenbanken mit einem Klick</span></h2>
+            <p class="sub"><span lang="en">PostgreSQL, MySQL/MariaDB, MongoDB and Redis, plus WireMock and Mailpit as mocks. Every sandbox gets its own database and user – agents find the connection in their environment.</span><span lang="de">PostgreSQL, MySQL/MariaDB, MongoDB und Redis, dazu WireMock und Mailpit als Mocks. Jede Sandbox bekommt eine eigene Datenbank und einen eigenen Benutzer – Agenten finden die Verbindung in ihrer Umgebung.</span></p>
+            <ul>
+              <li><span lang="en"><b>Pause automatically</b> when unused, start again on demand</span><span lang="de"><b>Pausieren automatisch</b>, wenn ungenutzt, und starten bei Bedarf wieder</span></li>
+              <li><span lang="en"><b>Or connect your own server</b> instead of a managed container</span><span lang="de"><b>Oder einen eigenen Server anbinden</b> statt eines verwalteten Containers</span></li>
+            </ul>
+          </div>
+          <div class="frame" data-zoom="assets/services.webp"><img src="assets/services.webp" loading="lazy" width="1800" height="1125" alt="Shared services PostgreSQL, Redis and Mailpit" /></div>
+        </div>
+
+        <div class="feature flip">
+          <div class="text">
+            <div class="eyebrow"><span lang="en">Always current</span><span lang="de">Immer aktuell</span></div>
+            <h2><span lang="en">Updates at the push of a button</span><span lang="de">Updates auf Knopfdruck</span></h2>
+            <p class="sub"><span lang="en">CoCoon checks daily whether it, the agent CLIs and its images are up to date – and updates itself with git + pnpm, rolls back on failure and restarts.</span><span lang="de">CoCoon prüft täglich, ob es selbst, die Agent-CLIs und seine Images aktuell sind – und aktualisiert sich per git + pnpm, rollt bei Fehlern zurück und startet neu.</span></p>
+            <ul>
+              <li><span lang="en"><b>Agent CLIs</b> live in a shared, read-only toolbox – updated without rebuilding images</span><span lang="de"><b>Agent-CLIs</b> liegen in einer gemeinsamen, schreibgeschützten Werkzeugkiste – Updates ohne Image-Neubau</span></li>
+              <li><span lang="en"><b>Images</b> are rebuilt when their Dockerfile or base image changed</span><span lang="de"><b>Images</b> werden neu gebaut, wenn sich Dockerfile oder Basis-Image geändert haben</span></li>
+            </ul>
+          </div>
+          <div class="frame" data-zoom="assets/updates.webp"><img src="assets/updates.webp" loading="lazy" width="1800" height="1125" alt="Updates page showing CoCoon, agent tools and images up to date" /></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- More features -->
+    <section style="padding-top: 24px">
+      <div class="wrap">
+        <div class="center">
+          <div class="eyebrow"><span lang="en">And more</span><span lang="de">Und mehr</span></div>
+          <h2><span lang="en">Built to fit in</span><span lang="de">Passt sich ein</span></h2>
+        </div>
+        <div class="grid">
+          <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z" /><path d="m3 8 9 5 9-5M12 13v8" /></svg></div>
+            <h3><span lang="en">Docker, Podman or bubblewrap</span><span lang="de">Docker, Podman oder bubblewrap</span></h3>
+            <p><span lang="en">Picked automatically. Rootless Podman without a daemon, or lightweight Linux process sandboxes that start in ~0.3 s.</span><span lang="de">Wird automatisch gewählt. Rootless Podman ohne Daemon oder leichte Linux-Prozess-Sandboxes, die in ~0,3 s starten.</span></p></div>
+          <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8" /><rect x="4" y="8" width="16" height="12" rx="2" /><path d="M2 14h2M20 14h2M15 13v2M9 13v2" /></svg></div>
+            <h3>MCP, CLI & API</h3>
+            <p><span lang="en">Let Claude Code on your laptop orchestrate CoCoon via MCP, script it with the CLI or use the typed HTTP/WebSocket API.</span><span lang="de">Lass Claude Code auf deinem Laptop CoCoon per MCP steuern, skripte es mit der CLI oder nutze die typisierte HTTP-/WebSocket-API.</span></p></div>
+          <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" /></svg></div>
+            <h3><span lang="en">Guided onboarding</span><span lang="de">Geführte Einrichtung</span></h3>
+            <p><span lang="en">A wizard walks you through system check, AI access with key verification, GitHub, safety defaults and the first agent.</span><span lang="de">Ein Assistent führt durch Systemcheck, KI-Zugang mit Key-Prüfung, GitHub, Sicherheits-Standards und den ersten Agenten.</span></p></div>
+          <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6M4 14l6-6 2-3M2 5h12M7 2h1M22 22l-5-10-5 10M14 18h6" /></svg></div>
+            <h3><span lang="en">English & German</span><span lang="de">Deutsch & Englisch</span></h3>
+            <p><span lang="en">The UI, server messages and the CLI speak both languages and follow your browser.</span><span lang="de">Oberfläche, Server-Meldungen und CLI sprechen beide Sprachen und folgen deinem Browser.</span></p></div>
+          <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" /></svg></div>
+            <h3><span lang="en">Zero-config start</span><span lang="de">Start ohne Konfiguration</span></h3>
+            <p><span lang="en">Admin token, internal network, egress proxy, sandbox image and agent toolbox are set up on first start.</span><span lang="de">Admin-Token, internes Netzwerk, Egress-Proxy, Sandbox-Image und Agent-Werkzeuge werden beim ersten Start eingerichtet.</span></p></div>
+          <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg></div>
+            <h3><span lang="en">Your server, your data</span><span lang="de">Dein Server, deine Daten</span></h3>
+            <p><span lang="en">CoCoon only listens on localhost. Reach it through an SSH tunnel, a VPN or a TLS reverse proxy – no cloud account needed.</span><span lang="de">CoCoon lauscht nur auf localhost. Erreichbar über SSH-Tunnel, VPN oder TLS-Reverse-Proxy – kein Cloud-Konto nötig.</span></p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Screenshots -->
+    <section id="screenshots">
+      <div class="wrap">
+        <div class="center">
+          <div class="eyebrow">Screenshots</div>
+          <h2><span lang="en">A closer look</span><span lang="de">Genauer hingeschaut</span></h2>
+          <p class="sub"><span lang="en">Click a picture to enlarge it.</span><span lang="de">Klick auf ein Bild, um es zu vergrößern.</span></p>
+        </div>
+        <div class="gallery">
+          <figure><div class="frame" data-zoom="assets/dashboard.webp"><img src="assets/dashboard.webp" loading="lazy" width="1800" height="1125" alt="Overview" /></div>
+            <figcaption><b><span lang="en">Overview</span><span lang="de">Übersicht</span></b> – <span lang="en">what needs your attention, at a glance</span><span lang="de">was deine Aufmerksamkeit braucht, auf einen Blick</span></figcaption></figure>
+          <figure><div class="frame" data-zoom="assets/onboarding-welcome.webp"><img src="assets/onboarding-welcome.webp" loading="lazy" width="1800" height="1125" alt="Onboarding wizard" /></div>
+            <figcaption><b>Onboarding</b> – <span lang="en">set up in about five minutes</span><span lang="de">in etwa fünf Minuten eingerichtet</span></figcaption></figure>
+          <figure><div class="frame" data-zoom="assets/wizard.webp"><img src="assets/wizard.webp" loading="lazy" width="1800" height="1125" alt="New sandbox wizard" /></div>
+            <figcaption><b><span lang="en">New sandbox</span><span lang="de">Neue Sandbox</span></b> – <span lang="en">repository, internet access, size</span><span lang="de">Repository, Internetzugang, Größe</span></figcaption></figure>
+          <figure><div class="frame" data-zoom="assets/sandbox-files.webp"><img src="assets/sandbox-files.webp" loading="lazy" width="1800" height="1125" alt="File browser" /></div>
+            <figcaption><b><span lang="en">Files</span><span lang="de">Dateien</span></b> – <span lang="en">browse, edit, upload and download</span><span lang="de">durchsuchen, bearbeiten, hoch- und herunterladen</span></figcaption></figure>
+          <figure><div class="frame" data-zoom="assets/activity.webp"><img src="assets/activity.webp" loading="lazy" width="1800" height="1125" alt="Activity log" /></div>
+            <figcaption><b><span lang="en">Activity</span><span lang="de">Aktivität</span></b> – <span lang="en">a live log of everything that happened</span><span lang="de">ein Live-Protokoll von allem, was passiert ist</span></figcaption></figure>
+          <figure><div class="frame" data-zoom="assets/cockpit-dark.webp"><img src="assets/cockpit-dark.webp" loading="lazy" width="1800" height="1125" alt="Cockpit in dark mode" /></div>
+            <figcaption><b>Dark mode</b> – <span lang="en">follows your system</span><span lang="de">folgt deinem System</span></figcaption></figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- Architecture -->
+    <section>
+      <div class="wrap">
+        <div class="center">
+          <div class="eyebrow"><span lang="en">How it works</span><span lang="de">So funktioniert es</span></div>
+          <h2><span lang="en">One control plane, many cocoons</span><span lang="de">Eine Zentrale, viele Kokons</span></h2>
+        </div>
+        <div class="arch">
+          <div class="row" style="--n: 4">
+            <div class="box"><b><span lang="en">Browser</span><span lang="de">Browser</span></b><span lang="en">Web UI, live terminals</span><span lang="de">Web-Oberfläche, Live-Terminals</span></div>
+            <div class="box"><b>CLI</b><span lang="en">scripts, CI</span><span lang="de">Skripte, CI</span></div>
+            <div class="box"><b>MCP</b><span lang="en">Claude Code & other agents</span><span lang="de">Claude Code & andere Agenten</span></div>
+            <div class="box"><b>API</b><span lang="en">HTTP / WebSocket</span><span lang="de">HTTP / WebSocket</span></div>
+          </div>
+          <div class="down">↓ HTTPS · SSH tunnel · VPN ↓</div>
+          <div class="box core"><b>cocoond</b><span lang="en">Control plane on 127.0.0.1:7420 – sandboxes, agents, tasks, workflows, status detection, updates</span><span lang="de">Zentrale auf 127.0.0.1:7420 – Sandboxes, Agenten, Aufgaben, Abläufe, Statuserkennung, Updates</span></div>
+          <div class="down">↓</div>
+          <div class="row" style="--n: 3">
+            <div class="box"><b><span lang="en">Sandboxes</span><span lang="de">Sandboxes</span></b><span lang="en">one per workspace or task: tmux with agents, /workspace with your repositories</span><span lang="de">eine pro Workspace oder Aufgabe: tmux mit Agenten, /workspace mit deinen Repositories</span></div>
+            <div class="box"><b><span lang="en">Egress & credential proxy</span><span lang="de">Egress- & Credential-Proxy</span></b><span lang="en">allowlist, API keys, API translation</span><span lang="de">Freigabeliste, API-Keys, API-Übersetzung</span></div>
+            <div class="box"><b><span lang="en">Shared services</span><span lang="de">Gemeinsame Dienste</span></b><span lang="en">PostgreSQL, MySQL, MongoDB, Redis, mocks</span><span lang="de">PostgreSQL, MySQL, MongoDB, Redis, Mocks</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Quickstart -->
+    <section id="quickstart">
+      <div class="wrap quick">
+        <div>
+          <div class="eyebrow">Quickstart</div>
+          <h2><span lang="en">Running in a few minutes</span><span lang="de">In wenigen Minuten startklar</span></h2>
+          <p class="sub"><span lang="en">You need Node.js 24, pnpm and Docker, Podman or – on Linux – bubblewrap.</span><span lang="de">Du brauchst Node.js 24, pnpm und Docker, Podman oder – unter Linux – bubblewrap.</span></p>
+          <ol class="steps">
+            <li><span lang="en"><b>Clone and set up</b> – installs dependencies and builds the web UI.</span><span lang="de"><b>Klonen und einrichten</b> – installiert Abhängigkeiten und baut die Oberfläche.</span></li>
+            <li><span lang="en"><b>Start</b> – the console prints a login link.</span><span lang="de"><b>Starten</b> – die Konsole zeigt einen Login-Link.</span></li>
+            <li><span lang="en"><b>Follow the wizard</b> – it prepares the sandbox image, the proxy and the agent tools for you.</span><span lang="de"><b>Dem Assistenten folgen</b> – er bereitet Sandbox-Image, Proxy und Agent-Werkzeuge für dich vor.</span></li>
+          </ol>
+          <p style="margin-top: 26px"><a class="btn" href="https://github.com/adziendziolD/cocoon#readme"><span lang="en">Read the full documentation</span><span lang="de">Zur vollständigen Dokumentation</span> →</a></p>
+        </div>
+        <pre class="term"><span class="p">$</span> git clone https://github.com/adziendziolD/cocoon.git
+<span class="p">$</span> cd cocoon
+<span class="p">$</span> pnpm setup
+<span class="p">$</span> pnpm start
+
+  <span class="g">CoCoon is running: http://127.0.0.1:7420</span>
+  Sandbox backend: docker
+  Log in: http://127.0.0.1:7420/?token=cct_…
+
+<span class="c"># from another terminal, or from a script</span>
+<span class="p">$</span> pnpm cocoon sandbox create --name demo \
+    --repo https://github.com/you/repo.git
+<span class="p">$</span> pnpm cocoon agent spawn &lt;sandbox-id&gt; claude-code \
+    -p "Fix the failing tests"</pre>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>CoCoon · <span lang="en">MIT licensed</span><span lang="de">MIT-Lizenz</span> · <span lang="en">Screenshots show a demo installation with example data.</span><span lang="de">Die Screenshots zeigen eine Demo-Installation mit Beispieldaten.</span></span>
+      <a href="https://github.com/adziendziolD/cocoon">github.com/adziendziolD/cocoon</a>
+    </div>
+  </footer>
+
+  <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Screenshot"><img alt="" /></div>
+
+  <script>
+    // Language: ?lang=de, saved choice, else the browser language.
+    const root = document.documentElement;
+    const setLang = (lang) => {
+      root.dataset.lang = lang;
+      root.lang = lang;
+      document.querySelectorAll('[data-set-lang]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.setLang === lang)));
+      try { localStorage.setItem('cocoon.site.lang', lang); } catch {}
+    };
+    const fromUrl = new URLSearchParams(location.search).get('lang');
+    let saved = null;
+    try { saved = localStorage.getItem('cocoon.site.lang'); } catch {}
+    const known = (l) => l === 'de' || l === 'en';
+    setLang(known(fromUrl) ? fromUrl : known(saved) ? saved : (navigator.language || '').toLowerCase().startsWith('de') ? 'de' : 'en');
+    document.querySelectorAll('[data-set-lang]').forEach((b) => b.addEventListener('click', () => setLang(b.dataset.setLang)));
+
+    // Lightbox for screenshots.
+    const box = document.getElementById('lightbox');
+    const boxImg = box.querySelector('img');
+    document.querySelectorAll('[data-zoom]').forEach((el) =>
+      el.addEventListener('click', () => {
+        boxImg.src = el.dataset.zoom;
+        boxImg.alt = el.querySelector('img')?.alt ?? '';
+        box.classList.add('open');
+      }),
+    );
+    const close = () => box.classList.remove('open');
+    box.addEventListener('click', close);
+    document.addEventListener('keydown', (e) => e.key === 'Escape' && close());
+  </script>
+</body>
+</html>

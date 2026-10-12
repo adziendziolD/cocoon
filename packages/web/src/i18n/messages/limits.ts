@@ -1,0 +1,103 @@
+import type { Messages } from '../types';
+
+/** Model limits: context window and answer length (providers, agent start, agent types, agent details). */
+export const de = {
+  'limits.title': 'Kontextgröße und Antwortlänge',
+  'limits.why': 'Damit Agenten rechtzeitig zusammenfassen und nicht mehr Text schicken, als das Modell verarbeiten kann. Steht bei llama.cpp z. B. in --ctx-size.',
+  'limits.summary': 'Kontext: {context} · Antwort: {answer}',
+  'limits.summaryContext': 'Kontext: {context}',
+  'limits.summaryAnswer': 'Antwort: {answer}',
+  'limits.contextShort': '{value} Kontext',
+  'limits.model': 'Modell',
+  'limits.contextLabel': 'Kontextgröße (Tokens)',
+  'limits.contextHint': 'Wie viel Text das Modell auf einmal verarbeiten kann – Unterhaltung, Dateien und Antwort zusammen. Du kannst auch „128k“ schreiben.',
+  'limits.outputLabel': 'Max. Antwortlänge (Tokens)',
+  'limits.outputHint': 'Wie lang eine einzelne Antwort höchstens werden darf. Leer = ein Viertel der Kontextgröße (höchstens 32k).',
+  'limits.approx': '≈ {value}',
+  'limits.unknown': 'unbekannt',
+  'limits.badge.detected': 'erkannt',
+  'limits.badge.detectedHint': 'Vom Server beim Verbindungstest gemeldet.',
+  'limits.badge.user': 'selbst eingetragen',
+  'limits.badge.userHint': 'Von dir eingetragen – ein neuer Verbindungstest überschreibt das nicht.',
+  'limits.reset': 'zurücksetzen',
+  'limits.resetHint': 'Deinen Wert entfernen – dann gilt wieder der erkannte Wert (beim nächsten Verbindungstest).',
+  'limits.err.format': 'Bitte eine Zahl eingeben, z. B. 131072 oder 128k.',
+  'limits.err.min': 'Mindestens {min} Tokens.',
+  'limits.err.outputTooBig': 'Die Antwortlänge muss kleiner als die Kontextgröße sein.',
+  'limits.noModels': 'Füge zuerst ein Modell hinzu oder teste die Verbindung – dann kannst du hier seine Kontextgröße eintragen.',
+  'limits.detected': 'Erkannte Kontextgrößen:',
+  'limits.detectedNone': 'Der Server hat keine Kontextgröße gemeldet – trag sie bei Bedarf selbst ein.',
+  'limits.missing': 'Kontextgröße unbekannt für {model} (genutzt von {types}). Trag sie unter „Bearbeiten“ ein, damit Agenten rechtzeitig zusammenfassen.',
+  'limits.save': 'Werte speichern',
+  'limits.saved': 'Kontextgröße gespeichert.',
+  'limits.edit': 'Kontextgröße eintragen',
+
+  // agent start / switch
+  'limits.source.start': 'für diesen Start',
+  'limits.source.type': 'vom Agent-Typ',
+  'limits.source.detected': 'vom Server erkannt',
+  'limits.source.user': 'beim Anbieter eingetragen',
+  'limits.source.default': 'Standard',
+  'limits.launch.unknown': 'Kontextgröße von {model} unbekannt – der Agent nutzt seine eigene Voreinstellung. Du kannst sie unter {link} eintragen.',
+  'limits.launch.overrideTitle': 'Kontextgröße und Antwortlänge für diesen Start',
+  'limits.launch.overrideHint': 'Nur für diesen Start. Leer lassen = Wert vom Agent-Typ bzw. Modell.',
+  'limits.launch.invalid': 'Kontextgröße oder Antwortlänge ist ungültig.',
+
+  // agent types
+  'limits.profile.intro':
+    'Optional: gilt für alle Agenten dieses Typs und hat Vorrang vor den Werten des Modells. Meist reicht es, die Kontextgröße beim API-Anbieter einzutragen.',
+  'limits.profile.fromModel': 'Vom Modell {model}: {summary}',
+  'limits.profile.modelUnknown': 'Für das Modell {model} ist noch keine Kontextgröße bekannt.',
+
+  // agent details
+  'limits.detailLabel': 'Kontext / Antwort',
+};
+
+export const en: Messages<typeof de> = {
+  'limits.title': 'Context window and answer length',
+  'limits.why': "So agents summarize in time and don't send more text than the model can handle. For llama.cpp it's e.g. --ctx-size.",
+  'limits.summary': 'Context: {context} · Answer: {answer}',
+  'limits.summaryContext': 'Context: {context}',
+  'limits.summaryAnswer': 'Answer: {answer}',
+  'limits.contextShort': '{value} context',
+  'limits.model': 'Model',
+  'limits.contextLabel': 'Context window (tokens)',
+  'limits.contextHint': 'How much text the model can handle at once – conversation, files and answer together. You can also type “128k”.',
+  'limits.outputLabel': 'Max answer length (tokens)',
+  'limits.outputHint': 'How long a single answer may get. Empty = a quarter of the context window (at most 32k).',
+  'limits.approx': '≈ {value}',
+  'limits.unknown': 'unknown',
+  'limits.badge.detected': 'detected',
+  'limits.badge.detectedHint': 'Reported by the server during the connection test.',
+  'limits.badge.user': 'set by you',
+  'limits.badge.userHint': "Entered by you – a new connection test won't overwrite it.",
+  'limits.reset': 'reset',
+  'limits.resetHint': 'Remove your value – the detected value applies again (after the next connection test).',
+  'limits.err.format': 'Please enter a number, e.g. 131072 or 128k.',
+  'limits.err.min': 'At least {min} tokens.',
+  'limits.err.outputTooBig': 'The answer length must be smaller than the context window.',
+  'limits.noModels': 'Add a model first or test the connection – then you can enter its context window here.',
+  'limits.detected': 'Detected context windows:',
+  'limits.detectedNone': "The server didn't report a context window – enter it yourself if needed.",
+  'limits.missing': 'Context window unknown for {model} (used by {types}). Enter it under “Edit” so agents summarize in time.',
+  'limits.save': 'Save values',
+  'limits.saved': 'Context window saved.',
+  'limits.edit': 'Enter context window',
+
+  'limits.source.start': 'for this start',
+  'limits.source.type': 'from the agent type',
+  'limits.source.detected': 'detected from the server',
+  'limits.source.user': 'set at the provider',
+  'limits.source.default': 'default',
+  'limits.launch.unknown': "Context window of {model} unknown – the agent uses its own default. You can enter it under {link}.",
+  'limits.launch.overrideTitle': 'Context window and answer length for this start',
+  'limits.launch.overrideHint': 'Only for this start. Leave empty = value from the agent type or model.',
+  'limits.launch.invalid': 'Context window or answer length is invalid.',
+
+  'limits.profile.intro':
+    "Optional: applies to all agents of this type and takes precedence over the model's values. Usually it's enough to enter the context window at the API provider.",
+  'limits.profile.fromModel': 'From the model {model}: {summary}',
+  'limits.profile.modelUnknown': 'No context window known yet for the model {model}.',
+
+  'limits.detailLabel': 'Context / answer',
+};

@@ -1,0 +1,83 @@
+@import 'tailwindcss';
+
+/*
+ * Semantic design tokens. Utilities like `bg-surface` or `text-fg-muted` resolve to these
+ * variables, so the dark theme only has to swap the values below.
+ */
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --color-canvas: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-surface-2: #f1f3f6;
+  --color-line: #e3e6eb;
+  --color-line-strong: #cfd4dc;
+  --color-fg: #17202e;
+  --color-fg-muted: #546072;
+  --color-fg-subtle: #8a94a3;
+  --color-accent: #4f46e5;
+  --color-accent-hover: #4338ca;
+  --color-accent-soft: #eef0ff;
+  --color-accent-fg: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-canvas: #0f1218;
+    --color-surface: #161a22;
+    --color-surface-2: #1d222c;
+    --color-line: #2a303b;
+    --color-line-strong: #3a4250;
+    --color-fg: #e6e9ef;
+    --color-fg-muted: #a3acba;
+    --color-fg-subtle: #737d8c;
+    --color-accent: #818cf8;
+    --color-accent-hover: #a5b4fc;
+    --color-accent-soft: #1f2340;
+    --color-accent-fg: #0f1218;
+    color-scheme: dark;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-canvas text-fg font-sans antialiased;
+  font-size: 14px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+@keyframes cocoon-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.85); }
+}
+
+.animate-status {
+  animation: cocoon-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes cocoon-slide-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-in {
+  animation: cocoon-slide-in 160ms ease-out;
+}
+
+/* xterm fills its container completely. */
+.xterm-host .xterm {
+  height: 100%;
+  padding: 8px;
+}
+.xterm-host .xterm-viewport {
+  background-color: transparent !important;
+}

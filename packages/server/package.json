@@ -1,0 +1,35 @@
+{
+  "name": "@cocoon/server",
+  "version": "0.1.0",
+  "license": "MIT",
+  "author": "Alexander Dziendziol-Dickopf",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "cocoond": "./src/supervisor.ts"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../../.env src/main.ts",
+    "start": "tsx --env-file-if-exists=../../.env src/supervisor.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@cocoon/protocol": "workspace:*",
+    "@fastify/static": "^10.1.6",
+    "@fastify/websocket": "^11.0.0",
+    "@lydell/node-pty": "1.2.0-beta.15",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "dockerode": "^5.0.1",
+    "fastify": "^5.0.0",
+    "mongodb": "^7.7.0",
+    "mysql2": "^3.24.5",
+    "pg": "^8.23.1",
+    "redis": "^6.3.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^4.0.2",
+    "@types/pg": "^8.23.1",
+    "@types/ws": "^8.5.0"
+  }
+}

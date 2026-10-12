@@ -1,0 +1,49 @@
+{
+  "sandbox": {
+    "image": "cocoon/sandbox:latest",
+    "network": "egress",
+    "resources": {
+      "cpus": 2,
+      "memoryMb": 4096,
+      "pids": 1024
+    },
+    "maxSandboxes": 20,
+    "runtime": null
+  },
+  "agents": {
+    "claude-yolo": {
+      "command": [
+        "claude",
+        "--dangerously-skip-permissions"
+      ],
+      "promptMode": "arg",
+      "secrets": [
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "GITHUB_TOKEN"
+      ],
+      "workingPatterns": [
+        "esc to interrupt"
+      ],
+      "blockedPatterns": [
+        "Do you want to"
+      ],
+      "hooks": "claude-code",
+      "label": "Claude Code (autonom)"
+    }
+  },
+  "status": {
+    "pollIntervalMs": 1000,
+    "idleAfterMs": 2500
+  },
+  "egress": {
+    "allowlist": [
+      "api.anthropic.com",
+      "github.com",
+      "*.github.com",
+      "*.githubusercontent.com",
+      "registry.npmjs.org"
+    ],
+    "credentialProxy": true
+  }
+}

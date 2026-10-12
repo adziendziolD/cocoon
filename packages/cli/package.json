@@ -1,0 +1,23 @@
+{
+  "name": "@cocoon/cli",
+  "version": "0.1.0",
+  "license": "MIT",
+  "author": "Alexander Dziendziol-Dickopf",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "cocoon": "./src/main.ts"
+  },
+  "scripts": {
+    "start": "tsx --env-file-if-exists=../../.env src/main.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@cocoon/protocol": "workspace:*",
+    "commander": "^15.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.0"
+  }
+}

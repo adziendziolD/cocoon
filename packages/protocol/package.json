@@ -1,0 +1,17 @@
+{
+  "name": "@cocoon/protocol",
+  "version": "0.1.0",
+  "license": "MIT",
+  "author": "Alexander Dziendziol-Dickopf",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "zod": "^4.1.0"
+  }
+}

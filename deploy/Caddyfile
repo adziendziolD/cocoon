@@ -1,0 +1,4 @@
+# TLS-terminating reverse proxy in front of cocoond (which only listens on 127.0.0.1).
+cocoon.example.com {
+  reverse_proxy 127.0.0.1:7420
+}

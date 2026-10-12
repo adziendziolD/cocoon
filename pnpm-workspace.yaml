@@ -1,0 +1,10 @@
+packages:
+  - packages/*
+
+# Build scripts: only esbuild needs one. The others are optional native speedups (ssh2/cpu-features for dockerode)
+# or a no-op notice (protobufjs).
+allowBuilds:
+  esbuild: true
+  cpu-features: false
+  protobufjs: false
+  ssh2: false

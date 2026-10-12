@@ -1,0 +1,19 @@
+# systemd unit for running cocoond on a Linux host.
+#   sudo useradd --system --create-home --groups docker cocoon
+#   sudo install -d -o cocoon /opt/cocoon && git clone ... /opt/cocoon/app && cd /opt/cocoon/app && pnpm install
+#   sudo cp deploy/cocoond.service /etc/systemd/system/ && sudo systemctl enable --now cocoond
+[Unit]
+Description=CoCoon (coding agents in isolated sandboxes)
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+User=cocoon
+WorkingDirectory=/opt/cocoon/app
+EnvironmentFile=/etc/cocoon/cocoond.env
+ExecStart=/usr/bin/env pnpm --filter @cocoon/server start
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
