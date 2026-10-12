@@ -4,6 +4,8 @@
 
 **Website with screenshots:** https://adziendziold.github.io/cocoon/
 
+<a href="https://www.buymeacoffee.com/adziendziolD"><img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20Coffee&emoji=%E2%98%95&slug=adziendziolD&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" alt="Buy me a coffee" height="42" /></a>
+
 **CoCoon** is a self-hosted platform for running AI coding agents – Claude Code, OpenAI Codex, plain shells or any other
 CLI – in isolated sandboxes on your own server, and for steering them remotely. It ships with a beginner-friendly web UI
 (English and German – follows the browser language), a CLI, an HTTP/WebSocket API and an MCP server, so that other agents can orchestrate
@@ -48,6 +50,7 @@ it too. The design is inspired by [herdr](https://vercel.com/docs/sandbox/ecosys
 - [Project structure](#project-structure)
 - [Development](#development)
 - [Limitations & roadmap](#limitations--roadmap)
+- [Support](#support)
 - [License](#license)
 
 ## Features
@@ -692,6 +695,12 @@ integration tests on every push and pull request.
 - Each cockpit terminal is a separate attach connection; a shared output stream per agent for many viewers is planned.
 - Planned: desktop app (Tauri) for the cockpit with native notifications, remote drivers (Vercel Sandbox, E2B), multi-user with
   roles and quotas, SQLite/Postgres instead of the JSON store, sandbox templates/snapshots, conditional workflow branches.
+
+## Support
+
+If CoCoon is useful to you, you can support its development:
+
+<a href="https://www.buymeacoffee.com/adziendziolD"><img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20Coffee&emoji=%E2%98%95&slug=adziendziolD&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" alt="Buy me a coffee" height="42" /></a>
 
 ## License
 

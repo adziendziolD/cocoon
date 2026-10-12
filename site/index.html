@@ -115,6 +115,12 @@
     .steps li::before { content: counter(s); width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 14px; }
     .steps b { color: var(--fg); }
 
+    .support { text-align: center; }
+    .support .card { max-width: 720px; margin: 0 auto; padding: 40px 32px; }
+    .support .sub { margin: 0 auto 26px; }
+    .bmc { display: inline-block; transition: transform .15s; }
+    .bmc:hover { transform: translateY(-2px); }
+
     footer { border-top: 1px solid var(--line); padding: 36px 0 48px; color: var(--subtle); font-size: 14px; }
     footer .wrap { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
 
@@ -135,6 +141,7 @@
         <a class="hide-sm" href="#screenshots">Screenshots</a>
         <a class="hide-sm" href="#quickstart">Quickstart</a>
         <a href="https://github.com/adziendziolD/cocoon">GitHub</a>
+        <a class="hide-sm" href="#support">Support</a>
       </nav>
       <div class="lang" role="group" aria-label="Language">
         <button type="button" data-set-lang="en" aria-pressed="true">EN</button>
@@ -407,12 +414,23 @@
     -p "Fix the failing tests"</pre>
       </div>
     </section>
+    <!-- Support -->
+    <section id="support" class="support" style="padding-top: 24px">
+      <div class="wrap">
+        <div class="card">
+          <div class="eyebrow">Support</div>
+          <h2><span lang="en">Like CoCoon?</span><span lang="de">Gefällt dir CoCoon?</span></h2>
+          <p class="sub"><span lang="en">CoCoon is free and open source. If it saves you time, you can support its development with a coffee.</span><span lang="de">CoCoon ist kostenlos und Open Source. Wenn es dir Zeit spart, kannst du die Weiterentwicklung mit einem Kaffee unterstützen.</span></p>
+          <a class="bmc" href="https://www.buymeacoffee.com/adziendziolD" target="_blank" rel="noopener"><img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20Coffee&amp;emoji=%E2%98%95&amp;slug=adziendziolD&amp;button_colour=FFDD00&amp;font_colour=000000&amp;font_family=Cookie&amp;outline_colour=000000&amp;coffee_colour=ffffff" alt="Buy me a coffee" height="54" style="height:54px;width:auto" /></a>
+        </div>
+      </div>
+    </section>
   </main>
 
   <footer>
     <div class="wrap">
       <span>CoCoon · <span lang="en">MIT licensed</span><span lang="de">MIT-Lizenz</span> · <span lang="en">Screenshots show a demo installation with example data.</span><span lang="de">Die Screenshots zeigen eine Demo-Installation mit Beispieldaten.</span></span>
-      <a href="https://github.com/adziendziolD/cocoon">github.com/adziendziolD/cocoon</a>
+      <span style="display:flex;gap:18px;align-items:center;flex-wrap:wrap"><a href="https://github.com/adziendziolD/cocoon">github.com/adziendziolD/cocoon</a><a class="bmc" href="https://www.buymeacoffee.com/adziendziolD" target="_blank" rel="noopener"><img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20Coffee&amp;emoji=%E2%98%95&amp;slug=adziendziolD&amp;button_colour=FFDD00&amp;font_colour=000000&amp;font_family=Cookie&amp;outline_colour=000000&amp;coffee_colour=ffffff" alt="Buy me a coffee" height="36" style="height:36px;width:auto" /></a></span>
     </div>
   </footer>
 
