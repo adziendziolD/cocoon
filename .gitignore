@@ -4,3 +4,4 @@ dist/
 .env
 *.log
 .cocoon.log
+.DS_Store
