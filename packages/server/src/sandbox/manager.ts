@@ -62,7 +62,7 @@ export class SandboxManager {
     return record;
   }
 
-  update(id: string, patch: Partial<Pick<SandboxRecord, 'pushedBranch' | 'pushedBranches' | 'grants' | 'services' | 'serviceDbs'>>): void {
+  update(id: string, patch: Partial<Pick<SandboxRecord, 'pushedBranch' | 'pushedBranches' | 'grants' | 'services' | 'serviceDbs' | 'ports'>>): void {
     this.save(Object.assign(this.record(id), patch));
   }
 

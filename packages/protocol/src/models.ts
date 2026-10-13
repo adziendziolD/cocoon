@@ -674,6 +674,33 @@ export const ImageInfo = z.object({
 });
 export type ImageInfo = z.infer<typeof ImageInfo>;
 
+// ── ports ───────────────────────────────────────────────────────────────────
+
+/** preview: only for people logged in to CoCoon (through cocoond) · shared: reachable on the host's network. */
+export const PortMode = z.enum(['preview', 'shared']);
+export type PortMode = z.infer<typeof PortMode>;
+
+/** A TCP port inside a sandbox: detected because something listens on it, and/or opened to the outside. */
+export const SandboxPort = z.object({
+  port: z.number().int(),
+  /** Something listens on the port right now. */
+  listening: z.boolean(),
+  /** all = 0.0.0.0 / :: (reachable from outside the sandbox) · loopback = only 127.0.0.1 / ::1 (not reachable through the gateway). */
+  address: z.enum(['all', 'loopback']).optional(),
+  opened: z
+    .object({
+      mode: PortMode,
+      name: z.string().optional(),
+      openedAt: z.string(),
+      /** Port on the CoCoon host the gateway forwards. */
+      hostPort: z.number().int(),
+      /** shared: address on the host's network, e.g. http://192.168.1.20:7550. */
+      url: z.string().optional(),
+    })
+    .optional(),
+});
+export type SandboxPort = z.infer<typeof SandboxPort>;
+
 // ── updates ─────────────────────────────────────────────────────────────────
 
 /** What an update covers: CoCoon itself, the agent CLIs in the toolbox, CoCoon's own container images. */

@@ -19,6 +19,17 @@ export const messages = {
     de: 'Die Änderungen konnten nicht hochgeladen werden – die Aufgabe bleibt in „Prüfen“ und die Sandbox bleibt erhalten: {error}',
     en: 'The changes could not be pushed – the task stays in "Review" and the sandbox is kept: {error}',
   },
+  'error.portsUnavailable': {
+    de: 'Ports nach außen freigeben geht derzeit nur mit Docker oder Podman (aktiv: {name}).',
+    en: 'Opening ports to the outside currently needs Docker or Podman (active: {name}).',
+  },
+  'error.portNoNetwork': { de: 'Die Sandbox hat kein Netzwerk („Kein Netzwerk“) – ihre Ports lassen sich nicht freigeben.', en: 'The sandbox has no network ("No network") – its ports cannot be opened.' },
+  'error.portShareDisabled': {
+    de: 'Freigeben im Netzwerk ist ausgeschaltet (COCOON_PORTS_SHARE_BIND ist leer). Nutze die Vorschau.',
+    en: 'Sharing on the network is turned off (COCOON_PORTS_SHARE_BIND is empty). Use the preview instead.',
+  },
+  'error.portNotOpen': { de: 'Port {port} ist nicht geöffnet.', en: 'Port {port} is not open.' },
+  'error.portRangeFull': { de: 'Alle Host-Ports im Bereich {range} sind belegt. Schließe einen offenen Port.', en: 'All host ports in the range {range} are in use. Close an open port first.' },
   'error.updateRunning': { de: 'Es läuft bereits ein Update.', en: 'An update is already running.' },
   'error.restartUnsupported': {
     de: 'CoCoon kann sich nicht selbst neu starten – bitte von Hand neu starten (mit „pnpm start“ gestartet, startet CoCoon selbst neu).',
@@ -157,6 +168,10 @@ export const messages = {
   },
   'activity.cocoonUpdated': { de: 'CoCoon wurde auf {version} ({commit}) aktualisiert', en: 'CoCoon was updated to {version} ({commit})' },
   'activity.cocoonUpdateFailed': { de: 'CoCoon-Update fehlgeschlagen: {error}', en: 'CoCoon update failed: {error}' },
+  'activity.portsFailed': { de: 'Port-Gateway konnte nicht gestartet werden: {error}', en: 'The port gateway could not be started: {error}' },
+  'activity.portOpened': { de: 'Port {port} von „{sandbox}“ als Vorschau geöffnet', en: 'Port {port} of "{sandbox}" opened as a preview' },
+  'activity.portShared': { de: 'Port {port} von „{sandbox}“ im Netzwerk freigegeben', en: 'Port {port} of "{sandbox}" shared on the network' },
+  'activity.portClosed': { de: 'Port {port} von „{sandbox}“ geschlossen', en: 'Port {port} of "{sandbox}" closed' },
   'activity.restarting': { de: 'CoCoon startet neu', en: 'CoCoon is restarting' },
   'activity.proxyFailed': { de: 'Egress-Proxy konnte nicht gestartet werden: {error}', en: 'Egress proxy could not be started: {error}' },
   'activity.secretSaved': { de: 'Zugangsdaten „{name}“ gespeichert', en: 'Credential "{name}" saved' },

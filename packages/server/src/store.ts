@@ -17,6 +17,17 @@ export interface SandboxRecord extends Sandbox {
   grants?: string[];
   /** Own database/user per shared service (by service id). */
   serviceDbs?: Record<string, SandboxServiceDb>;
+  /** Ports opened to the outside through the port gateway. */
+  ports?: OpenPort[];
+}
+
+export interface OpenPort {
+  port: number;
+  mode: 'preview' | 'shared';
+  /** Host port the gateway publishes for it. */
+  hostPort: number;
+  name?: string;
+  openedAt: string;
 }
 
 export interface SandboxServiceDb {

@@ -18,6 +18,7 @@ import type { TaskService } from './tasks.ts';
 import type { TokenService } from './tokens.ts';
 import type { WorkspaceService as WorkspacesService } from './workspaces.ts';
 import type { UpdateService } from './updates.ts';
+import type { PortService } from './ports.ts';
 import { currentLanguage, t } from './i18n.ts';
 import { STARTED_AT, VERSION } from './version.ts';
 
@@ -43,12 +44,13 @@ export interface RpcContext {
   notifier: Notifier;
   services: ServiceManager;
   updates: UpdateService;
+  ports: PortService;
 }
 
 const CREDENTIAL_SECRETS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'OPENAI_API_KEY', 'GEMINI_API_KEY'];
 
 export function createRpc(ctx: RpcContext) {
-  const { driver, store, settings, secrets, providers, tokens, images, egress, activity, sandboxes, workspace, agents, workspaces, tasks, notifier, services, updates } = ctx;
+  const { driver, store, settings, secrets, providers, tokens, images, egress, activity, sandboxes, workspace, agents, workspaces, tasks, notifier, services, updates, ports } = ctx;
   const ok = { ok: true as const };
 
   const handlers: Handlers = {
@@ -67,6 +69,7 @@ export function createRpc(ctx: RpcContext) {
         proxyRunning: await egress.running(),
         commit: updates.commit(),
         startedAt: STARTED_AT,
+        ports: { enabled: ports.enabled, share: ports.shareEnabled },
       };
     },
     'system.setup_status': async () => {
@@ -115,6 +118,11 @@ export function createRpc(ctx: RpcContext) {
 
     'image.status': () => images.status(),
     'image.build': async (p) => ({ buildId: images.build(p.kind, { variant: p.variant, tools: p.tools }).buildId }),
+
+    'ports.list': async (p) => ports.list(p.sandboxId),
+    'ports.open': (p) => ports.open(p.sandboxId, p.port, p.mode, p.name),
+    'ports.close': async (p) => (await ports.close(p.sandboxId, p.port), ok),
+    'ports.preview_link': async (p) => ports.previewLink(p.sandboxId, p.port),
 
     'update.status': (p) => updates.status(p.refresh),
     'update.apply': async (p) => ({ targets: await updates.apply(p.targets) }),

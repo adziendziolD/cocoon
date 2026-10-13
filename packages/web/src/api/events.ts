@@ -78,6 +78,9 @@ export function applyEvent(qc: QueryClient, event: CocoonEvent): void {
     case 'update.progress':
       buildStore.apply({ ...event, kind: 'cocoon' });
       break;
+    case 'ports.updated':
+      qc.setQueryData(qk.ports(event.sandboxId), event.ports);
+      break;
     case 'update.status':
       qc.setQueryData(qk.updates, event.status);
       break;

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ActivityEntry, Agent, ImageKind, Sandbox, Settings, UpdateStatus } from './models.ts';
+import { ActivityEntry, Agent, ImageKind, Sandbox, SandboxPort, Settings, UpdateStatus } from './models.ts';
 import { Task, Workspace } from './orchestration.ts';
 import { ServiceInfo } from './services.ts';
 
@@ -26,6 +26,7 @@ export const CocoonEvent = z.discriminatedUnion('type', [
     error: z.string().optional(),
   }),
   z.object({ type: z.literal('update.status'), status: UpdateStatus }),
+  z.object({ type: z.literal('ports.updated'), sandboxId: z.string(), ports: z.array(SandboxPort) }),
   z.object({ type: z.literal('activity'), entry: ActivityEntry }),
   z.object({ type: z.literal('workspace.updated'), workspace: Workspace }),
   z.object({ type: z.literal('workspace.deleted'), workspaceId: z.string() }),
@@ -52,6 +53,7 @@ function sandboxOf(event: CocoonEvent): string | undefined {
     case 'agent.removed': return event.sandboxId;
     case 'activity': return event.entry.sandboxId;
     case 'task.updated': return event.task.sandboxId;
+    case 'ports.updated': return event.sandboxId;
     default: return undefined;
   }
 }

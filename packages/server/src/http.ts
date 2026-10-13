@@ -12,6 +12,8 @@ import { CocoonError, httpStatus } from './errors.ts';
 import type { EventBus } from './events.ts';
 import { resolveLanguage, t, withLanguage } from './i18n.ts';
 import { handleMcp } from './mcp.ts';
+import type { PortService } from './ports.ts';
+import { routePreviewUpgrades, servePreview } from './preview.ts';
 import type { Rpc } from './rpc.ts';
 import type { WorkspaceService } from './sandbox/workspace.ts';
 import type { TokenService } from './tokens.ts';
@@ -23,6 +25,7 @@ export interface HttpDeps {
   tokens: TokenService;
   agents: AgentManager;
   workspace: WorkspaceService;
+  ports: PortService;
 }
 
 export function toWireError(err: unknown): WireError {
@@ -39,9 +42,17 @@ const requestLanguage = (req: FastifyRequest) =>
 
 const isApi = (url: string) => url.startsWith('/v1/') || url === '/mcp' || url.startsWith('/mcp?');
 
-export async function buildHttpServer({ config, rpc, bus, tokens, agents, workspace }: HttpDeps) {
+export async function buildHttpServer({ config, rpc, bus, tokens, agents, workspace, ports }: HttpDeps) {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' }, bodyLimit: 64 * 1024 * 1024 });
   await app.register(websocket);
+  routePreviewUpgrades(app.server, ports);
+
+  // Previews of sandbox servers (p<port>-<sandbox>.<domain>) have their own login (one-time link → cookie for that host).
+  app.addHook('onRequest', async (req, reply) => {
+    if (!ports.isPreviewHost(req.headers.host)) return;
+    reply.hijack();
+    servePreview(ports, req.raw, reply.raw, Boolean(config.ports.previewDomain));
+  });
 
   app.addHook('onRequest', async (req, reply) => {
     if (!isApi(req.url)) return;

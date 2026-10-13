@@ -325,6 +325,39 @@ program
     print(res, () => res.steps.forEach((s) => console.log(`${s.done ? '✔' : '✘'} ${s.title}${s.detail ? `  (${s.detail})` : ''}`)));
   });
 
+// ── ports ────────────────────────────────────────────────────────────────────
+const ports = program.command('ports').description('servers in a sandbox: open them as a preview or share them on the network');
+ports
+  .command('ls <sandbox-id>')
+  .description('detected and opened ports')
+  .action(async (sandboxId) => {
+    const list = await client().call('ports.list', { sandboxId });
+    print(list, () =>
+      console.table(
+        list.map((p) => ({
+          port: p.port,
+          listening: p.listening ? (p.address === 'loopback' ? 'yes (localhost only)' : 'yes') : 'no',
+          opened: p.opened?.mode ?? '',
+          url: p.opened?.url ?? '',
+        })),
+      ),
+    );
+  });
+ports
+  .command('open <sandbox-id> <port>')
+  .description('open a port as a preview (default) or share it on the network, and print the link')
+  .option('--shared', 'reachable for everyone on the network, without login')
+  .option('--name <name>', 'label shown in the UI')
+  .action(async (sandboxId, port, o: { shared?: boolean; name?: string }) => {
+    const c = client();
+    const opened = await c.call('ports.open', { sandboxId, port: Number(port), mode: o.shared ? 'shared' : 'preview', name: o.name });
+    const link = o.shared ? undefined : await c.call('ports.preview_link', { sandboxId, port: Number(port) });
+    print({ ...opened, previewLink: link?.url }, () => console.log(opened.opened?.url ?? `Preview (one-time link, valid 2 minutes): ${link?.url}`));
+  });
+ports
+  .command('close <sandbox-id> <port>')
+  .action(async (sandboxId, port) => print(await client().call('ports.close', { sandboxId, port: Number(port) })));
+
 // ── updates ──────────────────────────────────────────────────────────────────
 const UPDATE_TARGETS: UpdateTarget[] = ['cocoon', 'tools', 'images'];
 const updateTable = (s: UpdateStatus) => {

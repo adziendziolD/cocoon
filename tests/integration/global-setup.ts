@@ -79,6 +79,10 @@ export default async function setup(project: TestProject) {
       COCOON_DRIVER: process.env.COCOON_DRIVER ?? 'docker',
       COCOON_TOOLBOX_AUTOINSTALL: '0',
       COCOON_SERVICE_IDLE_MINUTES: '0.1',
+      // Own small port ranges, so a CoCoon running on the same machine keeps its gateway ports; shared only on loopback.
+      COCOON_PORTS_PREVIEW_RANGE: '17500-17504',
+      COCOON_PORTS_SHARE_RANGE: '17550-17554',
+      COCOON_PORTS_SHARE_BIND: '127.0.0.1',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -135,6 +139,7 @@ export default async function setup(project: TestProject) {
         }
       };
       sh(`docker rm -f cocoon-egress-proxy-${instance}`);
+      sh(`docker rm -f cocoon-ports-${instance}`);
       sh(`docker ps -aq --filter name=cocoon-svc-${instance}- | xargs -r docker rm -f`);
       sh(`docker volume ls -q --filter name=cocoon-svc-${instance}- | xargs -r docker volume rm`);
       sh(`docker network rm cocoon-internal-${instance}`);
