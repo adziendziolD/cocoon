@@ -311,7 +311,7 @@ export class TaskService {
       : '';
     const result = parseVerdict(raw, agentId, review?.agentKinds[step] ?? '');
     const { pullRequest: _pr, ...stored } = result;
-    task.reviews = [...task.reviews.filter((r) => r.agentId !== agentId), stored];
+    task.reviews = [...(task.reviews ?? []).filter((r) => r.agentId !== agentId), stored];
     if (result.verdict !== 'approved') {
       // Back to the user: "Request changes" sends it to the working agent, "Approve" reviews again.
       task.reviewStep = undefined;
@@ -357,7 +357,7 @@ export class TaskService {
     const { pushed } = await this.files.publish(sandbox.id, `${task.handle ?? ''}: ${task.title}`.replace(/^: /, ''), task.branch);
     const body = [
       task.description,
-      ...task.reviews.map((r) => `**Review (${r.agentKind}):** ${r.summary ?? r.verdict}`),
+      ...(task.reviews ?? []).map((r) => `**Review (${r.agentKind}):** ${r.summary ?? r.verdict}`),
       '',
       `_Created by CoCoon for task ${task.handle ?? task.id}._`,
     ]
@@ -777,7 +777,8 @@ function clearNote(task: Task): void {
 /** Renders the task note in the given language. */
 export function localizeTask(task: Task, lang: Language): Task {
   const note = task.noteKey && isMessageKey(task.noteKey) ? t(task.noteKey, task.noteParams, lang) : task.note;
-  return { ...task, runs: [...task.runs], note };
+  // Tasks saved before reviews/pull requests existed have no such fields.
+  return { ...task, runs: [...task.runs], reviews: task.reviews ?? [], pullRequests: task.pullRequests ?? [], note };
 }
 
 

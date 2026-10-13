@@ -53,6 +53,10 @@ export class WorkspaceService {
     private readonly bus: EventBus,
     private readonly activity: ActivityLog,
   ) {
+    // Tasks saved before reviews / pull requests existed get the (empty) fields.
+    for (const task of this.store.tasks()) {
+      if (!task.reviews || !task.pullRequests) this.store.putTask({ ...task, reviews: task.reviews ?? [], pullRequests: task.pullRequests ?? [] });
+    }
     // Workspaces from before task numbers: give them a key and number their tasks by creation date.
     for (const workspace of this.list()) {
       if (workspace.key) continue;
