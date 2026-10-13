@@ -15,6 +15,10 @@ export const messages = {
     de: 'Image „{image}“ ist nicht vorhanden – bitte zuerst bauen (Einstellungen → Sandbox-Standards).',
     en: 'Image "{image}" does not exist – please build it first (Settings → Sandbox defaults).',
   },
+  'error.taskPublishFailed': {
+    de: 'Die Änderungen konnten nicht hochgeladen werden – die Aufgabe bleibt in „Prüfen“ und die Sandbox bleibt erhalten: {error}',
+    en: 'The changes could not be pushed – the task stays in "Review" and the sandbox is kept: {error}',
+  },
   'error.updateRunning': { de: 'Es läuft bereits ein Update.', en: 'An update is already running.' },
   'error.restartUnsupported': {
     de: 'CoCoon kann sich nicht selbst neu starten – bitte von Hand neu starten (mit „pnpm start“ gestartet, startet CoCoon selbst neu).',
@@ -182,6 +186,8 @@ export const messages = {
   'note.interrupted': { de: 'Start wurde durch einen Neustart des Servers unterbrochen', en: 'Start was interrupted by a server restart' },
   'note.exitCode': { de: 'Der Agent wurde mit Exit-Code {code} beendet', en: 'The agent exited with code {code}' },
   'note.agentGone': { de: 'Der Agent wurde beendet, bevor er fertig war', en: 'The agent ended before it finished' },
+  'note.published': { de: 'Übernommen: Branch „{branch}“ hochgeladen ({repos}), Sandbox entfernt', en: 'Accepted: pushed branch "{branch}" ({repos}), sandbox removed' },
+  'note.publishedNothing': { de: 'Übernommen: keine Änderungen, Sandbox entfernt', en: 'Accepted: no changes, sandbox removed' },
   'note.failed': { de: 'Start fehlgeschlagen: {error}', en: 'Start failed: {error}' },
   'activity.taskCreated': { de: 'Aufgabe „{title}“ erstellt', en: 'Task "{title}" created' },
   'activity.taskRunning': { de: 'Aufgabe „{title}“ läuft', en: 'Task "{title}" is running' },

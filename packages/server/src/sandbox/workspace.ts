@@ -252,6 +252,29 @@ export class WorkspaceService {
     return { url: String(pr.html_url), number: Number(pr.number) };
   }
 
+  /**
+   * Commits all changes of every repository and pushes the ones with new commits to `branch`.
+   * Throws (and pushes nothing further) if a repository with work in it cannot be pushed, so no work gets lost.
+   */
+  async publish(sandboxId: string, message: string, branch: string): Promise<{ pushed: string[] }> {
+    const record = this.sandboxes.record(sandboxId);
+    const paths = reposOf(record).map((r) => r.path);
+    const pushed: string[] = [];
+    for (const path of paths.length ? paths : ['']) {
+      const { dir } = this.repo(sandboxId, path);
+      const ahead = await this.git(
+        sandboxId,
+        dir,
+        `git add -A && { git diff --cached --quiet || git commit -q -m "$MSG"; } && git rev-list --count ${BASELINE_TAG}..HEAD`,
+        { MSG: message },
+      );
+      if (Number(ahead.trim()) === 0) continue;
+      await this.push(sandboxId, branch, path);
+      pushed.push(path);
+    }
+    return { pushed };
+  }
+
   private async owner(sandboxId: string): Promise<{ uid: number; gid: number }> {
     const cached = this.owners.get(sandboxId);
     if (cached) return cached;

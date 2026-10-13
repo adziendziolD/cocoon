@@ -318,8 +318,13 @@ the CLI, the API and MCP alike (a lead agent can orchestrate just like you).
 
 **Workspaces** group sandboxes, agents and tasks – e.g. one per project or customer. A workspace can define a repository that is
 cloned into task sandboxes, a network mode, and a sandbox strategy: `per-task` (every task gets its own sandbox – parallel and
-isolated, default) or `shared` (all tasks work in one sandbox). Default agent type / workflow, `autoRun` and `maxParallel`
-complete the setup.
+isolated, default) or `shared` (all tasks work in one sandbox – an existing sandbox of the workspace is taken over before a new
+one is created). Default agent type / workflow, `autoRun` and `maxParallel` complete the setup.
+
+A task can also be pinned to an existing sandbox of its workspace (*Sandbox* in the task dialog; a running one is preselected).
+When a task that got **its own sandbox** is accepted, CoCoon commits all changes, pushes them as branch `cocoon/<task>-<id>` and
+removes the sandbox. If the push fails (e.g. no GitHub token), the task stays in *Review* and the sandbox is kept. Shared and
+hand-picked sandboxes are kept.
 
 **Tasks** live on a board and move through:
 
