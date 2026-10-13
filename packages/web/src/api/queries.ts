@@ -33,6 +33,15 @@ export const useUpdateStatus = () =>
 
 export const useSettings = () => useQuery({ queryKey: qk.settings, queryFn: () => rpc('settings.get') });
 export const useSecrets = () => useQuery({ queryKey: qk.secrets, queryFn: () => rpc('secrets.list') });
+/** Models an agent type offers with its default credentials (vendor listing); empty while loading or if unknown. */
+export const useDefaultModels = (kind: string | undefined, enabled = true) =>
+  useQuery({
+    queryKey: qk.defaultModels(kind ?? ''),
+    queryFn: () => rpc('models.list', { kind: kind! }),
+    enabled: enabled && !!kind,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
 export const useTokens = () => useQuery({ queryKey: qk.tokens, queryFn: () => rpc('tokens.list') });
 export const useDenied = () => useQuery({ queryKey: qk.denied, queryFn: () => rpc('egress.denied'), refetchInterval: 10_000 });
 

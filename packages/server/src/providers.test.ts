@@ -271,3 +271,38 @@ describe('ProviderService.test (API style detection)', () => {
     expect(res.message).toContain('model list disabled');
   });
 });
+
+describe('ProviderService.defaultModels', () => {
+  const ALIASES = ['opus', 'sonnet', 'haiku', 'claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
+  afterEach(() => vi.unstubAllGlobals());
+
+  const service = (keys: Record<string, string> = {}) =>
+    new ProviderService({ get: () => ({ providers: {} }) } as unknown as SettingsService, { resolve: (name: string) => keys[name] } as unknown as SecretsService);
+
+  it('offers the built-in aliases without a key and lists the vendor models with one', async () => {
+    expect(await service().defaultModels('claude-code')).toEqual({ models: [...ALIASES], source: 'builtin' });
+    expect(await service().defaultModels('codex')).toEqual({ models: [], source: 'none' });
+    expect(await service().defaultModels('opencode')).toEqual({ models: [], source: 'none' });
+
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: [{ id: 'claude-b' }, { id: 'claude-a' }] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await service({ ANTHROPIC_API_KEY: 'sk-ant' }).defaultModels('claude-code');
+    expect(result).toEqual({ models: [...ALIASES, 'claude-a', 'claude-b'], source: 'api' });
+    expect((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].headers).toMatchObject({ 'x-api-key': 'sk-ant' });
+  });
+
+  it('lists with the subscription token as OAuth bearer when there is no API key', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: [{ id: 'claude-x' }] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await service({ CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat' }).defaultModels('claude-code');
+    expect(result.models).toContain('claude-x');
+    expect((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].headers).toMatchObject({ authorization: 'Bearer sk-ant-oat', 'anthropic-beta': 'oauth-2025-04-20' });
+  });
+
+  it('keeps only chat models of OpenAI and falls back on errors', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [{ id: 'gpt-5' }, { id: 'text-embedding-3' }, { id: 'o3' }, { id: 'gpt-4o-audio' }] }), { status: 200 })));
+    expect((await service({ OPENAI_API_KEY: 'k' }).defaultModels('codex')).models).toEqual(['gpt-5', 'o3']);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('no', { status: 401 })));
+    expect(await service({ ANTHROPIC_API_KEY: 'bad' }).defaultModels('claude-code')).toEqual({ models: [...ALIASES], source: 'builtin' });
+  });
+});

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ADAPTERS, profileAdapter, profileTool, type AgentProfile, type ImageInfo, type SecretInfo, type Settings } from '@cocoon/protocol';
 import { ChevronDown, ChevronRight, Gauge, Plug } from 'lucide-react';
-import { useImages, useSecrets, useSettings } from '../api/queries';
+import { useDefaultModels, useImages, useSecrets, useSettings } from '../api/queries';
 import { rich, useLanguage, useT, type TFunction } from '../i18n';
 import { isModelProvider, profileCompat, providerCompat, toolState, type ProfileCompat } from '../lib/compat';
 import { isShellProfile, profileLabel } from '../lib/profiles';
@@ -10,7 +10,7 @@ import { checkProfileSecrets, secretLabel, type SecretCheck } from '../lib/secre
 import { AgentTypeCards } from './AgentTypeCards';
 import { buttonClasses } from './Button';
 import { CompatBadge, compatProblem } from './CompatBits';
-import { Checkbox, Field, Input } from './Field';
+import { Checkbox, Field } from './Field';
 import { Callout } from './HelpText';
 import { ModelSelect } from './ModelSelect';
 import { formatTokens, effectiveLimits, MIN_CONTEXT, MIN_OUTPUT, parseTokens, type EffectiveLimits } from '../lib/modelLimits';
@@ -137,6 +137,7 @@ export function AgentLaunchFields({
   const all = settings.data?.providers ?? {};
   const profiles = Object.entries(settings.data?.agents ?? {});
   const { profile, check, compat } = info;
+  const defaultModels = useDefaultModels(choice.kind, !!profile && !info.isShell && !info.needsModel);
   const providerEntries = Object.entries(all);
 
   const set = (patch: Partial<LaunchChoice>) => onChange({ ...choice, ...patch });
@@ -188,11 +189,17 @@ export function AgentLaunchFields({
               <ModelSelect value={info.model} onChange={(model) => set({ model })} models={info.models} invalid={!info.model} />
             </Field>
           ) : (
-            profile.model && (
-              <div className="text-sm text-fg-muted">
-                {t('spawn.model')} <code className="rounded bg-surface px-1 font-mono text-xs text-fg">{choice.model.trim() || profile.model}</code>
-              </div>
-            )
+            <Field label={t('spawn.modelField')} optional hint={t('spawn.modelHint')}>
+              <ModelSelect
+                key={(defaultModels.data?.models ?? []).join(',')}
+                value={choice.model}
+                onChange={(model) => set({ model })}
+                models={defaultModels.data?.models ?? []}
+                allowEmpty
+                emptyLabel={profile.model ? t('compat.model.agentDefault', { model: profile.model }) : t('compat.model.default')}
+                placeholder={profile.model || ''}
+              />
+            </Field>
           )}
           <LimitsLine info={info} onNavigate={onNavigate} />
         </div>
@@ -288,11 +295,6 @@ export function AgentLaunchFields({
                   </button>
                 )}
               </Field>
-              {!info.needsModel && (
-                <Field label={t('spawn.modelField')} optional hint={t('spawn.modelHint')}>
-                  <Input value={choice.model} onChange={(e) => set({ model: e.target.value })} className="font-mono" placeholder={profile.model || ''} />
-                </Field>
-              )}
               <div className="space-y-2">
                 <div className="text-sm font-medium text-fg">
                   {t('limits.launch.overrideTitle')} <span className="ml-1 font-normal text-fg-subtle">{t('common.optional')}</span>

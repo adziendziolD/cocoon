@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Sandbox, Task, TaskPriority, Workspace } from '@cocoon/protocol';
 import { Bot, ChevronDown, ChevronRight, Lightbulb, ListPlus, Inbox, Search, Workflow as WorkflowIcon } from 'lucide-react';
-import { useSandboxes, useSettings, useTasks, useWorkspaces } from '../../api/queries';
+import { useDefaultModels, useSandboxes, useSettings, useTasks, useWorkspaces } from '../../api/queries';
 import { rpc } from '../../api/rpc';
 import { useAction } from '../../api/useAction';
 import { rich, useT } from '../../i18n';
@@ -155,7 +155,8 @@ export function TaskDialog({
   const ws = d ? workspaces.data?.find((w) => w.id === d.workspaceId) : undefined;
   const profile = d ? settings.data?.agents[d.agentKind] : undefined;
   const effectiveProviders = d?.providers ?? profile?.providers ?? [];
-  const modelSuggestions = Array.from(new Set(effectiveProviders.flatMap((id) => allProviders[id]?.models ?? [])));
+  const vendorModels = useDefaultModels(d?.agentKind, effectiveProviders.length === 0);
+  const modelSuggestions = Array.from(new Set(effectiveProviders.length ? effectiveProviders.flatMap((id) => allProviders[id]?.models ?? []) : (vendorModels.data?.models ?? [])));
 
   // Possible dependencies: other tasks of the workspace that do not (directly) depend on this one.
   const depCandidates = useMemo(() => {

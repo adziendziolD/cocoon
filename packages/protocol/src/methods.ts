@@ -257,6 +257,12 @@ export const methods = {
       modelInfo: z.record(z.string(), ModelInfo).default({}),
     }),
   },
+  'models.list': {
+    description:
+      "Models an agent type offers with its default credentials (Anthropic/OpenAI/Gemini key): listed from the vendor's API, plus built-in aliases. Empty if nothing is known.",
+    params: z.object({ kind: z.string() }),
+    result: z.object({ models: z.array(z.string()).default([]), source: z.enum(['api', 'builtin', 'none']).default('none') }),
+  },
   'notifications.test': {
     description: 'Sends a test message to the configured notification webhook.',
     params: z.object({ webhookUrl: z.url().optional() }).default({}),

@@ -15,7 +15,7 @@ import {
   type LocalizedText,
 } from '@cocoon/protocol';
 import { Bot, ChevronDown, ChevronRight, Plug, Plus, RotateCcw, Save, Sparkles, SquareTerminal, Trash2, Undo2 } from 'lucide-react';
-import { useImages, useSecrets, useSettings } from '../../api/queries';
+import { useDefaultModels, useImages, useSecrets, useSettings } from '../../api/queries';
 import { apiLabel, CompatBadge, InstallToolButton } from '../../components/CompatBits';
 import { ModelSelect } from '../../components/ModelSelect';
 import { Badge } from '../../components/Badge';
@@ -368,7 +368,10 @@ function ProfileForm({
   const [advanced, setAdvanced] = useState(() => !!d.contextWindow || !!d.maxOutputTokens);
   const providerEntries = Object.entries(providers);
   const selectedProviders = d.providers.map((pid) => providers[pid]).filter((p): p is ApiProvider => !!p);
-  const modelSuggestions = Array.from(new Set(selectedProviders.flatMap((p) => [...(p.defaultModel ? [p.defaultModel] : []), ...p.models])));
+  const vendorModels = useDefaultModels(id, selectedProviders.length === 0);
+  const modelSuggestions = Array.from(
+    new Set(selectedProviders.length ? selectedProviders.flatMap((p) => [...(p.defaultModel ? [p.defaultModel] : []), ...p.models]) : (vendorModels.data?.models ?? [])),
+  );
   const defaultModel = selectedProviders.find((p) => p.defaultModel)?.defaultModel;
   const missingProviders = d.providers.filter((pid) => !providers[pid]);
   const parsed = splitCommand(d.commandText);

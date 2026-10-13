@@ -395,7 +395,12 @@ export class AgentManager {
       args.push(...wiring.args);
       files.push(...wiring.files);
     }
-    if (model && !kinds.size) env.COCOON_MODEL = model;
+    if (model && !kinds.size) {
+      env.COCOON_MODEL = model;
+      // Default credentials (no custom provider): select the model through the CLI's own flag.
+      const flag = DEFAULT_MODEL_FLAG[adapter];
+      if (flag && !profile.command.includes(flag)) args.push(flag, model);
+    }
     if (adapter === 'codex') {
       // Codex' own command sandbox needs bubblewrap inside the container; CoCoon already isolates the agent.
       if (!profile.command.some((arg) => arg === '--sandbox' || arg === '-s')) args.unshift('--sandbox', 'danger-full-access');
@@ -477,7 +482,7 @@ export class AgentManager {
     return record;
   }
 
-  private profile(kind: string): AgentProfile {
+  profile(kind: string): AgentProfile {
     const profile = this.settings.get().agents[kind];
     if (!profile) throw new CocoonError('bad_request', t('error.unknownAgentKind', { kind, available: this.kinds().join(', ') }));
     return profile;
@@ -488,6 +493,9 @@ export class AgentManager {
     return agents[kind] ?? agents.shell ?? { command: ['sh'], promptMode: 'input', secrets: [], env: {}, providers: [], workingPatterns: [], blockedPatterns: [] };
   }
 }
+
+/** Model flag of agent CLIs that run on their own credentials. */
+const DEFAULT_MODEL_FLAG: Partial<Record<AgentAdapter, string>> = { 'claude-code': '--model', codex: '-m', gemini: '-m' };
 
 function profileLabel(profile: AgentProfile, adapter: AgentAdapter): string {
   return localize(profile.label, currentLanguage()) ?? adapter;
