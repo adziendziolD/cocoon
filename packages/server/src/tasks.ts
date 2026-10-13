@@ -1,3 +1,4 @@
+import { GIT_CREDENTIAL_HELPER_SCRIPT } from './sandbox/git-auth.ts';
 import { DEFAULT_REVIEW_PROMPT, localize, type Agent, type Language, type MethodParams, type ReviewResult, type Task, type TaskStatus, type WorkflowStage, type Workspace } from '@cocoon/protocol';
 import type { AgentManager } from './agents/manager.ts';
 import { CocoonError, notFound } from './errors.ts';
@@ -214,9 +215,13 @@ export class TaskService {
     return review?.enabled && review.agentKinds.length ? review : undefined;
   }
 
-  /** Where review agent number `step` writes its verdict (outside the repositories, so it is never committed). */
+  /**
+   * Where review agent number `step` writes its verdict: inside the workspace folder (agents such as Claude Code may only
+   * write there without asking), in .cocoon/ which is excluded from every repository, so it is never committed.
+   */
   private reviewFile(task: Task, step: number): string {
-    return `${SANDBOX_HOME}/.cocoon/review/${task.id}-${step}.json`;
+    const workdir = (task.sandboxId && this.store.sandbox(task.sandboxId)?.workdir) || '/workspace';
+    return `${workdir}/.cocoon/review/${task.id}-${step}.json`;
   }
 
   /** Starts review agent number task.reviewStep in the task's sandbox. */
@@ -238,12 +243,30 @@ export class TaskService {
         const sandbox = this.store.sandbox(sandboxId);
         if (sandbox?.status === 'stopped') await this.sandboxes.start(sandboxId);
         const file = this.reviewFile(task, step);
-        const token = review.agentPushes && last ? this.secrets?.resolve('GITHUB_TOKEN') : undefined;
-        // Remove an old verdict; with a token, git authenticates through it (only the agent's environment has it).
+        const pushes = review.agentPushes && last;
+        const token = pushes ? this.secrets?.resolve('GITHUB_TOKEN') : undefined;
+        if (pushes && !token) {
+          // Do not let the agent find out the hard way: it was supposed to push, but there is nothing to push with.
+          const current = this.store.task(task.id);
+          if (!current) return;
+          current.reviewStep = undefined;
+          current.stage = this.stages(current).length - 1;
+          current.status = 'review';
+          setNote(current, 'note.reviewNoToken');
+          current.order = this.nextOrder(current.workspaceId, 'review');
+          this.save(current);
+          return;
+        }
+        // Fresh verdict file; .cocoon/ stays out of every repository (also the workspace folder's own one).
         await this.sandboxes.sh(
           sandboxId,
-          `mkdir -p "$(dirname "$FILE")" && rm -f "$FILE" && git config --global credential.https://github.com.helper '!f() { test -n "$GITHUB_TOKEN" && echo username=x-access-token && echo "password=$GITHUB_TOKEN"; }; f'`,
-          { FILE: file },
+          `mkdir -p "$(dirname "$FILE")" && rm -f "$FILE"
+           for d in "$WORKDIR" "$WORKDIR"/*/; do
+             [ -d "$d/.git" ] || continue
+             grep -qxF '/.cocoon/' "$d/.git/info/exclude" 2>/dev/null || echo '/.cocoon/' >> "$d/.git/info/exclude"
+           done
+           ${GIT_CREDENTIAL_HELPER_SCRIPT}`,
+          { FILE: file, WORKDIR: sandbox?.workdir ?? '/workspace' },
         );
         const stage: WorkflowStage = {
           name: { de: 'Code-Review', en: 'Code review' },
@@ -256,7 +279,8 @@ export class TaskService {
           sandboxId,
           kind,
           prompt,
-          ...(token ? { env: { GITHUB_TOKEN: token, GH_TOKEN: token } } : {}),
+          // Only the pushing reviewer gets the token; the others get it removed even if their agent type normally has it.
+          env: token ? { GITHUB_TOKEN: token, GH_TOKEN: token } : { GITHUB_TOKEN: '', GH_TOKEN: '' },
         });
         const current = this.store.task(task.id);
         if (!current || current.status !== 'running' || current.reviewStep !== step) {
@@ -287,7 +311,7 @@ export class TaskService {
       : '';
     const result = parseVerdict(raw, agentId, review?.agentKinds[step] ?? '');
     const { pullRequest: _pr, ...stored } = result;
-    task.reviews = [...task.reviews.filter((r) => r.agentId !== agentId), stored];
+    task.reviews = [...(task.reviews ?? []).filter((r) => r.agentId !== agentId), stored];
     if (result.verdict !== 'approved') {
       // Back to the user: "Request changes" sends it to the working agent, "Approve" reviews again.
       task.reviewStep = undefined;
@@ -333,7 +357,7 @@ export class TaskService {
     const { pushed } = await this.files.publish(sandbox.id, `${task.handle ?? ''}: ${task.title}`.replace(/^: /, ''), task.branch);
     const body = [
       task.description,
-      ...task.reviews.map((r) => `**Review (${r.agentKind}):** ${r.summary ?? r.verdict}`),
+      ...(task.reviews ?? []).map((r) => `**Review (${r.agentKind}):** ${r.summary ?? r.verdict}`),
       '',
       `_Created by CoCoon for task ${task.handle ?? task.id}._`,
     ]
@@ -753,16 +777,17 @@ function clearNote(task: Task): void {
 /** Renders the task note in the given language. */
 export function localizeTask(task: Task, lang: Language): Task {
   const note = task.noteKey && isMessageKey(task.noteKey) ? t(task.noteKey, task.noteParams, lang) : task.note;
-  return { ...task, runs: [...task.runs], note };
+  // Tasks saved before reviews/pull requests existed have no such fields.
+  return { ...task, runs: [...task.runs], reviews: task.reviews ?? [], pullRequests: task.pullRequests ?? [], note };
 }
 
-const SANDBOX_HOME = '/home/agent';
 
 /** What a review agent has to do at the end: the verdict file, and pushing + the pull request when it may. */
 function reviewResultInstructions(file: string, publish: boolean, task: Task, baseBranch: string | undefined): string {
   const base = baseBranch || "the repository's default branch";
   const lines = [
-    'When you are done, write your result as JSON to ' + file + ' (create the folder if needed):',
+    'Commit the fixes you make yourself: `git add -A && git commit -m "Review fixes: <short summary>"` (in each repository folder you changed).',
+    'When you are done, write your result as JSON to ' + file + ' (create the folder if needed; it is excluded from git):',
     '{"verdict": "approved" or "changes_requested", "summary": "a few sentences: what you checked, what you fixed, what still needs to change"}',
     'Use "changes_requested" if anything important is still wrong that you did not fix yourself.',
   ];

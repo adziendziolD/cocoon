@@ -7,10 +7,11 @@ const SPOON = 'https://github.com/octocat/Spoon-Knife.git';
  * Test reviewer: gets the review prompt as $1, finds the verdict file in it and writes a verdict –
  * "changes_requested" if the task contains PLEASE-REJECT; the summary tells whether it saw a GitHub token.
  */
-const REVIEWER_SCRIPT = `f=$(printf '%s' "$1" | grep -o '/home/agent/.cocoon/review/[^ ]*\\.json' | head -1)
+const REVIEWER_SCRIPT = `f=$(printf '%s' "$1" | grep -o '/workspace/.cocoon/review/[^ ]*\\.json' | head -1)
 verdict=approved; case "$1" in *PLEASE-REJECT*) verdict=changes_requested;; esac
 tok=no; [ -n "$GITHUB_TOKEN" ] && tok=yes
-mkdir -p "$(dirname "$f")"; printf '{"verdict":"%s","summary":"reviewed token=%s"}' "$verdict" "$tok" > "$f"`;
+cred=no; [ -n "$GITHUB_TOKEN" ] && printf 'protocol=https\nhost=github.com\n\n' | GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null | grep -qxF "password=$GITHUB_TOKEN" && cred=yes
+mkdir -p "$(dirname "$f")"; printf '{"verdict":"%s","summary":"reviewed token=%s cred=%s"}' "$verdict" "$tok" "$cred" > "$f"`;
 
 /** The working stage: a shell task that points origin to a bare repository in the sandbox and changes a file. */
 const WORK = (extra = '') => `git init -q --bare /home/agent/remote.git && git remote set-url origin /home/agent/remote.git && echo change > change.txt ${extra}`;
@@ -73,7 +74,7 @@ describe.runIf(available)('code review on approval and task numbers', () => {
     await rpc('task.approve', { taskId: task.id });
     const done = await untilStatus(task.id, 'done');
     expect(done.reviews.map((r: any) => r.verdict)).toEqual(['approved', 'approved']);
-    expect(done.reviews[0].summary).toBe('reviewed token=no');
+    expect(done.reviews[0].summary).toBe('reviewed token=no cred=no');
     expect(done.note).toContain(review.branch);
     expect(done.sandboxId).toBeUndefined();
     await expect(rpc('sandbox.get', { sandboxId: review.sandboxId })).rejects.toThrow();
@@ -89,9 +90,24 @@ describe.runIf(available)('code review on approval and task numbers', () => {
       return t.status === 'review' && t.reviews.length ? t : undefined;
     }, 180_000);
     expect(back.reviews.map((r: any) => r.verdict)).toEqual(['changes_requested']);
-    expect(back.note).toMatch(/reviewed token=no/);
+    expect(back.note).toMatch(/reviewed token=no cred=no/);
     expect(back.reviewStep).toBeUndefined();
+    // The verdict file lives in the workspace folder but never shows up in git.
+    expect((await sh(review.sandboxId, 'git -C /workspace status --porcelain')).stdout).not.toContain('.cocoon');
     expect((await rpc('sandbox.get', { sandboxId: review.sandboxId })).status).toBe('running');
+  });
+
+  it('says clearly that a GitHub token is missing when the review agent is supposed to push', async () => {
+    await rpc('workspace.update', { workspaceId, review: { enabled: true, agentKinds: ['test-reviewer'], agentPushes: true } });
+    const task = await rpc('task.create', { workspaceId, title: 'No token', agentKind: 'shell', description: WORK() });
+    await rpc('task.start', { taskId: task.id });
+    await untilStatus(task.id, 'review');
+    await rpc('task.approve', { taskId: task.id });
+    const back = await waitFor('missing token note', async () => {
+      const t = await rpc('task.get', { taskId: task.id });
+      return t.status === 'review' && /GITHUB_TOKEN/.test(t.note ?? '') ? t : undefined;
+    }, 60_000);
+    expect(back.reviews).toEqual([]);
   });
 
   it('gives the GitHub token only to the last review agent, and only with the setting on', async () => {
@@ -103,7 +119,8 @@ describe.runIf(available)('code review on approval and task numbers', () => {
     await rpc('secrets.set', { name: 'GITHUB_TOKEN', value: 'ghp_cocoon_integration_test_token' });
     await rpc('task.approve', { taskId: task.id });
     const done = await untilStatus(task.id, 'done');
-    expect(done.reviews.map((r: any) => r.summary)).toEqual(['reviewed token=no', 'reviewed token=yes']);
+    // Only the last reviewer has the token, and git can authenticate with it.
+    expect(done.reviews.map((r: any) => r.summary)).toEqual(['reviewed token=no cred=no', 'reviewed token=yes cred=yes']);
     await rpc('secrets.delete', { name: 'GITHUB_TOKEN' });
   });
 });

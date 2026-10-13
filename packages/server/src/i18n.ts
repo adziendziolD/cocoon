@@ -207,6 +207,7 @@ export const messages = {
   'note.reviewing': { de: 'Code-Review läuft ({step}/{total}) …', en: 'Code review running ({step}/{total}) …' },
   'note.reviewChanges': { de: 'Code-Review: Änderungen nötig – {summary}', en: 'Code review: changes requested – {summary}' },
   'note.reviewNoResult': { de: 'Der Review-Agent hat kein Ergebnis hinterlassen. „Freigeben“ startet das Review erneut.', en: 'The review agent left no result. "Approve" runs the review again.' },
+  'note.reviewNoToken': { de: 'Der Review-Agent soll selbst hochladen, aber es ist kein GitHub-Token hinterlegt (Einstellungen → Zugangsdaten → GITHUB_TOKEN).', en: 'The review agent is supposed to push, but no GitHub token is stored (Settings → Credentials → GITHUB_TOKEN).' },
   'note.reviewNoSandbox': { de: 'Für das Code-Review fehlt die Sandbox der Aufgabe.', en: 'The task has no sandbox for the code review.' },
   'note.reviewPublishFailed': { de: 'Review bestanden, aber Hochladen/Pull Request fehlgeschlagen: {error}', en: 'Review passed, but pushing / the pull request failed: {error}' },
   'note.prOpened': { de: 'Review bestanden: Branch „{branch}“ hochgeladen, Pull Request: {urls}', en: 'Review passed: pushed branch "{branch}", pull request: {urls}' },

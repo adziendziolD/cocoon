@@ -57,3 +57,13 @@ describe('parseVerdict', () => {
     expect(parseVerdict('{"verdict":"approved","pullRequest":"javascript:alert(1)"}', 'ag_1', 'x').pullRequest).toBeUndefined();
   });
 });
+
+describe('tasks saved before reviews existed', () => {
+  it('get empty reviews and pull requests when sent to clients', async () => {
+    const { localizeTask } = await import('./tasks.ts');
+    const legacy = { id: 'ts_1', workspaceId: 'ws_1', title: 'Old', status: 'done', runs: [] } as unknown as Task;
+    const view = localizeTask(legacy, 'de');
+    expect(view.reviews).toEqual([]);
+    expect(view.pullRequests).toEqual([]);
+  });
+});
