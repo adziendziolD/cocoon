@@ -34,6 +34,7 @@ it too. The design is inspired by [herdr](https://vercel.com/docs/sandbox/ecosys
 - [Sandbox backends](#sandbox-backends)
 - [Network modes & security](#network-modes--security)
 - [Credentials and custom API providers](#credentials-and-custom-api-providers)
+- [Environment variables (.env injection)](#environment-variables-env-injection)
 - [Several repositories per sandbox](#several-repositories-per-sandbox)
 - [Shared services: databases & mocks](#shared-services-databases--mocks)
 - [Servers & ports: previews and sharing](#servers--ports-previews-and-sharing)
@@ -244,6 +245,66 @@ How it is wired:
 - Provider hosts are added to the egress allowlist automatically.
 - If a profile uses an `anthropic` provider, the default `ANTHROPIC_API_KEY` is not injected (same for `openai` / `OPENAI_API_KEY`).
 - Assign providers per agent type (`providers`, `model`) or per start (`agent.spawn { providers, model }`).
+
+## Environment variables (.env injection)
+
+Projects need their own configuration – a Stripe test key, a database URL, a Sentry DSN, feature flags – to run their tests.
+Define it once and CoCoon injects it into sandboxes and agents, instead of typing variables for every sandbox or committing a `.env`.
+
+**Levels** (*Workspace page → Settings*, *Sandbox page → Environment*, `cocoon env …`); later levels override earlier ones:
+
+| Level | Applies to | Identified by |
+|---|---|---|
+| **Workspace** | every sandbox of the workspace | workspace |
+| **Repository** | every sandbox that clones the repository, in any workspace | the repository URL – `https://github.com/o/r.git`, `git@github.com:o/r` and `ssh://git@github.com/o/r` are the same repository |
+| **Sandbox** | this sandbox | sandbox |
+| **Agent type** | agents of that type | *Settings → Agent types* (`env`), as before |
+
+The sandbox page shows the merged result with the origin of every value (and what it overrides). `agent.spawn { env }` and CoCoon's own
+variables (credentials, provider wiring, `COCOON_*`) still come last. With several repositories in a sandbox, the agents get the
+variables of all of them (later repository wins); each repository's `.env` file only gets its own level.
+
+**Two ways to inject, per variable** (`target`):
+
+- `env` – environment variables of agents started afterwards and of `sandbox.exec` (never in the container's own configuration, so not in `docker inspect`).
+- `file` – a `.env` file in the repository folder (`/workspace/.env`, or `/workspace/<folder>/.env` per repository; the path is configurable per level).
+  CoCoon adds the file to the repository's `.git/info/exclude` **before** it creates it, so it never appears in `git status`, diffs, commits,
+  patches or pushes. It is written with mode `0600`, starts with a `# cocoon-managed` line, and CoCoon never overwrites or removes a file
+  without that line, never writes into a folder that is not a git repository and never into a `.env` the repository tracks (all reported as *skipped*).
+  Note that an agent can read the file – use the proxy for keys the agent does not need to see.
+- `both`.
+
+**Updates**: new agents get the current values immediately; the `.env` file is re-written when a sandbox is created or started and
+before every agent start. *Apply now* (`cocoon env apply`, `env.apply`) updates a running sandbox without starting an agent.
+Changing the file path of a level does not remove the file at the old path.
+
+**Secrets**: values are encrypted at rest (AES-256-GCM; key in `<data dir>/env.key`, mode `0600`, kept apart from `state.json` and bound
+per variable), masked in the UI and API (`env.get`, `env.resolve`, `sandbox.get`, the activity log – only variables marked *not secret* show
+their value) and never logged. The `env.*` methods are admin-only and not offered over MCP. Names starting with `COCOON_` and the proxy
+variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, …) are reserved. Back up `env.key` together with `state.json`; without it the stored values
+cannot be decrypted (they are skipped and have to be set again).
+
+**Credential proxy**: mark a variable as *API key for host X* (`proxyHost`, e.g. `api.stripe.com`, optional port, `http://` for internal APIs).
+The sandbox gets a placeholder (`cocoon_<token>_STRIPE_API_KEY`) plus a base URL (`STRIPE_BASE_URL`, or `baseUrlEnv`) pointing at the
+credential proxy; the proxy swaps the placeholder for the real value – in `Authorization: Bearer …`, other headers and `Basic` credentials –
+only for requests to that host and only for that sandbox. The real value never enters the sandbox, not even in the `.env` file.
+The application has to call the base URL (most SDKs have a setting for it); HTTPS traffic that bypasses it is a tunnel the proxy cannot rewrite.
+Without a credential proxy (sandbox network *none*, or the API key protection switched off) such a variable is **not injected at all**
+and flagged in the merged view – it is never handed over in plain text. Proxied variables are sandbox-wide: if two repositories define the
+same proxied name, the later one wins everywhere.
+
+```bash
+pnpm cocoon env set --workspace ws_… STRIPE_KEY=sk_test_… --target both
+pnpm cocoon env set --repo https://github.com/acme/api.git DATABASE_URL=postgres://… 
+pnpm cocoon env set --sandbox sb_… SENTRY_DSN --stdin < dsn.txt          # keeps the value out of the shell history
+pnpm cocoon env set --repo github.com/acme/api STRIPE_API_KEY=sk_test_… --proxy-host api.stripe.com
+pnpm cocoon env set --sandbox sb_… --file-path config/.env.test          # where the .env file goes
+pnpm cocoon env import .env --repo github.com/acme/api [--target file] [--replace]
+pnpm cocoon env ls --workspace ws_…             # one level (secrets masked)
+pnpm cocoon env ls --sandbox sb_… --merged      # what the sandbox gets, with origins   (--agent <type> to include it)
+pnpm cocoon env rm --sandbox sb_… SENTRY_DSN
+pnpm cocoon env apply sb_…                      # write the .env files now
+```
 
 ## Several repositories per sandbox
 
@@ -523,6 +584,10 @@ pnpm cocoon providers add openrouter openai https://openrouter.ai/api/v1 --key s
 pnpm cocoon providers test openrouter
 pnpm cocoon providers ls | rm <id>
 
+# environment variables (levels: workspace, repository, sandbox) – see "Environment variables"
+pnpm cocoon env set --repo https://github.com/you/repo.git DATABASE_URL=postgres://… [--target env|file|both] [--proxy-host api.example.com]
+pnpm cocoon env ls --sandbox <sandbox-id> --merged
+
 # sandboxes
 pnpm cocoon sandbox create --name demo --repo https://github.com/you/repo.git [--ref main] [--network egress|open|none] [--runtime runsc]
 pnpm cocoon sandbox create --name platform --repo https://github.com/acme/api.git=api --repo https://github.com/acme/web.git#develop=web [--service postgres]
@@ -621,6 +686,7 @@ GET  /healthz                        health check (no auth)
 |---|---|
 | System | `system.info`, `system.setup_status`, `activity.list` |
 | Images | `image.status`, `image.build` |
+| Environment | `env.get/set/unset/import/resolve/apply` (admin only, not in MCP) |
 | Admin | `settings.get/update/reset`, `secrets.list/set/delete`, `tokens.list/create/revoke`, `providers.test`, `notifications.test`, `egress.denied` |
 | Workspaces | `workspace.list/get/create/update/delete` |
 | Tasks | `task.list/get/create/update/delete/start/approve/reject/stop` |
@@ -724,7 +790,7 @@ pnpm build:image    # build the sandbox image manually
 ```bash
 pnpm test               # unit tests (Vitest, no Docker/network, < 1 s)
 pnpm test:integration   # integration tests against a real server with Docker (sandboxes, agents, proxy,
-                        # API translation, several repositories, shared services)
+                        # API translation, several repositories, shared services, .env injection)
 ```
 
 The integration tests start their own server with `COCOON_INSTANCE=it…` (own port, data folder, Docker network,

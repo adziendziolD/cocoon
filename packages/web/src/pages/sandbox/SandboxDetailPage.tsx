@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { Sandbox } from '@cocoon/protocol';
-import { Bot, Box, Database, FileDiff, FolderInput, FolderOpen, Loader2, Network, Play, Settings2, Square, SquareTerminal } from 'lucide-react';
+import { Bot, Box, Database, FileDiff, KeyRound, FolderInput, FolderOpen, Loader2, Network, Play, Settings2, Square, SquareTerminal } from 'lucide-react';
 import { useAgents, useSandbox, useSandboxPorts, useSystemInfo } from '../../api/queries';
 import { isNotFound } from '../../api/rpc';
 import { Badge, SandboxStatusBadge } from '../../components/Badge';
@@ -20,13 +20,14 @@ import { WorkspaceTag } from '../../components/WorkspaceSwitcher';
 import { AgentsTab } from './AgentsTab';
 import { ChangesTab } from './ChangesTab';
 import { ConsoleTab } from './ConsoleTab';
+import { EnvTab } from './EnvTab';
 import { FilesTab } from './FilesTab';
 import { ManageTab } from './ManageTab';
 import { PortsTab, visiblePorts } from './PortsTab';
 import { ServicesTab } from './ServicesTab';
 
-type TabId = 'agents' | 'files' | 'changes' | 'console' | 'ports' | 'services' | 'manage';
-const TAB_IDS: TabId[] = ['agents', 'files', 'changes', 'console', 'ports', 'services', 'manage'];
+type TabId = 'agents' | 'files' | 'changes' | 'console' | 'ports' | 'services' | 'env' | 'manage';
+const TAB_IDS: TabId[] = ['agents', 'files', 'changes', 'console', 'ports', 'services', 'env', 'manage'];
 
 export function SandboxDetailPage() {
   const { sandboxId = '', tab: tabParam } = useParams();
@@ -66,6 +67,7 @@ export function SandboxDetailPage() {
     { id: 'console', label: t('sandboxDetail.tab.console'), icon: <SquareTerminal className="size-4" /> },
     { id: 'ports', label: t('sandboxDetail.tab.ports'), icon: <Network className="size-4" />, count: visiblePorts(ports.data).length },
     { id: 'services', label: t('sandboxDetail.tab.services'), icon: <Database className="size-4" />, count: s.services?.length ?? 0 },
+    { id: 'env', label: t('sandboxDetail.tab.env'), icon: <KeyRound className="size-4" /> },
     { id: 'manage', label: t('sandboxDetail.tab.manage'), icon: <Settings2 className="size-4" /> },
   ];
 
@@ -144,6 +146,7 @@ export function SandboxDetailPage() {
       {tab === 'console' && <RequireRunning sandbox={s}>{<ConsoleTab sandbox={s} />}</RequireRunning>}
       {tab === 'ports' && <PortsTab sandbox={s} />}
       {tab === 'services' && <ServicesTab sandbox={s} />}
+      {tab === 'env' && <EnvTab sandbox={s} />}
       {tab === 'manage' && <ManageTab sandbox={s} />}
 
       <SpawnAgentDialog sandbox={s} open={spawnOpen} onClose={() => setSpawnOpen(false)} />

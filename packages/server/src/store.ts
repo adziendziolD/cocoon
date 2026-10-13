@@ -1,6 +1,6 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Agent, CockpitLayout, Sandbox, Settings, SharedService, Task, Workspace } from '@cocoon/protocol';
+import type { Agent, CockpitLayout, EnvTarget, Sandbox, Settings, SharedService, Task, Workspace } from '@cocoon/protocol';
 
 export interface SandboxRecord extends Sandbox {
   /** Driver-specific handle, e.g. Docker container id. */
@@ -53,6 +53,22 @@ export interface SecretRecord {
   updatedAt: string;
 }
 
+/** One environment variable: the value is encrypted (see EnvVault), the rest is plain metadata. */
+export interface EnvVarRecord {
+  enc: string;
+  target: EnvTarget;
+  secret: boolean;
+  proxyHost?: string;
+  baseUrlEnv?: string;
+  updatedAt: string;
+}
+
+/** Variables of one level; the store key is "workspace:<id>", "repo:<normalized url>" or "sandbox:<id>". */
+export interface EnvScopeRecord {
+  filePath?: string;
+  vars: Record<string, EnvVarRecord>;
+}
+
 export interface TokenRecord {
   id: string;
   name: string;
@@ -76,6 +92,8 @@ interface State {
   toolbox?: { tools: string[]; installedAt: string; versions?: Record<string, string> };
   /** Shared services (databases, mocks). */
   services: Record<string, ServiceRecord>;
+  /** Environment variables (.env injection) by level. */
+  envScopes: Record<string, EnvScopeRecord>;
 }
 
 /**
@@ -84,7 +102,7 @@ interface State {
  */
 export class Store {
   private readonly file: string;
-  private state: State = { sandboxes: {}, agents: {}, secrets: {}, tokens: {}, workspaces: {}, tasks: {}, layouts: {}, services: {} };
+  private state: State = { sandboxes: {}, agents: {}, secrets: {}, tokens: {}, workspaces: {}, tasks: {}, layouts: {}, services: {}, envScopes: {} };
 
   constructor(readonly dataDir: string) {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
@@ -112,6 +130,7 @@ export class Store {
   deleteSandbox(id: string): void {
     delete this.state.sandboxes[id];
     for (const agent of this.agents()) if (agent.sandboxId === id) delete this.state.agents[agent.id];
+    delete this.state.envScopes[`sandbox:${id}`];
     this.flush();
   }
 
@@ -173,6 +192,7 @@ export class Store {
   deleteWorkspace(id: string): void {
     delete this.state.workspaces[id];
     delete this.state.layouts[id];
+    delete this.state.envScopes[`workspace:${id}`];
     for (const task of this.tasks()) if (task.workspaceId === id) delete this.state.tasks[task.id];
     this.flush();
   }
@@ -219,6 +239,16 @@ export class Store {
 
   deleteService(id: string): void {
     delete this.state.services[id];
+    this.flush();
+  }
+
+  envScope(key: string): EnvScopeRecord | undefined {
+    return this.state.envScopes[key];
+  }
+
+  putEnvScope(key: string, record: EnvScopeRecord | undefined): void {
+    if (record && (Object.keys(record.vars).length || record.filePath)) this.state.envScopes[key] = record;
+    else delete this.state.envScopes[key];
     this.flush();
   }
 

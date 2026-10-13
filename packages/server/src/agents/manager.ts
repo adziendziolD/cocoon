@@ -1,6 +1,7 @@
 import { ADAPTERS, AGENT_TOOLS, DEFAULT_MODEL_FLAG, defaultMaxOutput, localize, profileAdapter, profileTool, type Agent, type AgentAdapter, type AgentProfile, type AgentStatus, type ApiStyle, type MethodParams, type MethodResult } from '@cocoon/protocol';
 import { currentLanguage } from '../i18n.ts';
 import type { ServiceManager } from '../services/manager.ts';
+import type { EnvService } from '../env.ts';
 import { PROXIED_SECRETS, placeholderFor, type EgressManager } from '../egress.ts';
 import { containerReachableUrl, envPrefixFor, providerRoute, providerUrls, translatedRoute, type ProviderService } from '../providers.ts';
 import { CocoonError, notFound } from '../errors.ts';
@@ -39,6 +40,7 @@ export class AgentManager {
     private readonly bus: EventBus,
     private readonly egress: EgressManager,
     private readonly services: ServiceManager,
+    private readonly envs: EnvService,
     private readonly log: (msg: string, err?: unknown) => void,
   ) {}
 
@@ -65,6 +67,8 @@ export class AgentManager {
 
     const id = newId('ag');
     await this.ensureTool(handle, profile);
+    // Current .env files, and the credential proxy knows the routes of proxied variables.
+    await this.envs.prepare(sandbox.id);
     const providerIds = params.providers ?? profile.providers;
     const wiring = await this.wireProviders(profile, providerIds, params.model ?? profile.model, sandbox, {
       contextWindow: params.contextWindow ?? profile.contextWindow,
@@ -83,7 +87,9 @@ export class AgentManager {
       }
     }
 
+    // Precedence (later wins): workspace → repository → sandbox variables, agent type, credentials/provider wiring, explicit.
     const env: Record<string, string> = {
+      ...this.envs.injectedEnv(sandbox),
       ...profile.env,
       ...this.secretEnv(profile, sandbox, wiring.kinds, wiring.grants),
       ...wiring.env,

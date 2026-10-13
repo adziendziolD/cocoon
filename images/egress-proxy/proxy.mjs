@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
+import { swapHeaders } from './placeholders.mjs';
 import {
   chatToMessage,
   chatToResponse,
@@ -201,14 +202,8 @@ const credentials = http.createServer((req, res) => {
     return;
   }
 
-  // Swap placeholders of this sandbox for the real secret values.
-  const headers = { ...req.headers };
-  for (const [name, value] of Object.entries(headers)) {
-    if (typeof value !== 'string') continue;
-    headers[name] = value.replace(/cocoon_([a-f0-9]+)_([A-Z][A-Z0-9_]*)/g, (match, token, secret) =>
-      token === sandbox.token && route.secrets[secret] ? route.secrets[secret] : match,
-    );
-  }
+  // Swap placeholders of this sandbox for the real secret values (also inside Basic credentials).
+  const headers = swapHeaders(req.headers, sandbox.token, route.secrets);
   if (route.inject) headers[route.inject.header] = route.inject.value;
   const path = rest.join('/').split('?')[0];
   if (route.translate && req.method === 'POST') {

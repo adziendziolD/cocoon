@@ -1,9 +1,10 @@
 #!/usr/bin/env -S npx tsx
 import { readFileSync, writeFileSync } from 'node:fs';
 import { Command, Option } from 'commander';
-import type { Agent, AgentStatus, Sandbox, UpdateStatus, UpdateTarget } from '@cocoon/protocol';
+import type { Agent, AgentStatus, EnvScopeInfo, Sandbox, UpdateStatus, UpdateTarget } from '@cocoon/protocol';
 import { attach } from './attach.ts';
 import { CocoonApiError, CocoonClient } from './client.ts';
+import { parseAssignments, readStdin, scopeFrom } from './env.ts';
 
 const program = new Command('cocoon')
   .description('Control a CoCoon server (cocoond)')
@@ -169,6 +170,98 @@ const tokens = program.command('tokens').description('API access tokens');
 tokens.command('ls').action(async () => print(await client().call('tokens.list')));
 tokens.command('create <name>').action(async (name) => print(await client().call('tokens.create', { name })));
 tokens.command('revoke <id>').action(async (id) => print(await client().call('tokens.revoke', { id })));
+
+// ── environment (.env injection) ─────────────────────────────────────────────
+const envCmd = program
+  .command('env')
+  .description('environment variables injected into sandboxes and agents (levels: workspace → repository → sandbox → agent type)');
+const scopeOptions = (cmd: Command) =>
+  cmd
+    .option('--workspace <id>', 'variables of a workspace')
+    .option('--repo <url>', 'variables of a repository (any spelling of its URL)')
+    .option('--sandbox <id>', 'variables of one sandbox');
+const targetOption = new Option('--target <target>', 'env: environment variables of processes · file: .env file in the repository folder · both').choices(['env', 'file', 'both']);
+
+const printScope = (info: EnvScopeInfo) =>
+  print(info, () => {
+    console.log(`${info.scope} ${info.label}${info.filePath ? `  (file: ${info.filePath})` : ''}`);
+    console.table(info.vars.map((v) => ({ name: v.name, value: v.secret ? '••••••••' : (v.value ?? ''), target: v.target, proxy: v.proxyHost ?? '' })));
+  });
+
+scopeOptions(
+  envCmd
+    .command('ls')
+    .description('list variables of one level; with --sandbox and --merged the variables the sandbox gets, with their origin')
+    .option('--merged', 'show the merged variables of --sandbox')
+    .option('--agent <kind>', 'with --merged: include the variables of this agent type'),
+).action(async (o) => {
+  if (o.merged) {
+    if (!o.sandbox) throw new Error('--merged needs --sandbox <id>');
+    const res = await client().call('env.resolve', { sandboxId: o.sandbox, agentKind: o.agent });
+    return print(res, () => {
+      console.table(
+        res.vars.map((v) => ({
+          name: v.name,
+          value: v.secret ? '••••••••' : v.value ?? '',
+          from: `${v.origin.scope}:${v.origin.label}`,
+          overrides: v.overrides.map((x) => x.scope).join(' < '),
+          note: v.skipped ?? '',
+        })),
+      );
+      for (const f of res.files) console.log(`file ${f.folder ? `${f.folder}/` : ''}${f.path}: ${f.status}${f.message ? ` – ${f.message}` : ''}`);
+    });
+  }
+  printScope(await client().call('env.get', scopeFrom(o)));
+});
+
+scopeOptions(
+  envCmd
+    .command('set [assignments...]')
+    .description('set NAME=value pairs (values are stored encrypted; use --stdin to keep a value out of the shell history)')
+    .addOption(targetOption)
+    .option('--stdin', 'read the value of the single NAME from standard input')
+    .option('--public', 'not a secret: the value is shown in the UI/API')
+    .option('--proxy-host <host>', 'API key for this host: the sandbox only gets a placeholder, the credential proxy adds the value')
+    .option('--base-url-env <name>', 'with --proxy-host: variable that receives the proxy base URL (default NAME_BASE_URL)')
+    .option('--file-path <path>', 'path of the .env file inside the repository folders (default .env)'),
+).action(async (assignments: string[], o) => {
+  const base = { target: o.target, secret: o.public ? false : undefined, proxyHost: o.proxyHost, baseUrlEnv: o.baseUrlEnv };
+  let vars: { name: string; value?: string }[];
+  if (o.stdin) {
+    if (assignments.length !== 1 || assignments[0]!.includes('=')) throw new Error('--stdin needs exactly one NAME (without =value)');
+    vars = [{ name: assignments[0]!, value: (await readStdin()).replace(/\r?\n$/, '') }];
+  } else vars = assignments.length ? parseAssignments(assignments) : [];
+  if (!vars.length && o.filePath === undefined) throw new Error('nothing to set: pass NAME=value pairs or --file-path');
+  printScope(await client().call('env.set', { ...scopeFrom(o), vars: vars.map((v) => ({ ...v, ...base })), filePath: o.filePath }));
+});
+
+scopeOptions(envCmd.command('rm <names...>').description('remove variables')).action(async (names: string[], o) =>
+  printScope(await client().call('env.unset', { ...scopeFrom(o), names })),
+);
+
+scopeOptions(
+  envCmd
+    .command('import <file>')
+    .description('import a local .env file ("-" = standard input)')
+    .addOption(targetOption)
+    .option('--public', 'import as non-secret variables')
+    .option('--replace', 'remove variables of this level that are not in the file'),
+).action(async (file: string, o) => {
+  const content = file === '-' ? await readStdin() : readFileSync(file, 'utf8');
+  const res = await client().call('env.import', { ...scopeFrom(o), content, target: o.target, secret: o.public ? false : undefined, replace: Boolean(o.replace) });
+  print(res, () => {
+    console.log(`imported ${res.imported.length} variable(s): ${res.imported.join(', ')}`);
+    for (const e of res.errors) console.error(`${file}${e.line ? `:${e.line}` : ''}: ${e.message}`);
+  });
+});
+
+envCmd
+  .command('apply <sandboxId>')
+  .description('write the .env files of a running sandbox now (otherwise done when the next agent starts)')
+  .action(async (sandboxId) => {
+    const res = await client().call('env.apply', { sandboxId });
+    print(res, () => res.files.forEach((f) => console.log(`${f.folder ? `${f.folder}/` : ''}${f.path}: ${f.status}${f.message ? ` – ${f.message}` : ''}`)));
+  });
 
 // ── workspaces & tasks ───────────────────────────────────────────────────────
 const workspaces = program.command('workspace').alias('ws').description('workspaces group sandboxes, agents and tasks');

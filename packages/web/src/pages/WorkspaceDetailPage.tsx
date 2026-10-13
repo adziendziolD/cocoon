@@ -10,6 +10,7 @@ import { AgentList, sortAgents } from '../components/AgentList';
 import { useAppDialogs } from '../components/AppDialogs';
 import { Badge, SandboxStatusBadge } from '../components/Badge';
 import { Button, ButtonLink, IconButton } from '../components/Button';
+import { EnvScopeEditor } from '../components/EnvScopeEditor';
 import { Card, CardBody, CardHeader, DetailList, PageHeader } from '../components/Card';
 import { EmptyState } from '../components/EmptyState';
 import { SectionTitle } from '../components/Layout';
@@ -285,6 +286,7 @@ function SettingsTab({ workspace: ws }: { workspace: Workspace }) {
           <WorkspaceForm value={draft} onChange={(p) => setDraft((d) => (d ? { ...d, ...p } : d))} />
         </CardBody>
       </Card>
+      <EnvScopeEditor scope={{ scope: 'workspace', id: ws.id }} title={t('env.workspaceTitle')} description={t('env.workspaceDescription')} />
       <Card className="border-red-500/30">
         <CardHeader title={t('workspaceDetail.dangerZone')} description={t('workspaceDetail.deleteText')} />
         <CardBody>

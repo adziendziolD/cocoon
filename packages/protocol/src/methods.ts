@@ -31,6 +31,7 @@ import {
   UpdateStatus,
   UpdateTarget,
 } from './models.ts';
+import { EnvFileStatus, EnvScopeInfo, EnvScopeRef, EnvTarget, EnvVarInput, ResolvedEnv } from './env.ts';
 import { SERVICE_ID, ServiceAdminCredentials, ServiceConnection, ServiceInfo, ServiceKind, SharedService } from './services.ts';
 
 /**
@@ -652,6 +653,46 @@ export const methods = {
     result: Task,
   },
   'task.stop': { description: 'Stops the running agent of a task and moves it back to the backlog.', mcp: true, params: TaskRef, result: Task },
+
+  // ── environment (.env injection) ──────────────────────────────────────────
+  // Admin methods (no MCP): an orchestrating agent must not read or change the secrets of other sandboxes.
+  'env.get': {
+    description: 'Variables defined on one level (workspace, repository or sandbox). Secret values are never returned.',
+    params: EnvScopeRef,
+    result: EnvScopeInfo,
+  },
+  'env.set': {
+    description:
+      'Creates or updates variables on one level. A variable without value keeps its stored value. filePath sets the .env file path inside the repository folders ("" resets it).',
+    params: EnvScopeRef.extend({ vars: z.array(EnvVarInput).max(500).default([]), filePath: z.string().nullable().optional() }),
+    result: EnvScopeInfo,
+  },
+  'env.unset': {
+    description: 'Removes variables from one level.',
+    params: EnvScopeRef.extend({ names: z.array(z.string()).min(1).max(500) }),
+    result: EnvScopeInfo,
+  },
+  'env.import': {
+    description: 'Imports the content of a .env file into one level. With replace, variables missing from the file are removed.',
+    params: EnvScopeRef.extend({
+      content: z.string().max(1_000_000),
+      target: EnvTarget.optional(),
+      secret: z.boolean().optional(),
+      replace: z.boolean().default(false),
+    }),
+    result: z.object({ scope: EnvScopeInfo, imported: z.array(z.string()), errors: z.array(z.object({ line: z.number(), message: z.string() })) }),
+  },
+  'env.resolve': {
+    description:
+      'The variables a sandbox (and an agent of the given type) gets: levels merged (workspace → repository → sandbox → agent type) with the origin of every value. Values of secrets are not returned.',
+    params: SandboxRef.extend({ agentKind: z.string().optional() }),
+    result: ResolvedEnv,
+  },
+  'env.apply': {
+    description: 'Writes the .env files of a running sandbox now (otherwise done when the next agent starts).',
+    params: SandboxRef,
+    result: z.object({ files: z.array(EnvFileStatus) }),
+  },
 
   // ── cockpit ───────────────────────────────────────────────────────────────
   'layout.get': {
