@@ -8,7 +8,7 @@ export const qk = {
   ports: (sandboxId: string) => ['ports', sandboxId] as const,
   settings: ['settings'] as const,
   secrets: ['secrets'] as const,
-  defaultModels: (kind: string) => ['models.list', kind] as const,
+  defaultModels: (adapter: string) => ['models.list', adapter] as const,
   tokens: ['tokens'] as const,
   denied: ['egress.denied'] as const,
   sandboxes: ['sandboxes'] as const,

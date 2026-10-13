@@ -1,4 +1,4 @@
-import { ADAPTERS, AGENT_TOOLS, defaultMaxOutput, localize, profileAdapter, profileTool, type Agent, type AgentAdapter, type AgentProfile, type AgentStatus, type ApiStyle, type MethodParams, type MethodResult } from '@cocoon/protocol';
+import { ADAPTERS, AGENT_TOOLS, DEFAULT_MODEL_FLAG, defaultMaxOutput, localize, profileAdapter, profileTool, type Agent, type AgentAdapter, type AgentProfile, type AgentStatus, type ApiStyle, type MethodParams, type MethodResult } from '@cocoon/protocol';
 import { currentLanguage } from '../i18n.ts';
 import type { ServiceManager } from '../services/manager.ts';
 import { PROXIED_SECRETS, placeholderFor, type EgressManager } from '../egress.ts';
@@ -399,7 +399,8 @@ export class AgentManager {
       env.COCOON_MODEL = model;
       // Default credentials (no custom provider): select the model through the CLI's own flag.
       const flag = DEFAULT_MODEL_FLAG[adapter];
-      if (flag && !profile.command.includes(flag)) args.push(flag, model);
+      const set = (arg: string) => arg === '--model' || arg.startsWith('--model=') || arg === flag || (!!flag && arg.startsWith(`${flag}=`));
+      if (flag && !profile.command.some(set)) args.push(flag, model);
     }
     if (adapter === 'codex') {
       // Codex' own command sandbox needs bubblewrap inside the container; CoCoon already isolates the agent.
@@ -493,9 +494,6 @@ export class AgentManager {
     return agents[kind] ?? agents.shell ?? { command: ['sh'], promptMode: 'input', secrets: [], env: {}, providers: [], workingPatterns: [], blockedPatterns: [] };
   }
 }
-
-/** Model flag of agent CLIs that run on their own credentials. */
-const DEFAULT_MODEL_FLAG: Partial<Record<AgentAdapter, string>> = { 'claude-code': '--model', codex: '-m', gemini: '-m' };
 
 function profileLabel(profile: AgentProfile, adapter: AgentAdapter): string {
   return localize(profile.label, currentLanguage()) ?? adapter;

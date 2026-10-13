@@ -51,14 +51,17 @@ export function authHeaderFor(provider: ApiProvider, key: string): { name: strin
   }
 }
 
-/** Custom API endpoints (settings.providers) plus their keys (secrets). */
 /** Vendor whose API lists the models of an agent's default credentials, and aliases the CLI accepts without a listing. */
 const VENDORS: Partial<Record<AgentAdapter, 'anthropic' | 'openai' | 'gemini'>> = { 'claude-code': 'anthropic', codex: 'openai', gemini: 'gemini' };
 const BUILTIN_MODELS: Record<string, string[]> = { anthropic: ['opus', 'sonnet', 'haiku', 'claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'], openai: [], gemini: [] };
 const CATALOG_TTL_MS = 5 * 60_000;
+/** A failed listing is remembered briefly so an invalid key or an outage doesn't cost a timeout per request. */
+const CATALOG_FAIL_TTL_MS = 30_000;
 
+/** Custom API endpoints (settings.providers) plus their keys (secrets). */
 export class ProviderService {
-  private readonly catalog = new Map<string, { at: number; models: string[] }>();
+  /** Listings per vendor, valid for the key they were fetched with. */
+  private readonly catalog = new Map<string, { at: number; key: string; result: MethodResult<'models.list'>; ttl: number }>();
 
   constructor(
     private readonly settings: SettingsService,
@@ -91,7 +94,8 @@ export class ProviderService {
     const key = apiKey ?? oauth;
     if (!key) return fallback;
     const cached = this.catalog.get(vendor);
-    if (cached && Date.now() - cached.at < CATALOG_TTL_MS) return { models: cached.models, source: 'api' };
+    if (cached && cached.key === key && Date.now() - cached.at < cached.ttl) return cached.result;
+    const remember = (result: MethodResult<'models.list'>, ttl: number) => (this.catalog.set(vendor, { at: Date.now(), key, result, ttl }), result);
     const [url, headers]: [string, Record<string, string>] =
       vendor === 'anthropic'
         ? [
@@ -105,14 +109,13 @@ export class ProviderService {
           : ['https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { 'x-goog-api-key': key }];
     try {
       const res = await fetch(url, { headers: { accept: 'application/json', ...headers }, signal: AbortSignal.timeout(TEST_TIMEOUT_MS) });
-      if (!res.ok) return fallback;
+      if (!res.ok) return remember(fallback, CATALOG_FAIL_TTL_MS);
       const listed = parseModels(await res.text()).map((id) => id.replace(/^models\//, ''));
       const ids = vendor === 'openai' ? listed.filter((id) => /^(gpt-|o\d|codex)/.test(id) && !/(audio|realtime|transcribe|tts|image|embedding|moderation|search)/.test(id)) : vendor === 'gemini' ? listed.filter((id) => id.startsWith('gemini-')) : listed;
       const models = Array.from(new Set([...builtin, ...ids.sort()]));
-      this.catalog.set(vendor, { at: Date.now(), models });
-      return { models, source: 'api' };
+      return remember({ models, source: 'api' }, CATALOG_TTL_MS);
     } catch {
-      return fallback;
+      return remember(fallback, CATALOG_FAIL_TTL_MS);
     }
   }
 

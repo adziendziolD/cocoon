@@ -32,7 +32,9 @@ export function ModelSelect({
 }) {
   const t = useT();
   const list = Array.from(new Set(models.filter(Boolean)));
-  const [manual, setManual] = useState(() => !!value && !list.includes(value));
+  // A value outside the list (typed while it was loading, or an older choice) keeps the text field.
+  const [manualChoice, setManual] = useState(false);
+  const manual = manualChoice || (!!value && !list.includes(value));
   const invalidCls = invalid ? 'border-red-500 focus:border-red-500 focus:ring-red-500/25' : undefined;
 
   if (list.length === 0 || manual) {

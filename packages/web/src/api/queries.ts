@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import type { AgentAdapter } from '@cocoon/protocol';
 import { qk } from './keys';
 import { isNotFound, rpc } from './rpc';
 
@@ -33,12 +34,12 @@ export const useUpdateStatus = () =>
 
 export const useSettings = () => useQuery({ queryKey: qk.settings, queryFn: () => rpc('settings.get') });
 export const useSecrets = () => useQuery({ queryKey: qk.secrets, queryFn: () => rpc('secrets.list') });
-/** Models an agent type offers with its default credentials (vendor listing); empty while loading or if unknown. */
-export const useDefaultModels = (kind: string | undefined, enabled = true) =>
+/** Models an agent CLI offers with its default credentials (vendor listing); empty while loading or if unknown. */
+export const useDefaultModels = (adapter: AgentAdapter | undefined, enabled = true) =>
   useQuery({
-    queryKey: qk.defaultModels(kind ?? ''),
-    queryFn: () => rpc('models.list', { kind: kind! }),
-    enabled: enabled && !!kind,
+    queryKey: qk.defaultModels(adapter ?? ''),
+    queryFn: () => rpc('models.list', { adapter: adapter! }),
+    enabled: enabled && !!adapter,
     staleTime: 5 * 60_000,
     retry: false,
   });

@@ -368,11 +368,6 @@ function ProfileForm({
   const [advanced, setAdvanced] = useState(() => !!d.contextWindow || !!d.maxOutputTokens);
   const providerEntries = Object.entries(providers);
   const selectedProviders = d.providers.map((pid) => providers[pid]).filter((p): p is ApiProvider => !!p);
-  const vendorModels = useDefaultModels(id, selectedProviders.length === 0);
-  const modelSuggestions = Array.from(
-    new Set(selectedProviders.length ? selectedProviders.flatMap((p) => [...(p.defaultModel ? [p.defaultModel] : []), ...p.models]) : (vendorModels.data?.models ?? [])),
-  );
-  const defaultModel = selectedProviders.find((p) => p.defaultModel)?.defaultModel;
   const missingProviders = d.providers.filter((pid) => !providers[pid]);
   const parsed = splitCommand(d.commandText);
   const images = useImages();
@@ -381,6 +376,11 @@ function ProfileForm({
   const derivedAdapter = profileAdapter({ tool: d.tool || undefined, command: parsed.length ? parsed : [''] });
   const adapter = d.adapter || derivedAdapter;
   const adapterInfo = ADAPTERS[adapter];
+  const vendorModels = useDefaultModels(adapter, selectedProviders.length === 0);
+  const modelSuggestions = Array.from(
+    new Set(selectedProviders.length ? selectedProviders.flatMap((p) => [...(p.defaultModel ? [p.defaultModel] : []), ...p.models]) : (vendorModels.data?.models ?? [])),
+  );
+  const defaultModel = selectedProviders.find((p) => p.defaultModel)?.defaultModel;
   const adapterName = (a: AgentAdapter) => (a === 'generic' ? t('profiles.adapter.generic') : toolLabel(a));
   const missingTool = tool && toolState({ tool, command: parsed.length ? parsed : [''] }, images.data) === 'missing';
   const compatFor = (p: ApiProvider): Compat | undefined => (isModelProvider(p) ? providerCompat(adapter, p) : undefined);
@@ -554,7 +554,6 @@ function ProfileForm({
           )}
           <Field label={t('profiles.model')} optional hint={defaultModel ? t('profiles.modelHintDefault', { model: defaultModel }) : t('profiles.modelHint')}>
             <ModelSelect
-              key={modelSuggestions.join(',')}
               value={d.model}
               onChange={(model) => onChange({ model })}
               models={modelSuggestions}

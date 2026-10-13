@@ -15,6 +15,7 @@ import {
   Sandbox,
   SandboxPort,
   PortMode,
+  AgentAdapter,
   AgentTool,
   ApiProvider,
   ApiStyle,
@@ -260,7 +261,7 @@ export const methods = {
   'models.list': {
     description:
       "Models an agent type offers with its default credentials (Anthropic/OpenAI/Gemini key): listed from the vendor's API, plus built-in aliases. Empty if nothing is known.",
-    params: z.object({ kind: z.string() }),
+    params: z.object({ adapter: AgentAdapter }),
     result: z.object({ models: z.array(z.string()).default([]), source: z.enum(['api', 'builtin', 'none']).default('none') }),
   },
   'notifications.test': {

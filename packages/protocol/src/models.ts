@@ -156,6 +156,9 @@ export type ApiStyle = z.infer<typeof ApiStyle>;
 export const AgentAdapter = z.enum(['claude-code', 'codex', 'opencode', 'pi', 'qwen-code', 'gemini', 'generic']);
 export type AgentAdapter = z.infer<typeof AgentAdapter>;
 
+/** CLI flag selecting the model for agents running on their own credentials (no custom provider). */
+export const DEFAULT_MODEL_FLAG: Partial<Record<AgentAdapter, string>> = { 'claude-code': '--model', codex: '-m', gemini: '-m' };
+
 export const ADAPTERS: Record<AgentAdapter, { native: ApiStyle[]; translated: ApiStyle[]; customProviders: boolean }> = {
   'claude-code': { native: ['messages'], translated: ['chat'], customProviders: true },
   codex: { native: ['responses'], translated: ['chat'], customProviders: true },

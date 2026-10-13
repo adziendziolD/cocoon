@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ADAPTERS, profileAdapter, profileTool, type AgentProfile, type ImageInfo, type SecretInfo, type Settings } from '@cocoon/protocol';
+import { ADAPTERS, DEFAULT_MODEL_FLAG, profileAdapter, profileTool, type AgentProfile, type ImageInfo, type SecretInfo, type Settings } from '@cocoon/protocol';
 import { ChevronDown, ChevronRight, Gauge, Plug } from 'lucide-react';
 import { useDefaultModels, useImages, useSecrets, useSettings } from '../api/queries';
 import { rich, useLanguage, useT, type TFunction } from '../i18n';
@@ -137,7 +137,7 @@ export function AgentLaunchFields({
   const all = settings.data?.providers ?? {};
   const profiles = Object.entries(settings.data?.agents ?? {});
   const { profile, check, compat } = info;
-  const defaultModels = useDefaultModels(choice.kind, !!profile && !info.isShell && !info.needsModel);
+  const defaultModels = useDefaultModels(profile ? profileAdapter(profile) : undefined, !!profile && !info.isShell && !info.needsModel);
   const providerEntries = Object.entries(all);
 
   const set = (patch: Partial<LaunchChoice>) => onChange({ ...choice, ...patch });
@@ -191,12 +191,11 @@ export function AgentLaunchFields({
           ) : (
             <Field label={t('spawn.modelField')} optional hint={t('spawn.modelHint')}>
               <ModelSelect
-                key={(defaultModels.data?.models ?? []).join(',')}
                 value={choice.model}
                 onChange={(model) => set({ model })}
                 models={defaultModels.data?.models ?? []}
                 allowEmpty
-                emptyLabel={profile.model ? t('compat.model.agentDefault', { model: profile.model }) : t('compat.model.default')}
+                emptyLabel={profile.model && DEFAULT_MODEL_FLAG[profileAdapter(profile)] ? t('compat.model.agentDefault', { model: profile.model }) : t('compat.model.default')}
                 placeholder={profile.model || ''}
               />
             </Field>

@@ -299,6 +299,26 @@ describe('ProviderService.defaultModels', () => {
     expect((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].headers).toMatchObject({ authorization: 'Bearer sk-ant-oat', 'anthropic-beta': 'oauth-2025-04-20' });
   });
 
+  it('caches per key and remembers failures briefly', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: [{ id: 'claude-a' }] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const keys = { ANTHROPIC_API_KEY: 'one' };
+    const svc = service(keys);
+    await svc.defaultModels('claude-code');
+    await svc.defaultModels('claude-code');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    keys.ANTHROPIC_API_KEY = 'two';
+    await svc.defaultModels('claude-code');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const failing = vi.fn(async () => new Response('no', { status: 401 }));
+    vi.stubGlobal('fetch', failing);
+    const bad = service({ ANTHROPIC_API_KEY: 'bad' });
+    await bad.defaultModels('claude-code');
+    await bad.defaultModels('claude-code');
+    expect(failing).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps only chat models of OpenAI and falls back on errors', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [{ id: 'gpt-5' }, { id: 'text-embedding-3' }, { id: 'o3' }, { id: 'gpt-4o-audio' }] }), { status: 200 })));
     expect((await service({ OPENAI_API_KEY: 'k' }).defaultModels('codex')).models).toEqual(['gpt-5', 'o3']);

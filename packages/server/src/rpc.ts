@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isMethodName, methods, profileAdapter, type MethodName, type MethodResult, type Methods, type SetupStep } from '@cocoon/protocol';
+import { isMethodName, methods, type MethodName, type MethodResult, type Methods, type SetupStep } from '@cocoon/protocol';
 import type { ActivityLog } from './activity.ts';
 import type { AgentManager } from './agents/manager.ts';
 import type { EgressManager } from './egress.ts';
@@ -150,7 +150,7 @@ export function createRpc(ctx: RpcContext) {
     },
     'tokens.revoke': async (p) => (tokens.revoke(p.id), ok),
     'providers.test': (p) => ('id' in p ? providers.testAndRemember(p.id) : providers.test(p.provider)),
-    'models.list': async (p) => providers.defaultModels(profileAdapter(agents.profile(p.kind))),
+    'models.list': async (p) => providers.defaultModels(p.adapter),
     'egress.denied': async () => egress.denied(),
     'notifications.test': (p) => notifier.test(p.webhookUrl),
 
