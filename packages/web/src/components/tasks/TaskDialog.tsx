@@ -163,7 +163,7 @@ export function TaskDialog({
     const q = depFilter.trim().toLowerCase();
     return (tasks.data ?? [])
       .filter((x) => x.workspaceId === d.workspaceId && x.id !== task?.id && !(task && x.dependsOn.includes(task.id)))
-      .filter((x) => !q || x.title.toLowerCase().includes(q) || d.dependsOn.includes(x.id))
+      .filter((x) => !q || x.title.toLowerCase().includes(q) || x.handle?.toLowerCase().includes(q) || d.dependsOn.includes(x.id))
       .sort((a, b) => Number(a.status === 'done') - Number(b.status === 'done') || sortByOrder(a, b));
   }, [tasks.data, d, task, depFilter]);
 

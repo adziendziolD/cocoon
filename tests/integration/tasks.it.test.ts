@@ -38,7 +38,9 @@ describe.runIf(available)('task sandboxes', () => {
     const done = await rpc('task.approve', { taskId: task.id });
     expect(done.status).toBe('done');
     expect(done.sandboxId).toBeUndefined();
-    expect(done.note).toMatch(/cocoon\/add-notes-file-/);
+    // Pushed to the task branch, e.g. TS-1-add-notes-file.
+    expect(review.branch).toMatch(/^[A-Z][A-Z0-9]+-\d+-add-notes-file$/);
+    expect(done.note).toContain(review.branch);
     await expect(rpc('sandbox.get', { sandboxId: review.sandboxId })).rejects.toThrow();
   });
 
