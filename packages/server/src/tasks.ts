@@ -1,15 +1,16 @@
-import { localize, type Agent, type Language, type MethodParams, type Task, type TaskStatus, type WorkflowStage, type Workspace } from '@cocoon/protocol';
+import { DEFAULT_REVIEW_PROMPT, localize, type Agent, type Language, type MethodParams, type ReviewResult, type Task, type TaskStatus, type WorkflowStage, type Workspace } from '@cocoon/protocol';
 import type { AgentManager } from './agents/manager.ts';
 import { CocoonError, notFound } from './errors.ts';
 import type { EventBus } from './events.ts';
 import { currentLanguage, isMessageKey, t, type MessageKey } from './i18n.ts';
 import { newId } from './ids.ts';
 import type { Notifier } from './notifications.ts';
+import type { SecretsService } from './secrets.ts';
 import { reposOf, type SandboxManager } from './sandbox/manager.ts';
 import type { WorkspaceService as FilesService } from './sandbox/workspace.ts';
 import type { SettingsService } from './settings.ts';
 import type { Store } from './store.ts';
-import { applyPatch, type WorkspaceService } from './workspaces.ts';
+import { applyPatch, withHandle, type WorkspaceService } from './workspaces.ts';
 
 const SCHEDULE_INTERVAL_MS = 5000;
 const PREVIOUS_OUTPUT_LINES = 80;
@@ -36,6 +37,7 @@ export class TaskService {
     private readonly agents: AgentManager,
     private readonly notifier: Notifier,
     private readonly log: (msg: string, err?: unknown) => void,
+    private readonly secrets?: SecretsService,
   ) {
     bus.subscribe((event) => {
       if (event.type === 'agent.updated') void this.onAgentUpdated(event.agent);
@@ -79,6 +81,7 @@ export class TaskService {
     const task: Task = {
       id: newId('ts'),
       workspaceId: workspace.id,
+      number: this.workspaces.allocateTaskNumber(workspace.id),
       title: params.title,
       description: params.description ?? '',
       status,
@@ -93,6 +96,8 @@ export class TaskService {
       stage: 0,
       runs: [],
       attention: false,
+      reviews: [],
+      pullRequests: [],
       createdAt: now,
       updatedAt: now,
     };
@@ -159,6 +164,11 @@ export class TaskService {
     if (task.stage < stages.length - 1) {
       task.stage += 1;
       this.launch(task);
+    } else if (this.reviewConfig(task) && task.reviewStep === undefined) {
+      // Code review first; pushing and the pull request follow when all review agents approve.
+      task.reviewStep = 0;
+      task.reviews = [];
+      this.launchReview(task);
     } else {
       // Fails (task stays in review) if the work cannot be pushed, e.g. without a GitHub token.
       const published = await this.publishOwnSandbox(task);
@@ -181,7 +191,7 @@ export class TaskService {
   private async publishOwnSandbox(task: Task): Promise<{ key: MessageKey; params: Record<string, string> } | undefined> {
     const sandbox = task.sandboxId ? this.store.sandbox(task.sandboxId) : undefined;
     if (!sandbox || sandbox.taskId !== task.id || !reposOf(sandbox).length) return undefined;
-    const branch = `cocoon/${slug(task.title)}-${task.id.slice(-4)}`;
+    const branch = task.branch ?? `cocoon/${slug(task.title)}-${task.id.slice(-4)}`;
     if (sandbox.status !== 'running') await this.sandboxes.start(sandbox.id);
     let pushed: string[];
     try {
@@ -197,10 +207,181 @@ export class TaskService {
       : { key: 'note.publishedNothing', params: {} };
   }
 
+  // ── code review ────────────────────────────────────────────────────────────
+
+  private reviewConfig(task: Task) {
+    const review = this.store.workspace(task.workspaceId)?.review;
+    return review?.enabled && review.agentKinds.length ? review : undefined;
+  }
+
+  /** Where review agent number `step` writes its verdict (outside the repositories, so it is never committed). */
+  private reviewFile(task: Task, step: number): string {
+    return `${SANDBOX_HOME}/.cocoon/review/${task.id}-${step}.json`;
+  }
+
+  /** Starts review agent number task.reviewStep in the task's sandbox. */
+  private launchReview(task: Task): void {
+    const review = this.reviewConfig(task);
+    const step = task.reviewStep ?? 0;
+    const kind = review?.agentKinds[step];
+    if (!review || !kind || !task.sandboxId) return void this.fail(task, 'note.reviewNoSandbox');
+    const last = step === review.agentKinds.length - 1;
+    task.status = 'running';
+    task.attention = false;
+    setNote(task, 'note.reviewing', { step: step + 1, total: review.agentKinds.length });
+    task.order = this.nextOrder(task.workspaceId, 'running');
+    this.save(task);
+
+    void (async () => {
+      try {
+        const sandboxId = task.sandboxId!;
+        const sandbox = this.store.sandbox(sandboxId);
+        if (sandbox?.status === 'stopped') await this.sandboxes.start(sandboxId);
+        const file = this.reviewFile(task, step);
+        const token = review.agentPushes && last ? this.secrets?.resolve('GITHUB_TOKEN') : undefined;
+        // Remove an old verdict; with a token, git authenticates through it (only the agent's environment has it).
+        await this.sandboxes.sh(
+          sandboxId,
+          `mkdir -p "$(dirname "$FILE")" && rm -f "$FILE" && git config --global credential.https://github.com.helper '!f() { test -n "$GITHUB_TOKEN" && echo username=x-access-token && echo "password=$GITHUB_TOKEN"; }; f'`,
+          { FILE: file },
+        );
+        const stage: WorkflowStage = {
+          name: { de: 'Code-Review', en: 'Code review' },
+          agentKind: kind,
+          prompt: `${review.prompt?.trim() || DEFAULT_REVIEW_PROMPT}\n\n${reviewResultInstructions(file, last && Boolean(token), task, review.baseBranch)}`,
+          approval: false,
+        };
+        const prompt = await this.renderPrompt(stage, task, sandboxId, task.agentId);
+        const agent = await this.agents.spawn({
+          sandboxId,
+          kind,
+          prompt,
+          ...(token ? { env: { GITHUB_TOKEN: token, GH_TOKEN: token } } : {}),
+        });
+        const current = this.store.task(task.id);
+        if (!current || current.status !== 'running' || current.reviewStep !== step) {
+          this.stopping.add(agent.id);
+          await this.agents.kill(agent.id).catch(() => undefined);
+          return;
+        }
+        current.agentId = agent.id;
+        current.runs.push({ stage: current.stage, stageName: localize(stage.name, currentLanguage()) ?? '', agentId: agent.id, startedAt: new Date().toISOString(), outcome: 'running' });
+        this.save(current);
+      } catch (err) {
+        const current = this.store.task(task.id);
+        if (current?.status === 'running') {
+          current.reviewStep = undefined;
+          this.fail(current, 'note.failed', { error: (err as Error).message });
+        }
+      }
+    })();
+  }
+
+  /** A review agent is done: read its verdict, continue with the next reviewer, or publish. */
+  private async finishReview(task: Task): Promise<void> {
+    const review = this.reviewConfig(task);
+    const step = task.reviewStep ?? 0;
+    const agentId = task.agentId ?? '';
+    const raw = task.sandboxId
+      ? await this.sandboxes.sh(task.sandboxId, 'cat "$FILE" 2>/dev/null || true', { FILE: this.reviewFile(task, step) }).catch(() => '')
+      : '';
+    const result = parseVerdict(raw, agentId, review?.agentKinds[step] ?? '');
+    const { pullRequest: _pr, ...stored } = result;
+    task.reviews = [...task.reviews.filter((r) => r.agentId !== agentId), stored];
+    if (result.verdict !== 'approved') {
+      // Back to the user: "Request changes" sends it to the working agent, "Approve" reviews again.
+      task.reviewStep = undefined;
+      task.stage = this.stages(task).length - 1;
+      task.status = 'review';
+      task.attention = false;
+      setNote(task, result.verdict === 'missing' ? 'note.reviewNoResult' : 'note.reviewChanges', { summary: result.summary ?? '' });
+      task.order = this.nextOrder(task.workspaceId, 'review');
+      this.save(task);
+      this.notifier.notify('task.review', 'notify.taskReview', { title: task.title }, `/tasks?task=${task.id}`);
+      return;
+    }
+    if (review && step < review.agentKinds.length - 1) {
+      task.reviewStep = step + 1;
+      this.launchReview(task);
+      return;
+    }
+    // All reviewers approved: push, open the pull request(s), clean up.
+    task.reviewStep = undefined;
+    try {
+      const published = await this.publishReviewed(task, result.pullRequest);
+      task.status = 'done';
+      task.attention = false;
+      setNote(task, published.key, published.params);
+      task.order = this.nextOrder(task.workspaceId, 'done');
+      this.save(task);
+      this.notifier.notify('task.done', 'notify.taskDone', { title: task.title }, `/tasks?task=${task.id}`);
+      void this.schedule();
+    } catch (err) {
+      task.stage = this.stages(task).length - 1;
+      task.status = 'review';
+      setNote(task, 'note.reviewPublishFailed', { error: (err as Error).message });
+      task.order = this.nextOrder(task.workspaceId, 'review');
+      this.save(task);
+    }
+  }
+
+  /** After an approved review: commit + push the task branch, open a pull request per pushed repository, remove an own sandbox. */
+  private async publishReviewed(task: Task, agentPullRequest?: string): Promise<{ key: MessageKey; params: Record<string, string> }> {
+    const sandbox = task.sandboxId ? this.store.sandbox(task.sandboxId) : undefined;
+    if (!sandbox || !task.branch) return { key: 'note.publishedNothing', params: {} };
+    const workspace = this.store.workspace(task.workspaceId);
+    const { pushed } = await this.files.publish(sandbox.id, `${task.handle ?? ''}: ${task.title}`.replace(/^: /, ''), task.branch);
+    const body = [
+      task.description,
+      ...task.reviews.map((r) => `**Review (${r.agentKind}):** ${r.summary ?? r.verdict}`),
+      '',
+      `_Created by CoCoon for task ${task.handle ?? task.id}._`,
+    ]
+      .filter((line, i) => line || i > 0)
+      .join('\n\n');
+    const prs: { repo: string; url: string }[] = [];
+    for (const repo of pushed) {
+      if (agentPullRequest && pushed.length === 1) {
+        prs.push({ repo, url: agentPullRequest });
+        continue;
+      }
+      const pr = await this.files.ensurePullRequest({
+        sandboxId: sandbox.id,
+        branch: task.branch,
+        title: `${task.handle ? `${task.handle}: ` : ''}${task.title}`,
+        body,
+        base: workspace?.review?.baseBranch,
+        repo,
+      });
+      if (pr) prs.push({ repo, url: pr.url });
+    }
+    task.pullRequests = prs;
+    const own = sandbox.taskId === task.id;
+    if (own) {
+      this.stopAgent(task);
+      await this.sandboxes.delete(sandbox.id);
+      delete task.sandboxId;
+    }
+    if (!pushed.length) return { key: own ? 'note.publishedNothing' : 'note.reviewApprovedNothing', params: {} };
+    if (!prs.length) return { key: own ? 'note.published' : 'note.reviewPushed', params: { branch: task.branch, repos: pushed.map((p) => p || '.').join(', ') } };
+    return {
+      key: own ? 'note.prOpenedRemoved' : 'note.prOpened',
+      params: { branch: task.branch, urls: prs.map((p) => p.url).join(', ') },
+    };
+  }
+
   async reject(taskId: string, feedback: string): Promise<Task> {
     const task = this.record(taskId);
     if (task.status !== 'review' && task.status !== 'running') {
       throw new CocoonError('conflict', t('error.taskNotInReview', { title: task.title }));
+    }
+    if (task.reviewStep !== undefined) {
+      // Feedback during the code review goes to the working agent, not the reviewer.
+      if (task.status === 'running') this.stopAgent(task);
+      task.reviewStep = undefined;
+      task.stage = this.stages(task).length - 1;
+      this.launch(task, feedback);
+      return localizeTask(task, currentLanguage());
     }
     const agent = task.agentId ? this.store.agent(task.agentId) : undefined;
     if (agent && agent.status !== 'exited') {
@@ -224,6 +405,7 @@ export class TaskService {
   stop(taskId: string): Task {
     const task = this.record(taskId);
     if (task.status === 'running') this.stopAgent(task);
+    task.reviewStep = undefined;
     task.status = 'backlog';
     task.stage = 0;
     task.attention = false;
@@ -299,6 +481,7 @@ export class TaskService {
       run.outcome = 'finished';
       run.finishedAt = new Date().toISOString();
     }
+    if (task.reviewStep !== undefined) return void this.finishReview(task);
     const stages = this.stages(task);
     const stage = stages[task.stage];
     const last = task.stage >= stages.length - 1;
@@ -323,6 +506,7 @@ export class TaskService {
     }
     task.status = 'failed';
     task.attention = false;
+    task.reviewStep = undefined;
     setNote(task, key, params);
     task.order = this.nextOrder(task.workspaceId, 'failed');
     this.save(task);
@@ -406,7 +590,10 @@ export class TaskService {
       this.workspaces.update({ workspaceId: workspace.id, sharedSandboxId: created });
       return this.assignSandbox(task, created);
     }
-    return this.assignSandbox(task, await this.createSandbox(workspace, slug(task.title), task.id));
+    const created = await this.createSandbox(workspace, slug(task.title), task.id);
+    // A sandbox for this task alone works on the task branch from the start.
+    if (task.branch) await this.files.checkoutBranch(created, task.branch).catch((err) => this.log(`checking out ${task.branch} failed`, err));
+    return this.assignSandbox(task, created);
   }
 
   private async createSandbox(workspace: Workspace, baseName: string, taskId?: string): Promise<string> {
@@ -444,6 +631,8 @@ export class TaskService {
       'previous.output': previous.trim(),
       'diff': diff,
       'feedback': feedback ? `\n\nReview feedback:\n${feedback}` : '',
+      'task.key': task.handle ?? task.title,
+      'task.branch': task.branch ?? '',
     };
     let prompt = stage.prompt.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (match, name: string) => values[name] ?? match);
     // Feedback must reach the agent even if the template has no {{feedback}} placeholder.
@@ -528,6 +717,9 @@ export class TaskService {
   }
 
   private save(task: Task): void {
+    const named = withHandle(task, this.store.workspace(task.workspaceId)?.key);
+    task.handle = named.handle;
+    task.branch = named.branch;
     task.updatedAt = new Date().toISOString();
     this.store.putTask(task);
     this.bus.publish({ type: 'task.updated', task: { ...task, runs: [...task.runs] } });
@@ -562,4 +754,40 @@ function clearNote(task: Task): void {
 export function localizeTask(task: Task, lang: Language): Task {
   const note = task.noteKey && isMessageKey(task.noteKey) ? t(task.noteKey, task.noteParams, lang) : task.note;
   return { ...task, runs: [...task.runs], note };
+}
+
+const SANDBOX_HOME = '/home/agent';
+
+/** What a review agent has to do at the end: the verdict file, and pushing + the pull request when it may. */
+function reviewResultInstructions(file: string, publish: boolean, task: Task, baseBranch: string | undefined): string {
+  const base = baseBranch || "the repository's default branch";
+  const lines = [
+    'When you are done, write your result as JSON to ' + file + ' (create the folder if needed):',
+    '{"verdict": "approved" or "changes_requested", "summary": "a few sentences: what you checked, what you fixed, what still needs to change"}',
+    'Use "changes_requested" if anything important is still wrong that you did not fix yourself.',
+  ];
+  if (publish) {
+    lines.push(
+      `If your verdict is "approved": commit all changes, push them with \`git push origin HEAD:${task.branch}\` and open a pull request from ${task.branch} into ${base}. ` +
+        'Use the GitHub API with the token in $GITHUB_TOKEN (or `gh` if it is installed). Title: "' + `${task.handle ?? ''}: ${task.title}`.replace(/^: /, '') + '". ' +
+        'Add the URL of the pull request to the JSON as "pullRequest". With several repositories, do it for each one that changed.',
+    );
+  } else {
+    lines.push('Do not push and do not open a pull request – CoCoon does that after the review.');
+  }
+  return lines.join('\n');
+}
+
+/** Verdict JSON of a review agent; anything unreadable counts as "missing". */
+export function parseVerdict(raw: string, agentId: string, agentKind: string): ReviewResult & { pullRequest?: string } {
+  const at = new Date().toISOString();
+  try {
+    const json = JSON.parse(raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, '')) as { verdict?: unknown; summary?: unknown; pullRequest?: unknown };
+    const verdict = json.verdict === 'approved' || json.verdict === 'changes_requested' ? json.verdict : 'missing';
+    const summary = typeof json.summary === 'string' ? json.summary.slice(0, 4000) : undefined;
+    const pullRequest = typeof json.pullRequest === 'string' && /^https:\/\//.test(json.pullRequest) ? json.pullRequest : undefined;
+    return { agentId, agentKind, verdict, summary, at, ...(pullRequest ? { pullRequest } : {}) };
+  } catch {
+    return { agentId, agentKind, verdict: 'missing', at };
+  }
 }

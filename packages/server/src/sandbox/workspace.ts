@@ -252,6 +252,40 @@ export class WorkspaceService {
     return { url: String(pr.html_url), number: Number(pr.number) };
   }
 
+  /** Switches every repository of the sandbox to a new branch (keeps the work; used for task sandboxes). */
+  async checkoutBranch(sandboxId: string, branch: string): Promise<void> {
+    const record = this.sandboxes.record(sandboxId);
+    const paths = reposOf(record).map((r) => r.path);
+    for (const path of paths.length ? paths : ['']) {
+      const { dir } = this.repo(sandboxId, path);
+      await this.git(sandboxId, dir, 'git checkout -q -B "$BRANCH"', { BRANCH: branch });
+    }
+  }
+
+  /**
+   * Opens a pull request, or returns the open one for the branch if it already exists (e.g. opened by a review agent).
+   * Repositories outside GitHub get no pull request (undefined) – the pushed branch is all there is.
+   */
+  async ensurePullRequest(params: MethodParams<'git.create_pr'>): Promise<MethodResult<'git.create_pr'> | undefined> {
+    const { remoteUrl } = await this.gitStatus(params.sandboxId, params.repo);
+    if (!remoteUrl || !parseGithubRepo(remoteUrl)) return undefined;
+    try {
+      return await this.createPullRequest(params);
+    } catch (err) {
+      if (!/already exists/i.test((err as Error).message)) throw err;
+      const { remoteUrl } = await this.gitStatus(params.sandboxId, params.repo);
+      const repo = remoteUrl && parseGithubRepo(remoteUrl);
+      const token = this.secrets.resolve('GITHUB_TOKEN');
+      if (!repo || !token) throw err;
+      const res = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.repo}/pulls?state=open&head=${repo.owner}:${encodeURIComponent(params.branch)}`, {
+        headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json' },
+      });
+      const [pr] = (await res.json().catch(() => [])) as { html_url?: string; number?: number }[];
+      if (!pr?.html_url) throw err;
+      return { url: pr.html_url, number: Number(pr.number) };
+    }
+  }
+
   /**
    * Commits all changes of every repository and pushes the ones with new commits to `branch`.
    * Throws (and pushes nothing further) if a repository with work in it cannot be pushed, so no work gets lost.

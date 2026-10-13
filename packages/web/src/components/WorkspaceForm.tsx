@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { MethodParams, NetworkMode, Workspace } from '@cocoon/protocol';
+import { DEFAULT_REVIEW_PROMPT, WORKSPACE_KEY, type MethodParams, type NetworkMode, type Workspace } from '@cocoon/protocol';
 import { Boxes, Check, Layers, Workflow as WorkflowIcon, Bot, Square } from 'lucide-react';
 import { qk } from '../api/keys';
 import { useSettings } from '../api/queries';
@@ -14,12 +14,16 @@ import { workflowLabel } from '../lib/tasks';
 import { setWorkspaceScope, WORKSPACE_COLORS } from '../lib/workspace';
 import { Button } from './Button';
 import { Dialog } from './Dialog';
-import { ChoiceCard, Field, Input, Select, Textarea, Toggle } from './Field';
+import { Checkbox, ChoiceCard, Field, Input, Select, Textarea, Toggle } from './Field';
+import { Callout } from './HelpText';
 import { RepoRowsEditor } from './RepoRowsEditor';
 import { NetworkModeCards } from './SandboxOptions';
 
 export interface WorkspaceDraft {
   name: string;
+  /** '' = derived from the name by the server. */
+  key: string;
+  review: { enabled: boolean; agentKinds: string[]; prompt: string; agentPushes: boolean; baseBranch: string };
   description: string;
   color: string;
   /** Repositories for the workspace's sandboxes (the older single `repo` shows up as the first row). */
@@ -37,6 +41,14 @@ export interface WorkspaceDraft {
 export function toWorkspaceDraft(w?: Workspace, index = 0): WorkspaceDraft {
   return {
     name: w?.name ?? '',
+    key: w?.key ?? '',
+    review: {
+      enabled: w?.review?.enabled ?? false,
+      agentKinds: w?.review?.agentKinds ?? ['claude-code'],
+      prompt: w?.review?.prompt ?? '',
+      agentPushes: w?.review?.agentPushes ?? false,
+      baseBranch: w?.review?.baseBranch ?? '',
+    },
     description: w?.description ?? '',
     color: w?.color ?? WORKSPACE_COLORS[index % WORKSPACE_COLORS.length]!,
     repos: repoRowsFrom(w?.repos, w?.repo),
@@ -55,6 +67,14 @@ export function workspaceParams(d: WorkspaceDraft): MethodParams<'workspace.crea
   const repos = reposFromRows(d.repos);
   return {
     name: d.name.trim(),
+    key: d.key.trim() || undefined,
+    review: {
+      enabled: d.review.enabled,
+      agentKinds: d.review.agentKinds.length ? d.review.agentKinds : ['claude-code'],
+      prompt: d.review.prompt.trim() || undefined,
+      agentPushes: d.review.agentPushes,
+      baseBranch: d.review.baseBranch.trim() || undefined,
+    },
     description: d.description.trim(),
     color: d.color,
     // Always saved as `repos` (null = none); the older single `repo` field is cleared.
@@ -70,8 +90,10 @@ export function workspaceParams(d: WorkspaceDraft): MethodParams<'workspace.crea
   };
 }
 
-export function validateWorkspace(t: TFunction, d: WorkspaceDraft): Partial<Record<'name' | 'repo' | 'workflow' | 'maxParallel', string>> {
-  const e: Partial<Record<'name' | 'repo' | 'workflow' | 'maxParallel', string>> = {};
+export function validateWorkspace(t: TFunction, d: WorkspaceDraft): Partial<Record<'name' | 'key' | 'repo' | 'workflow' | 'maxParallel' | 'review', string>> {
+  const e: Partial<Record<'name' | 'key' | 'repo' | 'workflow' | 'maxParallel' | 'review', string>> = {};
+  if (d.key && !WORKSPACE_KEY.test(d.key)) e.key = t('workspaceForm.err.key');
+  if (d.review.enabled && !d.review.agentKinds.length) e.review = t('workspaceForm.err.reviewAgents');
   if (!d.name.trim()) e.name = t('workspaceForm.err.name');
   else if (d.name.trim().length > 80) e.name = t('workspaceForm.err.nameLong');
   const repoErrors = validateRepoRows(t, d.repos);
@@ -118,9 +140,17 @@ export function WorkspaceForm({ value: d, onChange, showErrors = true }: { value
   return (
     <div className="space-y-6">
       <section className="space-y-4">
-        <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
+        <div className="grid gap-4 sm:grid-cols-[1fr_8rem_auto]">
           <Field label={t('workspaceForm.name')} error={errors.name} hint={t('workspaceForm.nameHint')}>
             <Input value={d.name} onChange={(e) => onChange({ name: e.target.value })} placeholder={t('workspaceForm.namePlaceholder')} maxLength={80} />
+          </Field>
+          <Field label={t('workspaceForm.key')} optional error={showErrors ? errors.key : undefined} hint={t('workspaceForm.keyHint', { example: `${d.key || 'FD'}-12` })}>
+            <Input
+              value={d.key}
+              onChange={(e) => onChange({ key: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) })}
+              placeholder={t('workspaceForm.keyAuto')}
+              className="font-mono"
+            />
           </Field>
           <Field label={t('workspaceForm.color')}>
             <ColorPicker value={d.color} onChange={(color) => onChange({ color })} />
@@ -205,6 +235,8 @@ export function WorkspaceForm({ value: d, onChange, showErrors = true }: { value
         </div>
       </section>
 
+      <ReviewSection value={d} onChange={onChange} error={showErrors ? errors.review : undefined} />
+
       <section className="space-y-3">
         <SectionLabel title={t('workspaceForm.automation')} />
         <Toggle checked={d.autoRun} onChange={(autoRun) => onChange({ autoRun })} label={t('workspaceForm.autoRun')} description={t('workspaceForm.autoRunHint')} />
@@ -213,6 +245,47 @@ export function WorkspaceForm({ value: d, onChange, showErrors = true }: { value
         </Field>
       </section>
     </div>
+  );
+}
+
+/** Code review when approving: review agents in the same sandbox, then push + pull request. */
+function ReviewSection({ value: d, onChange, error }: { value: WorkspaceDraft; onChange: (patch: Partial<WorkspaceDraft>) => void; error?: string }) {
+  const t = useT();
+  const { lang } = useLanguage();
+  const settings = useSettings();
+  const agents = Object.entries(settings.data?.agents ?? {}).filter(([k]) => k !== 'shell');
+  const r = d.review;
+  const set = (patch: Partial<WorkspaceDraft['review']>) => onChange({ review: { ...r, ...patch } });
+  const toggleAgent = (kind: string, on: boolean) => set({ agentKinds: on ? [...r.agentKinds.filter((k) => k !== kind), kind] : r.agentKinds.filter((k) => k !== kind) });
+  return (
+    <section className="space-y-3">
+      <SectionLabel title={t('workspaceForm.review')} text={t('workspaceForm.reviewHint')} />
+      <Toggle checked={r.enabled} onChange={(enabled) => set({ enabled })} label={t('workspaceForm.reviewEnabled')} description={t('workspaceForm.reviewEnabledHint')} />
+      {r.enabled && (
+        <div className="space-y-4 rounded-xl border border-line p-4">
+          <Field label={t('workspaceForm.reviewAgents')} hint={t('workspaceForm.reviewAgentsHint')} error={error}>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {agents.map(([kind, profile]) => (
+                <Checkbox
+                  key={kind}
+                  checked={r.agentKinds.includes(kind)}
+                  onChange={(on) => toggleAgent(kind, on)}
+                  label={`${r.agentKinds.includes(kind) ? `${r.agentKinds.indexOf(kind) + 1}. ` : ''}${profileLabel(kind, profile, lang)}`}
+                />
+              ))}
+            </div>
+          </Field>
+          <Toggle checked={r.agentPushes} onChange={(agentPushes) => set({ agentPushes })} label={t('workspaceForm.reviewPushes')} description={t('workspaceForm.reviewPushesHint')} />
+          {r.agentPushes && <Callout tone="warning">{t('workspaceForm.reviewTokenWarning')}</Callout>}
+          <Field label={t('workspaceForm.reviewBase')} optional hint={t('workspaceForm.reviewBaseHint')} className="max-w-xs">
+            <Input value={r.baseBranch} onChange={(e) => set({ baseBranch: e.target.value })} placeholder="main" className="font-mono" />
+          </Field>
+          <Field label={t('workspaceForm.reviewPrompt')} optional hint={t('workspaceForm.reviewPromptHint')}>
+            <Textarea value={r.prompt} rows={5} onChange={(e) => set({ prompt: e.target.value })} placeholder={DEFAULT_REVIEW_PROMPT} className="font-mono text-xs" />
+          </Field>
+        </div>
+      )}
+    </section>
   );
 }
 
