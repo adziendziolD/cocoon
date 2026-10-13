@@ -288,11 +288,11 @@ function TaskDetail({ task, allTasks, onClose }: { task: Task; allTasks: Task[];
                 </dd>
               </>
             )}
-            {task.pullRequests.length > 0 && (
+            {(task.pullRequests ?? []).length > 0 && (
               <>
                 <dt className="text-fg-muted">{t('taskDrawer.pullRequests')}</dt>
                 <dd className="space-y-1">
-                  {task.pullRequests.map((pr) => (
+                  {(task.pullRequests ?? []).map((pr) => (
                     <a key={pr.url} href={pr.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-accent hover:underline">
                       <GitPullRequest className="size-3.5" />
                       <span className="truncate">{pr.repo ? `${pr.repo}: ` : ''}{pr.url.replace(/^https:\/\/github\.com\//, '')}</span>
@@ -301,12 +301,12 @@ function TaskDetail({ task, allTasks, onClose }: { task: Task; allTasks: Task[];
                 </dd>
               </>
             )}
-            {(task.reviews.length > 0 || task.reviewStep !== undefined) && (
+            {((task.reviews ?? []).length > 0 || task.reviewStep !== undefined) && (
               <>
                 <dt className="text-fg-muted">{t('taskDrawer.reviews')}</dt>
                 <dd className="space-y-2">
                   {task.reviewStep !== undefined && <p className="text-xs text-fg-muted">{t('taskDrawer.reviewRunning')}</p>}
-                  {task.reviews.map((r) => (
+                  {(task.reviews ?? []).map((r) => (
                     <div key={r.agentId} className="text-xs">
                       <span className="flex items-center gap-1.5">
                         <Badge tone={r.verdict === 'approved' ? 'green' : r.verdict === 'changes_requested' ? 'amber' : 'gray'}>{t(`taskDrawer.verdict.${r.verdict}`)}</Badge>

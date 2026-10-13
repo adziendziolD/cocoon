@@ -388,8 +388,14 @@ in the same sandbox** instead of pushing right away. Each reviews the full diff,
   configured base branch or the repository default; repositories outside GitHub are only pushed). A sandbox that belonged to
   the task alone is removed. The drawer shows the reviews and the pull request links.
 - *Review agent may push and open the pull request itself* gives the **last** review agent the GitHub token (`GITHUB_TOKEN` /
-  `GH_TOKEN` plus a git credential helper) – off by default; otherwise the token never enters the sandbox. Use a fine-grained
-  token limited to the repositories.
+  `GH_TOKEN`) – off by default; all other review agents get the token removed. If no token is stored, the task goes back to
+  *Review* with a clear note instead of starting the agent. Use a fine-grained token limited to the repositories.
+- Reviewers commit their own fixes (`Review fixes: …`); their verdict file lives in `<workspace>/.cocoon/`, which is excluded
+  from every repository.
+
+**GitHub access for agents.** Agent types that list `GITHUB_TOKEN` in their secrets (Claude Code, Codex and OpenCode by
+default) get the stored token in their environment, and CoCoon sets up a git credential helper for github.com, so plain
+`git push` works for them. Remove `GITHUB_TOKEN` from an agent type (*Settings → Agent types*) to keep it away from that agent.
 
 **Workflows** (*Settings → Workflows*) chain stages, each a fresh agent in the task's sandbox. Prompt templates may use
 `{{task}}`, `{{task.title}}`, `{{task.description}}`, `{{previous.output}}` (last screen of the previous stage),

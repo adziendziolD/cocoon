@@ -2,6 +2,7 @@ import { ADAPTERS, AGENT_TOOLS, defaultMaxOutput, localize, profileAdapter, prof
 import { currentLanguage } from '../i18n.ts';
 import type { ServiceManager } from '../services/manager.ts';
 import { PROXIED_SECRETS, placeholderFor, type EgressManager } from '../egress.ts';
+import { GIT_CREDENTIAL_HELPER_SCRIPT } from '../sandbox/git-auth.ts';
 import { containerReachableUrl, envPrefixFor, providerRoute, providerUrls, translatedRoute, type ProviderService } from '../providers.ts';
 import { CocoonError, notFound } from '../errors.ts';
 import type { EventBus } from '../events.ts';
@@ -104,6 +105,8 @@ export class AgentManager {
       await this.driver.exec(handle, ['sh', '-c', approveClaudeKeyScript], { env: { KEY_TAIL: env.ANTHROPIC_API_KEY.slice(-20) } });
     }
 
+    // Agents with a GitHub token can push with plain git.
+    if (env.GITHUB_TOKEN) await this.driver.exec(handle, ['sh', '-c', GIT_CREDENTIAL_HELPER_SCRIPT]).catch(() => undefined);
     const envFile = `${tmux.STAGING_DIR}/env-${id}`;
     await this.driver.putArchive(
       handle,
