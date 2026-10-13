@@ -36,6 +36,7 @@ it too. The design is inspired by [herdr](https://vercel.com/docs/sandbox/ecosys
 - [Credentials and custom API providers](#credentials-and-custom-api-providers)
 - [Several repositories per sandbox](#several-repositories-per-sandbox)
 - [Shared services: databases & mocks](#shared-services-databases--mocks)
+- [Servers & ports: previews and sharing](#servers--ports-previews-and-sharing)
 - [Orchestration: workspaces, tasks & workflows](#orchestration-workspaces-tasks--workflows)
 - [Cockpit](#cockpit)
 - [Agent types](#agent-types)
@@ -68,6 +69,7 @@ it too. The design is inspired by [herdr](https://vercel.com/docs/sandbox/ecosys
 | **Many agents** | Claude Code, OpenAI Codex, OpenCode, Pi, Qwen Code, Gemini CLI and plain shells – switch the agent of a sandbox at any time, with handover of task, changes and last output |
 | **Local LLMs** | Each agent is started with the right parameters for your own model server; CoCoon detects which APIs a server speaks and **translates** Anthropic Messages / OpenAI Responses to Chat Completions, so Claude Code and Codex work with chat-only servers (llama.cpp, vLLM, LM Studio, …) |
 | **Custom APIs** | Bring your own model endpoint (Anthropic- or OpenAI-compatible: company gateway, LiteLLM, OpenRouter, Ollama, DeepSeek, …) or give agents access to any HTTP API, with model selection and connection test |
+| **Previews & ports** | Servers that agents start (dev servers, APIs, docs) are detected automatically and can be opened as an authenticated **preview** in the browser or **shared** on the network – WebSockets/HMR included |
 | **Shared services** | One click starts **PostgreSQL, MySQL/MariaDB, MongoDB, Redis** or the mocks **WireMock** (HTTP APIs) and **Mailpit** (email) for all sandboxes – or connects your own server. Every sandbox gets its own database and user; agents get the connection as env vars and may create schemas and test databases freely |
 | **Agent status** | `working` / `blocked` / `done` / `idle` / `exited`, from native hooks (Claude Code, Codex) plus screen heuristics |
 | **Persistence** | Agents run in tmux inside the sandbox – they survive control-plane restarts and client disconnects |
@@ -265,6 +267,36 @@ A sandbox can hold any number of them, so one agent can work across all of them 
   combined patch has folder-prefixed paths. `git.repos` lists branch and number of changes per repository.
 - **Agents know the layout**: they start in `/workspace` and get a short note listing the folders and their remotes;
   Codex trusts every repository folder; when switching agents, the handover lists the changes per repository.
+
+## Servers & ports: previews and sharing
+
+When an agent starts a server in a sandbox, it shows up under *Sandbox → Ports* within a few seconds (CoCoon reads the
+listening TCP ports of every running sandbox). From there:
+
+- **Open preview** – opens the server in the browser, only for people logged in to CoCoon. The preview runs on its own host
+  name, `http://p<port>-<sandbox>.localhost:7420/` (browsers resolve `*.localhost` to the local machine), or
+  `https://p<port>-<sandbox>.<COCOON_PREVIEW_DOMAIN>/` with a wildcard domain behind your reverse proxy. The link contains a
+  one-time token that is exchanged for a cookie valid for that preview only. The app sees `Host: localhost:<port>`, so dev
+  servers that only allow localhost (e.g. Vite) work, and WebSockets / hot reload are proxied as well.
+- **Share on the network** – publishes the server on a host port (`http://<host-ip>:7550`) for everyone who can reach the
+  machine, without login. Opt-in per port, logged in the activity log, can be turned off entirely.
+
+How it works: a small gateway container (`cocoon-ports`, runs in the egress-proxy image) sits on the internal network and the
+bridge and publishes two host port ranges – `127.0.0.1:7500-7549` for previews and `0.0.0.0:7550-7599` for shared ports.
+cocoond writes which host port goes to which sandbox port; changes apply immediately and close existing connections of a
+closed port. Opened ports survive stopping and starting the sandbox and are removed with it.
+
+Servers must listen on all addresses – `npm run dev -- --host 0.0.0.0`, `python -m http.server --bind 0.0.0.0`. Servers
+bound to localhost only are listed as *internal only*; CoCoon tells agents about this in their notes.
+
+```bash
+pnpm cocoon ports ls <sandbox-id>
+pnpm cocoon ports open <sandbox-id> 5173            # preview, prints a one-time link
+pnpm cocoon ports open <sandbox-id> 5173 --shared   # reachable on the network
+pnpm cocoon ports close <sandbox-id> 5173
+```
+
+Available with Docker and Podman (not yet with bubblewrap), in network modes *Restricted* and *Open*.
 
 ## Shared services: databases & mocks
 
@@ -536,6 +568,11 @@ pnpm cocoon services rm <id> [--delete-data]
 pnpm cocoon services connections <sandbox-id>
 pnpm cocoon services attach | detach | reset <sandbox-id> <service-id>
 
+# ports (servers started in a sandbox)
+pnpm cocoon ports ls <sandbox-id>
+pnpm cocoon ports open <sandbox-id> 5173 [--shared] [--name web]
+pnpm cocoon ports close <sandbox-id> 5173
+
 # updates
 pnpm cocoon update                                 # check CoCoon, agent tools and images
 pnpm cocoon update apply [cocoon|tools|images]     # update (default: everything outdated) and wait
@@ -620,6 +657,11 @@ Everything is configurable in the UI. Environment variables (all optional, see [
 | `COCOON_INSTANCE` | – | Name suffix for this server's Docker resources (network, proxy, services, toolbox) – lets several servers share one Docker host |
 | `COCOON_TOOLBOX_AUTOINSTALL` | `1` | `0` skips installing the agent CLIs on first start |
 | `COCOON_UPDATE_CHECK` | `1` | `0` turns off the daily update check |
+| `COCOON_PORTS` | `1` | `0` turns off port forwarding (previews and sharing) |
+| `COCOON_PORTS_PREVIEW_RANGE` | `7500-7549` | host ports for previews (published on 127.0.0.1) |
+| `COCOON_PORTS_SHARE_RANGE` | `7550-7599` | host ports for shared ports |
+| `COCOON_PORTS_SHARE_BIND` | `0.0.0.0` | address shared ports are published on; empty = sharing disabled |
+| `COCOON_PREVIEW_DOMAIN` | – | wildcard domain for previews (`p<port>-<sandbox>.<domain>`, HTTPS); default `*.localhost` on the CoCoon port |
 | `COCOON_SERVICE_IDLE_MINUTES` | `10` | Minutes without a running sandbox before a managed shared service is paused |
 | `DOCKER_SOCKET` | auto-detected | Path to the Docker or Podman API socket |
 | `COCOON_PROXY_PORT` | `7431` | bubblewrap only: port of the local egress proxy (credential proxy = port + 1) |
@@ -658,6 +700,7 @@ packages/cli          `cocoon` CLI + typed API client
 site/                 Project website (GitHub Pages, branch gh-pages)
 images/sandbox        Sandbox base image (Node.js 24, git, tmux, ripgrep; variant "full" adds compilers + Python)
 images/egress-proxy   Allowlist + credential proxy
+images/port-gateway   TCP forwarder for previews and shared ports (runs in the egress-proxy image)
 deploy/               systemd unit, Caddyfile
 docs/                 Beginner's guides (EN/DE), architecture (DE)
 ```

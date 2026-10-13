@@ -5,6 +5,7 @@ export const qk = {
   activity: ['activity'] as const,
   images: ['images'] as const,
   updates: ['update.status'] as const,
+  ports: (sandboxId: string) => ['ports', sandboxId] as const,
   settings: ['settings'] as const,
   secrets: ['secrets'] as const,
   tokens: ['tokens'] as const,

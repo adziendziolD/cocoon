@@ -8,6 +8,7 @@ import { EventBus } from './events.ts';
 import { buildHttpServer } from './http.ts';
 import { ImageService } from './images.ts';
 import { Notifier } from './notifications.ts';
+import { PortService } from './ports.ts';
 import { ProviderService } from './providers.ts';
 import { createRpc } from './rpc.ts';
 import { join } from 'node:path';
@@ -54,14 +55,16 @@ const workspace = new WorkspaceService(sandboxes, driver, secrets);
 const services = new ServiceManager(driver, store, bus, sandboxes, egress, logProxy);
 const agents = new AgentManager(settings, secrets, providers, driver, sandboxes, store, bus, egress, services, logProxy);
 
+const ports = new PortService(config, driver, store, sandboxes, bus, activity, logProxy);
+
 const notifier = new Notifier(settings, store, bus, config.publicUrl, logProxy);
 const workspaces = new WorkspacesService(store, bus, activity);
 const tasks = new TaskService(store, bus, settings, workspaces, sandboxes, workspace, agents, notifier, logProxy);
 
 const updates = new UpdateService(config, driver, images, store, bus, activity, () => void shutdown(RESTART_EXIT_CODE), logProxy);
 
-const rpc = createRpc({ driver, store, settings, secrets, providers, tokens, images, egress, activity, sandboxes, workspace, agents, workspaces, tasks, notifier, services, updates });
-const app = await buildHttpServer({ config, rpc, bus, tokens, agents, workspace });
+const rpc = createRpc({ driver, store, settings, secrets, providers, tokens, images, egress, activity, sandboxes, workspace, agents, workspaces, tasks, notifier, services, updates, ports });
+const app = await buildHttpServer({ config, rpc, bus, tokens, agents, workspace, ports });
 log = (msg, err) => app.log.warn({ err }, msg);
 
 await sandboxes.reconcile();
@@ -86,8 +89,9 @@ void (async () => {
   } catch (err) {
     activity.add('error', 'activity.proxyFailed', { error: (err as Error).message });
   }
-  // Shared services need the internal network (created by egress.ensure()).
+  // Shared services and the port gateway need the internal network (created by egress.ensure()).
   void services.start();
+  void ports.start().catch((err) => activity.add('error', 'activity.portsFailed', { error: (err as Error).message }));
   if (driver.capabilities.images) {
     const sandboxImage = settings.get().sandbox.image;
     if (!(await images.exists(sandboxImage))) {
@@ -111,6 +115,7 @@ async function shutdown(code: number): Promise<void> {
   agents.stop();
   tasks.stopEngine();
   updates.stop();
+  ports.stop();
   await app.close();
   process.exit(code);
 }

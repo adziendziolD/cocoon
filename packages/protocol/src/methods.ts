@@ -13,6 +13,8 @@ import {
   RepoSource,
   Resources,
   Sandbox,
+  SandboxPort,
+  PortMode,
   AgentTool,
   ApiProvider,
   ApiStyle,
@@ -123,6 +125,8 @@ export const methods = {
       commit: z.string().optional(),
       /** When this server process started (changes after a restart). */
       startedAt: z.string().optional(),
+      /** Port forwarding: available (Docker/Podman) and whether ports may be shared on the network. */
+      ports: z.object({ enabled: z.boolean(), share: z.boolean() }).optional(),
     }),
   },
   'system.setup_status': {
@@ -154,6 +158,32 @@ export const methods = {
       installAgents: z.boolean().optional(),
     }),
     result: z.object({ buildId: z.string() }),
+  },
+
+  // ── ports ─────────────────────────────────────────────────────────────────
+  'ports.list': {
+    description: 'Ports of a sandbox: detected listening ports and ports opened to the outside (preview or shared).',
+    mcp: true,
+    params: SandboxRef,
+    result: z.array(SandboxPort),
+  },
+  'ports.open': {
+    description:
+      'Opens a sandbox port to the outside. preview: only for people logged in to CoCoon (get a link with ports.preview_link). shared: reachable on the host network.',
+    mcp: true,
+    params: SandboxRef.extend({ port: z.number().int().min(1).max(65535), mode: PortMode.default('preview'), name: z.string().max(60).optional() }),
+    result: SandboxPort,
+  },
+  'ports.close': {
+    description: 'Closes an opened sandbox port again.',
+    mcp: true,
+    params: SandboxRef.extend({ port: z.number().int() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  'ports.preview_link': {
+    description: 'Link to the preview of an opened port. Contains a one-time token that logs the browser in to this preview only.',
+    params: SandboxRef.extend({ port: z.number().int() }),
+    result: z.object({ url: z.string(), expiresAt: z.string() }),
   },
 
   // ── updates ───────────────────────────────────────────────────────────────

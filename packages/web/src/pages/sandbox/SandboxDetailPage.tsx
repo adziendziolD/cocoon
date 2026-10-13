@@ -1,8 +1,8 @@
 import { useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { Sandbox } from '@cocoon/protocol';
-import { Bot, Box, Database, FileDiff, FolderInput, FolderOpen, Loader2, Play, Settings2, Square, SquareTerminal } from 'lucide-react';
-import { useAgents, useSandbox } from '../../api/queries';
+import { Bot, Box, Database, FileDiff, FolderInput, FolderOpen, Loader2, Network, Play, Settings2, Square, SquareTerminal } from 'lucide-react';
+import { useAgents, useSandbox, useSandboxPorts, useSystemInfo } from '../../api/queries';
 import { isNotFound } from '../../api/rpc';
 import { Badge, SandboxStatusBadge } from '../../components/Badge';
 import { Button, ButtonLink } from '../../components/Button';
@@ -22,10 +22,11 @@ import { ChangesTab } from './ChangesTab';
 import { ConsoleTab } from './ConsoleTab';
 import { FilesTab } from './FilesTab';
 import { ManageTab } from './ManageTab';
+import { PortsTab, visiblePorts } from './PortsTab';
 import { ServicesTab } from './ServicesTab';
 
-type TabId = 'agents' | 'files' | 'changes' | 'console' | 'services' | 'manage';
-const TAB_IDS: TabId[] = ['agents', 'files', 'changes', 'console', 'services', 'manage'];
+type TabId = 'agents' | 'files' | 'changes' | 'console' | 'ports' | 'services' | 'manage';
+const TAB_IDS: TabId[] = ['agents', 'files', 'changes', 'console', 'ports', 'services', 'manage'];
 
 export function SandboxDetailPage() {
   const { sandboxId = '', tab: tabParam } = useParams();
@@ -33,6 +34,8 @@ export function SandboxDetailPage() {
   const tab: TabId = TAB_IDS.includes(tabParam as TabId) ? (tabParam as TabId) : 'agents';
   const sandbox = useSandbox(sandboxId);
   const agents = useAgents();
+  const info = useSystemInfo();
+  const ports = useSandboxPorts(sandboxId, Boolean(info.data?.ports?.enabled));
   const [spawnOpen, setSpawnOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const t = useT();
@@ -61,6 +64,7 @@ export function SandboxDetailPage() {
     { id: 'files', label: t('sandboxDetail.tab.files'), icon: <FolderOpen className="size-4" /> },
     { id: 'changes', label: t('sandboxDetail.tab.changes'), icon: <FileDiff className="size-4" /> },
     { id: 'console', label: t('sandboxDetail.tab.console'), icon: <SquareTerminal className="size-4" /> },
+    { id: 'ports', label: t('sandboxDetail.tab.ports'), icon: <Network className="size-4" />, count: visiblePorts(ports.data).length },
     { id: 'services', label: t('sandboxDetail.tab.services'), icon: <Database className="size-4" />, count: s.services?.length ?? 0 },
     { id: 'manage', label: t('sandboxDetail.tab.manage'), icon: <Settings2 className="size-4" /> },
   ];
@@ -138,6 +142,7 @@ export function SandboxDetailPage() {
       {tab === 'files' && <RequireRunning sandbox={s}>{<FilesTab sandbox={s} />}</RequireRunning>}
       {tab === 'changes' && <RequireRunning sandbox={s}>{<ChangesTab sandbox={s} />}</RequireRunning>}
       {tab === 'console' && <RequireRunning sandbox={s}>{<ConsoleTab sandbox={s} />}</RequireRunning>}
+      {tab === 'ports' && <PortsTab sandbox={s} />}
       {tab === 'services' && <ServicesTab sandbox={s} />}
       {tab === 'manage' && <ManageTab sandbox={s} />}
 

@@ -18,6 +18,10 @@ export const useImages = () =>
     refetchInterval: (q) => (q.state.data?.some((i) => i.building) ? 5000 : false),
   });
 
+/** Detected and opened ports of a sandbox; live via the ports.updated event. */
+export const useSandboxPorts = (sandboxId: string, enabled = true) =>
+  useQuery({ queryKey: qk.ports(sandboxId), queryFn: () => rpc('ports.list', { sandboxId }), enabled });
+
 /** Update status; the server checks the remotes itself (daily), refresh via rpc('update.status', { refresh: true }). */
 export const useUpdateStatus = () =>
   useQuery({

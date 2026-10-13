@@ -25,6 +25,16 @@ export function loadConfig(env = process.env) {
     proxyPort: Number(env.COCOON_PROXY_PORT ?? 7431),
     /** CoCoon's own installation (a git clone, updated by the update service). */
     repoDir: repoRoot,
+    /** Port forwarding (sandbox servers reachable from outside). COCOON_PORTS=0 turns it off. */
+    ports: {
+      enabled: env.COCOON_PORTS !== '0',
+      previewRange: env.COCOON_PORTS_PREVIEW_RANGE ?? '7500-7549',
+      shareRange: env.COCOON_PORTS_SHARE_RANGE ?? '7550-7599',
+      /** Address shared ports are published on; empty = sharing disabled. */
+      shareBind: env.COCOON_PORTS_SHARE_BIND ?? '0.0.0.0',
+      /** Wildcard domain for previews (p<port>-<sandbox>.<domain>); default: *.localhost on the CoCoon port. */
+      previewDomain: env.COCOON_PREVIEW_DOMAIN || undefined,
+    },
     imagesDir: resolve(env.COCOON_IMAGES_DIR ?? resolve(repoRoot, 'images')),
     webDir: resolve(env.COCOON_WEB_DIR ?? resolve(repoRoot, 'packages/web/dist')),
     /** Initial settings on first start (later edited via UI/API). */

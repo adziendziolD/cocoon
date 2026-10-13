@@ -6,6 +6,8 @@ const ctx = inject('cocoon');
 /** Integration tests run only when the global setup could start a server (Docker available). */
 export const available = Boolean(ctx);
 export const instance = ctx?.instance ?? '';
+/** Base URL of the test server, e.g. http://127.0.0.1:52586. */
+export const serverUrl = ctx?.url ?? '';
 
 export async function rpc<T = any>(method: string, params: unknown = {}): Promise<T> {
   if (!ctx) throw new Error('no server');
