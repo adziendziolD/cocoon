@@ -127,6 +127,10 @@ export const messages = {
     de: 'Für Pull Requests wird ein GitHub-Token benötigt (Einstellungen → Zugangsdaten)',
     en: 'Pull requests require a GitHub token (Settings → Credentials)',
   },
+  'error.issuesNeedToken': {
+    de: 'Für private Repositories wird ein GitHub-Token benötigt (Einstellungen → Zugangsdaten)',
+    en: 'Private repositories require a GitHub token (Settings → Credentials)',
+  },
   'error.github': { de: 'GitHub: {message}', en: 'GitHub: {message}' },
 
   // setup checklist
