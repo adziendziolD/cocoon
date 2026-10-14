@@ -62,7 +62,7 @@ const ports = new PortService(config, driver, store, sandboxes, bus, activity, l
 
 const notifier = new Notifier(settings, store, bus, config.publicUrl, logProxy);
 const workspaces = new WorkspacesService(store, bus, activity);
-const tasks = new TaskService(store, bus, settings, workspaces, sandboxes, workspace, agents, notifier, logProxy);
+const tasks = new TaskService(store, bus, settings, workspaces, sandboxes, workspace, agents, notifier, logProxy, secrets);
 
 const updates = new UpdateService(config, driver, images, store, bus, activity, () => void shutdown(RESTART_EXIT_CODE), logProxy);
 

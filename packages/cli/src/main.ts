@@ -297,7 +297,7 @@ const tasks = program.command('task').description('tasks on the board, run by ag
 tasks.command('ls').option('--workspace <id>').action(async (o) => {
   const rows = await client().call('task.list', { workspaceId: o.workspace });
   print(rows, () =>
-    console.table(rows.map((t) => ({ id: t.id, title: t.title, status: t.status + (t.attention ? ' ⚠' : ''), stage: t.workflowId ? `${t.stage + 1} (${t.workflowId})` : (t.agentKind ?? ''), note: t.note ?? '' }))),
+    console.table(rows.map((t) => ({ id: t.id, task: t.handle ?? '', title: t.title, status: t.status + (t.attention ? ' ⚠' : ''), stage: t.workflowId ? `${t.stage + 1} (${t.workflowId})` : (t.agentKind ?? ''), note: t.note ?? '' }))),
   );
 });
 tasks

@@ -435,6 +435,29 @@ backlog ──▶ queued ──▶ running ──▶ review ──▶ done
 - **Auto-run**: in workspaces with `autoRun`, queued tasks are started automatically (high priority first) up to `maxParallel`.
 - Every stage run is recorded in `runs` (stage, agent, outcome). Running tasks are reconciled after a server restart.
 
+**Task numbers and branches.** Every workspace has a short **key** (derived from its name, e.g. `FocusDigital` → `FD`,
+editable) and numbers its tasks: `FD-1`, `FD-2`, … The handle is shown on cards and in the drawer, and gives the task's **git
+branch** `FD-12-add-apple-pay` – a sandbox created for a task works on it from the start, pushes and pull requests use it.
+Prompts can use `{{task.key}}` and `{{task.branch}}`.
+
+**Code review when approving** (workspace setting). Approving a finished task then starts **review agents one after another
+in the same sandbox** instead of pushing right away. Each reviews the full diff, may fix small problems, and reports a verdict
+(`approved` / `changes_requested` + summary) in a file outside the repositories.
+- *Changes requested* (or no result) → the task goes back to *Review* with the summary; *Request changes* sends it to the
+  working agent, *Approve* runs the review again.
+- *All approved* → CoCoon commits, pushes the task branch and opens a **pull request** per changed repository (target: the
+  configured base branch or the repository default; repositories outside GitHub are only pushed). A sandbox that belonged to
+  the task alone is removed. The drawer shows the reviews and the pull request links.
+- *Review agent may push and open the pull request itself* gives the **last** review agent the GitHub token (`GITHUB_TOKEN` /
+  `GH_TOKEN`) – off by default; all other review agents get the token removed. If no token is stored, the task goes back to
+  *Review* with a clear note instead of starting the agent. Use a fine-grained token limited to the repositories.
+- Reviewers commit their own fixes (`Review fixes: …`); their verdict file lives in `<workspace>/.cocoon/`, which is excluded
+  from every repository.
+
+**GitHub access for agents.** Agent types that list `GITHUB_TOKEN` in their secrets (Claude Code, Codex and OpenCode by
+default) get the stored token in their environment, and CoCoon sets up a git credential helper for github.com, so plain
+`git push` works for them. Remove `GITHUB_TOKEN` from an agent type (*Settings → Agent types*) to keep it away from that agent.
+
 **Workflows** (*Settings → Workflows*) chain stages, each a fresh agent in the task's sandbox. Prompt templates may use
 `{{task}}`, `{{task.title}}`, `{{task.description}}`, `{{previous.output}}` (last screen of the previous stage),
 `{{diff}}` (changed files) and `{{feedback}}` (review feedback). Stages with `approval` pause in `review` until you approve.

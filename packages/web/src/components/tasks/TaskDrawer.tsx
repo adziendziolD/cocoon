@@ -1,8 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
-import type { Task, TaskRun } from '@cocoon/protocol';
+import { localize, type Task, type TaskRun } from '@cocoon/protocol';
 import {
+  GitBranch,
+  GitPullRequest,
   Bot,
   Check,
   CircleStop,
@@ -19,7 +21,7 @@ import {
   Workflow as WorkflowIcon,
   X,
 } from 'lucide-react';
-import { useAgents, useSandboxes, useSettings, useTask, useTasks } from '../../api/queries';
+import { useAgents, useSandboxes, useSettings, useTask, useTasks, useWorkspaces } from '../../api/queries';
 import { isNotFound, rpc } from '../../api/rpc';
 import { useAction } from '../../api/useAction';
 import { rich, useLanguage, useT } from '../../i18n';
@@ -31,6 +33,7 @@ import { useAppDialogs } from '../AppDialogs';
 import { AgentStatusBadge, Badge } from '../Badge';
 import { Button, ButtonLink } from '../Button';
 import { ConfirmDialog } from '../Dialog';
+import { CopyButton } from '../CodeBlock';
 import { Callout } from '../HelpText';
 import { ErrorState, LoadingState } from '../States';
 import { WorkspaceTag } from '../WorkspaceSwitcher';
@@ -123,6 +126,7 @@ function TaskDetail({ task, allTasks, onClose }: { task: Task; allTasks: Task[];
   const openTask = useOpenTask();
   const openInCockpit = useOpenInCockpit();
   const { start, approve, stop, remove, update } = useTaskActions();
+  const reviewOnApprove = useWorkspaces().data?.find((w) => w.id === task.workspaceId)?.review?.enabled;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const agent = task.agentId ? agents.data?.find((a) => a.id === task.agentId) : undefined;
   const sandbox = task.sandboxId ? sandboxes.data?.find((s) => s.id === task.sandboxId) : undefined;
@@ -140,7 +144,10 @@ function TaskDetail({ task, allTasks, onClose }: { task: Task; allTasks: Task[];
         title={
           <span className="flex items-start gap-2">
             <PriorityIcon priority={task.priority} className="mt-1.5" />
-            {task.title}
+            <span>
+              {task.handle && <span className="mr-2 font-mono text-sm font-semibold text-fg-subtle">{task.handle}</span>}
+              {task.title}
+            </span>
           </span>
         }
       >
@@ -182,7 +189,7 @@ function TaskDetail({ task, allTasks, onClose }: { task: Task; allTasks: Task[];
             <div className="font-semibold text-fg">{wf && task.stage < wf.stages.length - 1 ? t('taskDrawer.reviewStageTitle') : t('taskDrawer.reviewTitle')}</div>
             <p className="mt-0.5 text-sm text-fg-muted">{wf && task.stage < wf.stages.length - 1 ? t('taskDrawer.reviewStageText') : t('taskDrawer.reviewText')}</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button size="sm" variant="success" icon={<Check className="size-3.5" />} loading={approve.isPending} onClick={() => approve.mutate(task.id)}>
+              <Button size="sm" variant="success" icon={<Check className="size-3.5" />} loading={approve.isPending} onClick={() => approve.mutate(task.id)} title={reviewOnApprove ? t('taskCard.approveReviewHint') : undefined}>
                 {wf && task.stage < wf.stages.length - 1 ? t('taskDrawer.approveNext') : t('taskCard.approve')}
               </Button>
               <Button size="sm" icon={<MessageSquareReply className="size-3.5" />} onClick={() => dialogs.reject(task)}>
@@ -268,6 +275,46 @@ function TaskDetail({ task, allTasks, onClose }: { task: Task; allTasks: Task[];
                     </button>
                   ))}
                   {open.length > 0 && <p className="text-xs text-amber-700 dark:text-amber-400">{t('taskDrawer.waitingForDeps', { count: open.length })}</p>}
+                </dd>
+              </>
+            )}
+            {task.branch && (
+              <>
+                <dt className="text-fg-muted">{t('taskDrawer.branch')}</dt>
+                <dd className="flex min-w-0 items-center gap-1.5 font-mono text-xs text-fg">
+                  <GitBranch className="size-3.5 shrink-0 text-fg-subtle" />
+                  <span className="truncate">{task.branch}</span>
+                  <CopyButton text={task.branch} />
+                </dd>
+              </>
+            )}
+            {(task.pullRequests ?? []).length > 0 && (
+              <>
+                <dt className="text-fg-muted">{t('taskDrawer.pullRequests')}</dt>
+                <dd className="space-y-1">
+                  {(task.pullRequests ?? []).map((pr) => (
+                    <a key={pr.url} href={pr.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-accent hover:underline">
+                      <GitPullRequest className="size-3.5" />
+                      <span className="truncate">{pr.repo ? `${pr.repo}: ` : ''}{pr.url.replace(/^https:\/\/github\.com\//, '')}</span>
+                    </a>
+                  ))}
+                </dd>
+              </>
+            )}
+            {((task.reviews ?? []).length > 0 || task.reviewStep !== undefined) && (
+              <>
+                <dt className="text-fg-muted">{t('taskDrawer.reviews')}</dt>
+                <dd className="space-y-2">
+                  {task.reviewStep !== undefined && <p className="text-xs text-fg-muted">{t('taskDrawer.reviewRunning')}</p>}
+                  {(task.reviews ?? []).map((r) => (
+                    <div key={r.agentId} className="text-xs">
+                      <span className="flex items-center gap-1.5">
+                        <Badge tone={r.verdict === 'approved' ? 'green' : r.verdict === 'changes_requested' ? 'amber' : 'gray'}>{t(`taskDrawer.verdict.${r.verdict}`)}</Badge>
+                        <span className="text-fg-muted">{settings.data?.agents[r.agentKind]?.label ? String(localize(settings.data.agents[r.agentKind]!.label, lang)) : r.agentKind}</span>
+                      </span>
+                      {r.summary && <p className="mt-1 whitespace-pre-wrap text-fg">{r.summary}</p>}
+                    </div>
+                  ))}
                 </dd>
               </>
             )}

@@ -1,6 +1,7 @@
 import type { Agent, Settings, Task } from '@cocoon/protocol';
 import { Bot, Check, CircleStop, Hand, Link2, MessageSquareReply, MonitorPlay, MoreHorizontal, Pencil, Play, RotateCcw, Trash2, Workflow as WorkflowIcon } from 'lucide-react';
 import { useLanguage, useT } from '../../i18n';
+import { useWorkspaces } from '../../api/queries';
 import { cn } from '../../lib/cn';
 import { agentStatusMeta } from '../../lib/status';
 import { openDependencies, taskRunLabel } from '../../lib/tasks';
@@ -33,6 +34,7 @@ export function TaskCard({ task, allTasks, agent, settings, compact, showWorkspa
   const openInCockpit = useOpenInCockpit();
   const dialogs = useAppDialogs();
   const { start, approve, stop } = useTaskActions();
+  const reviewOnApprove = useWorkspaces().data?.find((w) => w.id === task.workspaceId)?.review?.enabled;
   const run = taskRunLabel(task, settings, lang);
   const deps = openDependencies(task, allTasks);
   const s = task.status;
@@ -64,7 +66,10 @@ export function TaskCard({ task, allTasks, agent, settings, compact, showWorkspa
       )}
       <div className="flex items-start gap-1.5">
         <PriorityIcon priority={task.priority} className="mt-0.5" />
-        <div className={cn('min-w-0 flex-1 font-medium text-fg', compact ? 'line-clamp-2 text-[13px]' : 'line-clamp-3 text-sm')}>{task.title}</div>
+        <div className={cn('min-w-0 flex-1 font-medium text-fg', compact ? 'line-clamp-2 text-[13px]' : 'line-clamp-3 text-sm')}>
+          {task.handle && <span className="mr-1.5 font-mono text-[11px] font-semibold text-fg-subtle">{task.handle}</span>}
+          {task.title}
+        </div>
         <span onClick={(e) => e.stopPropagation()} className="-mt-1 -mr-1">
           <Popover
             align="right"
@@ -150,7 +155,7 @@ export function TaskCard({ task, allTasks, agent, settings, compact, showWorkspa
         )}
         {s === 'review' && (
           <>
-            <Button size="sm" variant="success" icon={<Check className="size-3.5" />} loading={busy(approve)} onClick={() => approve.mutate(task.id)} title={t('taskCard.approveHint')}>
+            <Button size="sm" variant="success" icon={<Check className="size-3.5" />} loading={busy(approve)} onClick={() => approve.mutate(task.id)} title={reviewOnApprove ? t('taskCard.approveReviewHint') : t('taskCard.approveHint')}>
               {t('taskCard.approve')}
             </Button>
             <Button size="sm" icon={<MessageSquareReply className="size-3.5" />} onClick={() => dialogs.reject(task)} title={t('taskCard.rejectHint')}>

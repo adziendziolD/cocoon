@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CockpitLayout, Task, TaskPriority, TaskStatus, Workspace } from './orchestration.ts';
+import { CockpitLayout, Task, TaskPriority, TaskStatus, Workspace, WORKSPACE_KEY, WorkspaceReview } from './orchestration.ts';
 import {
   ActivityEntry,
   Agent,
@@ -67,6 +67,8 @@ const TaskRef = z.object({ taskId: z.string() });
 /** Optional workspace/task fields accept "" or null to clear them. */
 const WorkspaceInput = z.object({
   name: Workspace.shape.name,
+  key: z.string().regex(WORKSPACE_KEY).optional(),
+  review: WorkspaceReview.nullable().optional(),
   description: z.string().nullable().optional(),
   color: z.string().optional(),
   repo: RepoSource.nullable().optional(),
