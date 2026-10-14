@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { localize, type Task, type TaskRun } from '@cocoon/protocol';
 import {
   GitBranch,
+  CircleDot,
   GitPullRequest,
   Bot,
   Check,
@@ -285,6 +286,17 @@ function TaskDetail({ task, allTasks, onClose }: { task: Task; allTasks: Task[];
                   <GitBranch className="size-3.5 shrink-0 text-fg-subtle" />
                   <span className="truncate">{task.branch}</span>
                   <CopyButton text={task.branch} />
+                </dd>
+              </>
+            )}
+            {task.issue && /^https:\/\//.test(task.issue.url) && (
+              <>
+                <dt className="text-fg-muted">{t('taskDrawer.issue')}</dt>
+                <dd>
+                  <a href={task.issue.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-accent hover:underline">
+                    <CircleDot className="size-3.5" />
+                    <span className="truncate">{task.issue.repo}#{task.issue.number}</span>
+                  </a>
                 </dd>
               </>
             )}

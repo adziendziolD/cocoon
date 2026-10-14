@@ -96,6 +96,16 @@ export const useWorkspaces = () => useQuery({ queryKey: qk.workspaces, queryFn: 
 /** All tasks across workspaces; boards filter this list client-side. */
 export const useTasks = () => useQuery({ queryKey: qk.tasks, queryFn: () => rpc('task.list', {}) });
 
+/** Open GitHub issues of a workspace's repositories. GitHub has no push, so they are polled slowly (the server caches for a minute). */
+export const useGithubIssues = (workspaceId: string | undefined) =>
+  useQuery({
+    queryKey: qk.githubIssues(workspaceId ?? ''),
+    queryFn: () => rpc('github.issues', { workspaceId: workspaceId! }),
+    enabled: !!workspaceId,
+    staleTime: 60_000,
+    refetchInterval: 5 * 60_000,
+  });
+
 export const useTask = (taskId: string | null) =>
   useQuery({
     queryKey: qk.task(taskId ?? ''),

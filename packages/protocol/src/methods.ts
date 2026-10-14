@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CockpitLayout, Task, TaskPriority, TaskStatus, Workspace, WORKSPACE_KEY, WorkspaceReview } from './orchestration.ts';
+import { CockpitLayout, GithubIssues, Task, TaskPriority, TaskStatus, Workspace, WORKSPACE_KEY, WorkspaceReview } from './orchestration.ts';
 import {
   ActivityEntry,
   Agent,
@@ -639,6 +639,22 @@ export const methods = {
     mcp: true,
     params: TaskRef.extend(TaskInput.partial().shape).extend({ status: TaskStatus.optional(), order: z.number().optional() }),
     result: Task,
+  },
+  'github.issues': {
+    description: 'Lists the open GitHub issues of the workspace repositories, sorted into bugs and features (with the task each was imported as).',
+    mcp: true,
+    params: z.object({ workspaceId: z.string(), refresh: z.boolean().default(false) }),
+    result: GithubIssues,
+  },
+  'github.import_issues': {
+    description: 'Imports GitHub issues as tasks of the workspace (issues that were imported before are skipped).',
+    mcp: true,
+    params: z.object({
+      workspaceId: z.string(),
+      issues: z.array(z.object({ repo: z.string(), number: z.number().int() })).min(1).max(100),
+      status: z.enum(['backlog', 'queued']).default('backlog'),
+    }),
+    result: z.object({ tasks: z.array(Task), skipped: z.number().int() }),
   },
   'task.delete': { description: 'Deletes a task (stops its agent).', mcp: true, params: TaskRef, result: Ok },
   'task.start': {
