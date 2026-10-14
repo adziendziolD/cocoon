@@ -90,7 +90,7 @@ function rig(opts: { network?: 'egress' | 'none' | 'open'; repos?: { url: string
     repos, workdir, createdAt: new Date().toISOString(), proxyToken: 'abcdef0123456789', handle: 'h1', workspaceId: 'ws_1', services: [],
   } as SandboxRecord;
   store.putSandbox(sandbox);
-  store.putWorkspace({ id: 'ws_1', name: 'Platform', sandboxMode: 'per-task', defaultAgentKind: 'claude-code', autoRun: false, maxParallel: 2, createdAt: new Date().toISOString() });
+  store.putWorkspace({ id: 'ws_1', name: 'Platform', sandboxMode: 'per-task', defaultAgentKind: 'claude-code', autoRun: false, maxParallel: 2, nextTaskNumber: 1, createdAt: new Date().toISOString() });
   for (const r of repos) initRepo(r.path ? join(workdir, r.path) : workdir);
 
   const state = { running: true, policyWrites: 0, routesFn: (() => []) as (id: string) => EnvRoute[], logs: [] as string[] };
