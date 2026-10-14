@@ -23,6 +23,7 @@ import {
   DriverCapabilities,
   DriverKind,
   PROVIDER_ID,
+  GITHUB_TOKEN_NAME,
   SECRET_NAME,
   SecretInfo,
   SetupStep,
@@ -71,6 +72,7 @@ const WorkspaceInput = z.object({
   repo: RepoSource.nullable().optional(),
   repos: z.array(RepoSource).max(20).nullable().optional(),
   network: NetworkMode.optional(),
+  githubToken: z.string().regex(GITHUB_TOKEN_NAME).nullable().optional(),
   sandboxMode: z.enum(['per-task', 'shared']).optional(),
   defaultAgentKind: z.string().optional(),
   defaultWorkflowId: z.string().nullable().optional(),
@@ -376,6 +378,7 @@ export const methods = {
       runtime: z.string().nullable().optional(),
       resources: Resources.optional(),
       workspaceId: z.string().optional(),
+      githubToken: z.string().regex(GITHUB_TOKEN_NAME).optional(),
       env: z.record(z.string(), z.string()).optional(),
       /** Shared services to attach (default: all services set to "every sandbox"). */
       services: z.array(z.string()).optional(),
@@ -390,6 +393,8 @@ export const methods = {
     params: SandboxRef.extend({
       name: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$/).optional(),
       workspaceId: z.string().nullable().optional(),
+      /** GitHub token (secret name); null = use the workspace's / default token. */
+      githubToken: z.string().regex(GITHUB_TOKEN_NAME).nullable().optional(),
     }),
     result: Sandbox,
   },

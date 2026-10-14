@@ -7,6 +7,7 @@ import {
   DEFAULT_PROFILES,
   KNOWN_SECRETS,
   localize,
+  parseSkillSource,
   profileAdapter,
   profileTool,
   type AgentProfile,
@@ -54,6 +55,8 @@ interface ProfileDraft {
   adapter: '' | AgentAdapter;
   tool: '' | AgentTool;
   promptFlag: string;
+  /** One GitHub skill reference per line. */
+  skills: string;
   /** Context window / answer length as typed ('' = from the model). */
   contextWindow: string;
   maxOutputTokens: string;
@@ -79,6 +82,7 @@ function toDraft(p: AgentProfile): ProfileDraft {
     adapter: p.adapter ?? '',
     tool: p.tool ?? '',
     promptFlag: p.promptFlag ?? '',
+    skills: p.skills.join('\n'),
     contextWindow: tokensText(p.contextWindow),
     maxOutputTokens: tokensText(p.maxOutputTokens),
   };
@@ -102,6 +106,7 @@ function fromDraft(d: ProfileDraft): AgentProfile {
     adapter: d.adapter || undefined,
     tool: d.tool || undefined,
     promptFlag: d.promptFlag.trim() || undefined,
+    skills: lines(d.skills),
     contextWindow: parseTokens(d.contextWindow),
     maxOutputTokens: parseTokens(d.maxOutputTokens),
   };
@@ -109,6 +114,8 @@ function fromDraft(d: ProfileDraft): AgentProfile {
 
 function validate(t: TFunction, d: ProfileDraft): string | undefined {
   if (splitCommand(d.commandText).length === 0) return t('profiles.err.command');
+  const badSkill = lines(d.skills).find((skill) => !parseSkillSource(skill));
+  if (badSkill) return t('profiles.err.skill', { skill: badSkill });
   const limitsError = limitsPairError(t, d.contextWindow, d.maxOutputTokens);
   if (limitsError) return `${t('limits.title')}: ${limitsError}`;
   for (const p of [...lines(d.workingPatterns), ...lines(d.blockedPatterns)]) {
@@ -598,6 +605,10 @@ function ProfileForm({
           <KeyValueEditor rows={d.env} onChange={(env) => onChange({ env })} />
         </Field>
 
+        <Field label={t('profiles.form.skills')} optional hint={t('profiles.form.skillsHint')}>
+          <Textarea value={d.skills} onChange={(e) => onChange({ skills: e.target.value })} rows={3} className="font-mono text-xs" placeholder={'owner/repo\nowner/repo/skills/name@v1'} />
+        </Field>
+
         <div className="rounded-xl border border-line">
           <button type="button" onClick={() => setAdvanced((a) => !a)} className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium text-fg">
             {advanced ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
@@ -671,7 +682,7 @@ function AddProfileDialog({ open, onClose, existing, onAdd }: { open: boolean; o
     let profile: AgentProfile;
     if (template === 'autonomous') profile = CLAUDE_AUTONOMOUS;
     else if (template.startsWith('copy:')) profile = fromDraft(existing[template.slice(5)]!);
-    else profile = { command: ['bash', '-l'], promptMode: 'input', secrets: [], env: {}, providers: [], workingPatterns: [], blockedPatterns: [], label: '' };
+    else profile = { command: ['bash', '-l'], promptMode: 'input', secrets: [], env: {}, providers: [], skills: [], workingPatterns: [], blockedPatterns: [], label: '' };
     onAdd(key, profile);
     onClose();
   };

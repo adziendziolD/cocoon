@@ -487,6 +487,14 @@ A profile defines `command`, `promptMode` (`arg` | `input`) and `promptFlag`, `a
 derived from the command if omitted), `tool`, `secrets`, `env`, `providers`, `model`, `hooks`, `workingPatterns`,
 `blockedPatterns` and `idleForeground`.
 
+**Skills:** a profile can list `skills` – GitHub references such as `owner/repo`, `owner/repo/path/to/skill` or
+`owner/repo@v1` (also `https://github.com/…` and `/tree/<ref>/<path>` URLs). When an agent of this type starts, CoCoon
+clones each repository (shallow) inside the sandbox and copies every folder containing a `SKILL.md` into the CLI's skills
+folder (`~/.claude/skills`, `~/.codex/skills`, `~/.gemini/skills`, `~/.config/opencode/skills`, `~/.pi/agent/skills`,
+`~/.qwen/skills`). A path pointing at a skill installs that one; otherwise all skills directly in the folder (or its
+`skills/` subfolder) are installed. Needs sandbox internet access; private repos use the sandbox's GitHub token.
+Create e.g. a "Claude Code + Ponytail" agent type by duplicating Claude Code and adding the skill.
+
 **Switching agents:** `agent.switch` (UI: *Switch agent* on the agent page or in a cockpit pane) starts another agent type – with
 its own provider/model – in the same sandbox. With *handover* the new agent receives the original task, a `git diff --stat` of the
 changes so far and the previous agent's last output; the previous agent is stopped and a running task follows the new agent.

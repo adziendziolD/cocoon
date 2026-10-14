@@ -16,6 +16,7 @@ import { Button } from './Button';
 import { Dialog } from './Dialog';
 import { ChoiceCard, Field, Input, Select, Textarea, Toggle } from './Field';
 import { RepoRowsEditor } from './RepoRowsEditor';
+import { GithubTokenSelect } from './GithubTokenSelect';
 import { NetworkModeCards } from './SandboxOptions';
 
 export interface WorkspaceDraft {
@@ -26,6 +27,8 @@ export interface WorkspaceDraft {
   repos: RepoRow[];
   /** '' = server default network mode. */
   network: NetworkMode | '';
+  /** '' = default GITHUB_TOKEN. */
+  githubToken: string;
   sandboxMode: 'per-task' | 'shared';
   runMode: 'agent' | 'workflow';
   defaultAgentKind: string;
@@ -41,6 +44,7 @@ export function toWorkspaceDraft(w?: Workspace, index = 0): WorkspaceDraft {
     color: w?.color ?? WORKSPACE_COLORS[index % WORKSPACE_COLORS.length]!,
     repos: repoRowsFrom(w?.repos, w?.repo),
     network: w?.network ?? '',
+    githubToken: w?.githubToken ?? '',
     sandboxMode: w?.sandboxMode ?? 'per-task',
     runMode: w?.defaultWorkflowId ? 'workflow' : 'agent',
     defaultAgentKind: w?.defaultAgentKind ?? 'claude-code',
@@ -61,6 +65,7 @@ export function workspaceParams(d: WorkspaceDraft): MethodParams<'workspace.crea
     repos: repos.length ? repos : null,
     repo: null,
     network: d.network || undefined,
+    githubToken: d.githubToken || null,
     sandboxMode: d.sandboxMode,
     defaultAgentKind: d.defaultAgentKind,
     // '' = no default workflow (an omitted field would keep the old value).
@@ -134,6 +139,11 @@ export function WorkspaceForm({ value: d, onChange, showErrors = true }: { value
       <section className="space-y-4">
         <SectionLabel title={t('workspaceForm.repoSection')} text={t('workspaceForm.repoSectionHint')} />
         <RepoRowsEditor rows={d.repos} onChange={(repos) => onChange({ repos })} errors={showErrors ? validateRepoRows(t, d.repos) : []} idPrefix="ws-repo" />
+      </section>
+
+      <section className="space-y-3">
+        <SectionLabel title={t('workspaceForm.githubToken')} text={t('workspaceForm.githubTokenHint')} />
+        <GithubTokenSelect value={d.githubToken} onChange={(githubToken) => onChange({ githubToken })} />
       </section>
 
       <section className="space-y-3">

@@ -1,4 +1,4 @@
-import { ADAPTERS, AGENT_TOOLS, DEFAULT_MODEL_FLAG, defaultMaxOutput, localize, profileAdapter, profileTool, type Agent, type AgentAdapter, type AgentProfile, type AgentStatus, type ApiStyle, type MethodParams, type MethodResult } from '@cocoon/protocol';
+import { ADAPTERS, AGENT_TOOLS, DEFAULT_MODEL_FLAG, defaultMaxOutput, localize, parseSkillSource, profileAdapter, profileTool, type Agent, type AgentAdapter, type AgentProfile, type AgentStatus, type ApiStyle, type MethodParams, type MethodResult } from '@cocoon/protocol';
 import { currentLanguage } from '../i18n.ts';
 import type { ServiceManager } from '../services/manager.ts';
 import type { EnvService } from '../env.ts';
@@ -16,6 +16,8 @@ import { publicAgent, type AgentRecord, type SandboxRecord, type Store } from '.
 import { singleFileTar } from '../sandbox/tar.ts';
 import { CODEX_TRUST_SCRIPT, MERGE_CONFIG_SCRIPT, wireEndpoint, type ConfigFile } from './adapters.ts';
 import { approveClaudeKeyScript } from './hooks.ts';
+import { INSTALL_SKILL_SCRIPT, skillsDirFor } from './skills.ts';
+import { githubAuthEnv } from '../sandbox/git-auth.ts';
 
 /** uid of the sandbox user in CoCoon's images and in bubblewrap sandboxes. */
 const SANDBOX_UID = 1000;
@@ -79,6 +81,7 @@ export class AgentManager {
     if (wiring.files.length) {
       await this.driver.exec(handle, ['sh', '-c', MERGE_CONFIG_SCRIPT], { env: { COCOON_CONFIG_FILES: JSON.stringify(wiring.files) } });
     }
+    await this.installSkills(handle, profile, wiring.adapter, sandbox);
     if (wiring.adapter === 'codex') {
       // The sandbox workspace is the agent's own – skip Codex' "Trust this folder?" dialog.
       // Every repository folder is its own Codex project.
@@ -293,7 +296,8 @@ export class AgentManager {
     for (const name of profile.secrets) {
       // A custom model provider replaces the default Anthropic/OpenAI credentials of the agent.
       if (providerKinds.size && ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'OPENAI_API_KEY'].includes(name)) continue;
-      const value = this.secrets.resolve(name);
+      // GITHUB_TOKEN inside the sandbox is the token chosen for this sandbox / workspace.
+      const value = name === 'GITHUB_TOKEN' ? this.secrets.githubToken(sandbox) : this.secrets.resolve(name);
       if (!value) continue;
       const proxied = useProxy ? PROXIED_SECRETS[name] : undefined;
       if (proxied) {
@@ -416,6 +420,27 @@ export class AgentManager {
     return { env, args, files, kinds, grants, model, adapter, contextWindow, maxOutputTokens };
   }
 
+  /** Installs the agent type's skills (GitHub references) into the skills folder of its CLI. */
+  private async installSkills(handle: string, profile: AgentProfile, adapter: AgentAdapter, sandbox: SandboxRecord): Promise<void> {
+    if (!profile.skills.length) return;
+    const dir = skillsDirFor(adapter);
+    if (!dir) return;
+    const sources = profile.skills.map((skill) => {
+      const source = parseSkillSource(skill);
+      if (!source) throw new CocoonError('bad_request', t('error.skillInvalid', { skill }));
+      return source;
+    });
+    if (sandbox.network === 'none') throw new CocoonError('bad_request', t('error.skillNeedsNetwork'));
+    const token = this.secrets.githubToken(sandbox);
+    for (const [i, source] of sources.entries()) {
+      const res = await this.driver.exec(handle, ['sh', '-c', INSTALL_SKILL_SCRIPT], {
+        env: { SKILLS_DIR: dir, SKILL_URL: source.url, SKILL_REF: source.ref ?? '', SKILL_PATH: source.path ?? '', SKILL_NAME: source.name, ...githubAuthEnv(source.url, token) },
+        timeoutMs: 120_000,
+      });
+      if (res.exitCode !== 0) throw new CocoonError('bad_request', t('error.skillInstallFailed', { skill: profile.skills[i] ?? source.url, error: res.stderr.trim() || `exit ${res.exitCode}` }));
+    }
+  }
+
   /** One snapshot exec per sandbox with live agents; updates status and emits events on change. */
   private async poll(): Promise<void> {
     if (this.polling) return;
@@ -497,7 +522,7 @@ export class AgentManager {
 
   private profileOrShell(kind: string): AgentProfile {
     const agents = this.settings.get().agents;
-    return agents[kind] ?? agents.shell ?? { command: ['sh'], promptMode: 'input', secrets: [], env: {}, providers: [], workingPatterns: [], blockedPatterns: [] };
+    return agents[kind] ?? agents.shell ?? { command: ['sh'], promptMode: 'input', secrets: [], env: {}, providers: [], skills: [], workingPatterns: [], blockedPatterns: [] };
   }
 }
 

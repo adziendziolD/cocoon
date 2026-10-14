@@ -162,6 +162,7 @@ export class TaskService {
     } else {
       // Fails (task stays in review) if the work cannot be pushed, e.g. without a GitHub token.
       const published = await this.publishOwnSandbox(task);
+      this.stopTaskAgents(task);
       task.status = 'done';
       task.attention = false;
       if (published) setNote(task, published.key, published.params);
@@ -519,6 +520,16 @@ export class TaskService {
     if (agent && agent.status !== 'exited') {
       this.stopping.add(agent.id);
       void this.agents.kill(agent.id).catch((err) => this.log(`stopping agent ${agent.id} failed`, err));
+    }
+  }
+
+  /** The task is finished and confirmed: no agent of any of its stages keeps running. */
+  private stopTaskAgents(task: Task): void {
+    for (const id of new Set([...task.runs.map((run) => run.agentId), ...(task.agentId ? [task.agentId] : [])])) {
+      const agent = this.store.agent(id);
+      if (!agent || agent.status === 'exited') continue;
+      this.stopping.add(id);
+      void this.agents.kill(id).catch((err) => this.log(`stopping agent ${id} failed`, err));
     }
   }
 

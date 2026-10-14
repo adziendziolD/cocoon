@@ -159,6 +159,9 @@ export const de = {
   'profiles.removeText': '{name} wird aus der Liste entfernt. Bereits laufende Agenten sind nicht betroffen. Die Änderung wird erst mit „Speichern“ übernommen.',
   'profiles.err.command': 'Bitte einen Befehl angeben.',
   'profiles.err.pattern': 'Ungültiges Muster: {pattern}',
+  'profiles.err.skill': 'Ungültiger Skill „{skill}“ – erwartet wird ein GitHub-Eintrag wie owner/repo.',
+  'profiles.form.skills': 'Skills (GitHub)',
+  'profiles.form.skillsHint': 'Ein Eintrag pro Zeile, z. B. „owner/repo“, „owner/repo/pfad/zum/skill“ oder mit Version „owner/repo@v1“. Beim Start des Agenten werden die Skills aus GitHub in die Sandbox installiert (wenn die Sandbox Internetzugang hat). Private Repositories nutzen das GitHub-Token der Sandbox.',
   'profiles.providers': 'API-Anbieter',
   'profiles.providersHint':
     'Optional: Statt des Standard-Zugangs einen eigenen Anbieter nutzen. Beispiel: Claude Code mit eigenem Gateway – wähle einen Anthropic-kompatiblen Anbieter. Codex – wähle einen OpenAI-kompatiblen. HTTP-APIs kannst du jedem Agenten zusätzlich geben.',
@@ -480,6 +483,9 @@ export const en: Messages<typeof de> = {
   'profiles.removeText': '{name} will be removed from the list. Agents that are already running are not affected. The change only takes effect once you click "Save".',
   'profiles.err.command': 'Please enter a command.',
   'profiles.err.pattern': 'Invalid pattern: {pattern}',
+  'profiles.err.skill': 'Invalid skill "{skill}" – expected a GitHub reference like owner/repo.',
+  'profiles.form.skills': 'Skills (GitHub)',
+  'profiles.form.skillsHint': 'One entry per line, e.g. "owner/repo", "owner/repo/path/to/skill" or pinned "owner/repo@v1". When the agent starts, the skills are installed from GitHub into the sandbox (needs internet access). Private repositories use the sandbox GitHub token.',
   'profiles.providers': 'API providers',
   'profiles.providersHint':
     'Optional: use your own provider instead of the default access. Example: Claude Code with your own gateway – pick an Anthropic-compatible provider. For Codex, pick an OpenAI-compatible one. HTTP APIs can be given to any agent on top.',

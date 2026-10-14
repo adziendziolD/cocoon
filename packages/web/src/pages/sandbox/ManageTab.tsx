@@ -16,6 +16,7 @@ import { networkModeMeta, sandboxStatusMeta } from '../../lib/status';
 import { useT } from '../../i18n';
 import { StartStopButton } from '../../components/StartStopButton';
 import { repoDir } from '../../lib/repos';
+import { GithubTokenSelect } from '../../components/GithubTokenSelect';
 import { SandboxReposCard } from './RepoDialogs';
 
 export function ManageTab({ sandbox: s }: { sandbox: Sandbox }) {
@@ -32,6 +33,12 @@ export function ManageTab({ sandbox: s }: { sandbox: Sandbox }) {
     error: t('manage.delete.error'),
     invalidate: [qk.sandboxes, qk.agents, qk.setup],
     onSuccess: () => navigate('/sandboxes'),
+  });
+
+  const setToken = useAction((githubToken: string) => rpc('sandbox.update', { sandboxId: s.id, githubToken: githubToken || null }), {
+    success: t('githubToken.saved'),
+    error: t('common.saveFailed'),
+    invalidate: [qk.sandboxes],
   });
 
   return (
@@ -80,6 +87,16 @@ export function ManageTab({ sandbox: s }: { sandbox: Sandbox }) {
           </CardBody>
         </Card>
         <SandboxReposCard sandbox={s} />
+        <Card>
+          <CardHeader title={t('githubToken.title')} description={t('githubToken.description')} />
+          <CardBody>
+            <GithubTokenSelect
+              value={s.githubToken ?? ''}
+              inheritLabel={t('githubToken.inherit')}
+              onChange={(githubToken) => setToken.mutate(githubToken)}
+            />
+          </CardBody>
+        </Card>
       </div>
 
       <div className="space-y-5">
