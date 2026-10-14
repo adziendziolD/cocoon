@@ -90,6 +90,41 @@ export const ReviewResult = z.object({
 });
 export type ReviewResult = z.infer<typeof ReviewResult>;
 
+/** The GitHub issue a task was imported from. */
+export const TaskIssue = z.object({
+  /** "owner/name" */
+  repo: z.string(),
+  number: z.number().int(),
+  url: z.string(),
+});
+export type TaskIssue = z.infer<typeof TaskIssue>;
+
+/** Open GitHub issue of a workspace repository, sorted into bugs and features. */
+export const GithubIssue = z.object({
+  repo: z.string(),
+  number: z.number().int(),
+  title: z.string(),
+  body: z.string().default(''),
+  url: z.string(),
+  kind: z.enum(['bug', 'feature']),
+  labels: z.array(z.string()).default([]),
+  author: z.string().optional(),
+  createdAt: z.string(),
+  comments: z.number().int().default(0),
+  /** Task this issue was already imported as. */
+  taskId: z.string().optional(),
+});
+export type GithubIssue = z.infer<typeof GithubIssue>;
+
+export const GithubIssues = z.object({
+  /** GitHub repositories of the workspace ("owner/name"). */
+  repos: z.array(z.string()),
+  issues: z.array(GithubIssue),
+  /** Repositories whose issues could not be loaded (no access, rate limit, …). */
+  errors: z.array(z.object({ repo: z.string(), message: z.string() })),
+});
+export type GithubIssues = z.infer<typeof GithubIssues>;
+
 export const Task = z.object({
   id: z.string(),
   workspaceId: z.string(),
@@ -124,6 +159,8 @@ export const Task = z.object({
   reviews: z.array(ReviewResult).default([]),
   /** Pull requests opened for the task (one per repository). */
   pullRequests: z.array(z.object({ repo: z.string(), url: z.string() })).default([]),
+  /** Set when the task was imported from a GitHub issue. */
+  issue: TaskIssue.optional(),
   /** Human-readable progress or error note (rendered in the client's language). */
   note: z.string().optional(),
   /** Message key + parameters behind `note`. */

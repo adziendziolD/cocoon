@@ -5,6 +5,7 @@ import type { AgentManager } from './agents/manager.ts';
 import type { EnvService } from './env.ts';
 import type { EgressManager } from './egress.ts';
 import { CocoonError } from './errors.ts';
+import type { IssueService } from './github-issues.ts';
 import type { ImageService } from './images.ts';
 import type { SandboxDriver } from './sandbox/driver.ts';
 import type { SandboxManager } from './sandbox/manager.ts';
@@ -47,12 +48,13 @@ export interface RpcContext {
   updates: UpdateService;
   ports: PortService;
   envs: EnvService;
+  issues: IssueService;
 }
 
 const CREDENTIAL_SECRETS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'OPENAI_API_KEY', 'GEMINI_API_KEY'];
 
 export function createRpc(ctx: RpcContext) {
-  const { driver, store, settings, secrets, providers, tokens, images, egress, activity, sandboxes, workspace, agents, workspaces, tasks, notifier, services, updates, ports, envs } = ctx;
+  const { driver, store, settings, secrets, providers, tokens, images, egress, activity, sandboxes, workspace, agents, workspaces, tasks, notifier, services, updates, ports, envs, issues } = ctx;
   const ok = { ok: true as const };
 
   const handlers: Handlers = {
@@ -213,6 +215,8 @@ export function createRpc(ctx: RpcContext) {
     'task.get': async (p) => tasks.get(p.taskId),
     'task.create': async (p) => tasks.create(p),
     'task.update': async (p) => tasks.update(p),
+    'github.issues': async (p) => issues.list(p),
+    'github.import_issues': async (p) => issues.import(p),
     'task.delete': async (p) => (await tasks.delete(p.taskId), ok),
     'task.start': async (p) => tasks.start(p.taskId),
     'task.approve': async (p) => tasks.approve(p.taskId),

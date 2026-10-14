@@ -6,6 +6,7 @@ import { PageHeader } from '../components/Card';
 import { EmptyState } from '../components/EmptyState';
 import { Callout } from '../components/HelpText';
 import { ErrorState, LoadingState } from '../components/States';
+import { IssueBadges } from '../components/tasks/IssueImport';
 import { AutomationBar } from '../components/tasks/AutomationBar';
 import { TaskBoard } from '../components/tasks/TaskBoard';
 import { WorkspaceSwitcher } from '../components/WorkspaceSwitcher';
@@ -59,7 +60,10 @@ export function TasksPage() {
       ) : (
         <div className="space-y-4">
           {workspace ? (
-            <AutomationBar workspace={workspace} tasks={list} />
+            <>
+              <AutomationBar workspace={workspace} tasks={list} />
+              <IssueBadges workspace={workspace} />
+            </>
           ) : (
             <Callout tone="tip">{t('tasksPage.allHint')}</Callout>
           )}

@@ -72,7 +72,7 @@ export class TaskService {
 
   // ── commands ───────────────────────────────────────────────────────────────
 
-  create(params: MethodParams<'task.create'>): Task {
+  create(params: MethodParams<'task.create'>, issue?: Task['issue']): Task {
     const workspace = this.workspaces.get(params.workspaceId);
     this.validate(workspace, params);
     const now = new Date().toISOString();
@@ -99,6 +99,7 @@ export class TaskService {
       attention: false,
       reviews: [],
       pullRequests: [],
+      issue,
       createdAt: now,
       updatedAt: now,
     };

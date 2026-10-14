@@ -39,6 +39,7 @@ export const qk = {
   workspace: (id: string) => ['workspace', id] as const,
   /** All tasks of all workspaces; views filter client-side (like agents). */
   tasks: ['tasks'] as const,
+  githubIssues: (workspaceId: string) => ['github.issues', workspaceId] as const,
   task: (id: string) => ['task', id] as const,
   /** Cockpit layout of a workspace; '' = the global layout. */
   layout: (workspaceId: string) => ['layout', workspaceId] as const,
