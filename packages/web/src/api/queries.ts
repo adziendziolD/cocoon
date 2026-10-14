@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import type { AgentAdapter, EnvScopeRef } from '@cocoon/protocol';
 import { qk } from './keys';
 import { isNotFound, rpc } from './rpc';
 
@@ -33,6 +34,15 @@ export const useUpdateStatus = () =>
 
 export const useSettings = () => useQuery({ queryKey: qk.settings, queryFn: () => rpc('settings.get') });
 export const useSecrets = () => useQuery({ queryKey: qk.secrets, queryFn: () => rpc('secrets.list') });
+/** Models an agent CLI offers with its default credentials (vendor listing); empty while loading or if unknown. */
+export const useDefaultModels = (adapter: AgentAdapter | undefined, enabled = true) =>
+  useQuery({
+    queryKey: qk.defaultModels(adapter ?? ''),
+    queryFn: () => rpc('models.list', { adapter: adapter! }),
+    enabled: enabled && !!adapter,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
 export const useTokens = () => useQuery({ queryKey: qk.tokens, queryFn: () => rpc('tokens.list') });
 export const useDenied = () => useQuery({ queryKey: qk.denied, queryFn: () => rpc('egress.denied'), refetchInterval: 10_000 });
 
@@ -108,3 +118,11 @@ export const useServices = () => useQuery({ queryKey: qk.services, queryFn: () =
 
 export const useServiceConnections = (sandboxId: string, enabled = true) =>
   useQuery({ queryKey: qk.serviceConnections(sandboxId), queryFn: () => rpc('services.connections', { sandboxId }), enabled });
+
+/** Variables of one level (workspace, repository or sandbox); values of secrets are never included. */
+export const useEnvScope = (ref: EnvScopeRef) =>
+  useQuery({ queryKey: qk.envScope(ref.scope, ref.id), queryFn: () => rpc('env.get', ref) });
+
+/** The merged variables of a sandbox with their origin, and the state of its .env files. */
+export const useResolvedEnv = (sandboxId: string) =>
+  useQuery({ queryKey: qk.envResolved(sandboxId), queryFn: () => rpc('env.resolve', { sandboxId }) });

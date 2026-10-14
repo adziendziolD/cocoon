@@ -15,6 +15,7 @@ import {
   Sandbox,
   SandboxPort,
   PortMode,
+  AgentAdapter,
   AgentTool,
   ApiProvider,
   ApiStyle,
@@ -22,6 +23,7 @@ import {
   DriverCapabilities,
   DriverKind,
   PROVIDER_ID,
+  GITHUB_TOKEN_NAME,
   SECRET_NAME,
   SecretInfo,
   SetupStep,
@@ -30,6 +32,7 @@ import {
   UpdateStatus,
   UpdateTarget,
 } from './models.ts';
+import { EnvFileStatus, EnvScopeInfo, EnvScopeRef, EnvTarget, EnvVarInput, ResolvedEnv } from './env.ts';
 import { SERVICE_ID, ServiceAdminCredentials, ServiceConnection, ServiceInfo, ServiceKind, SharedService } from './services.ts';
 
 /**
@@ -71,6 +74,7 @@ const WorkspaceInput = z.object({
   repo: RepoSource.nullable().optional(),
   repos: z.array(RepoSource).max(20).nullable().optional(),
   network: NetworkMode.optional(),
+  githubToken: z.string().regex(GITHUB_TOKEN_NAME).nullable().optional(),
   sandboxMode: z.enum(['per-task', 'shared']).optional(),
   defaultAgentKind: z.string().optional(),
   defaultWorkflowId: z.string().nullable().optional(),
@@ -259,6 +263,12 @@ export const methods = {
       modelInfo: z.record(z.string(), ModelInfo).default({}),
     }),
   },
+  'models.list': {
+    description:
+      "Models an agent type offers with its default credentials (Anthropic/OpenAI/Gemini key): listed from the vendor's API, plus built-in aliases. Empty if nothing is known.",
+    params: z.object({ adapter: AgentAdapter }),
+    result: z.object({ models: z.array(z.string()).default([]), source: z.enum(['api', 'builtin', 'none']).default('none') }),
+  },
   'notifications.test': {
     description: 'Sends a test message to the configured notification webhook.',
     params: z.object({ webhookUrl: z.url().optional() }).default({}),
@@ -370,6 +380,7 @@ export const methods = {
       runtime: z.string().nullable().optional(),
       resources: Resources.optional(),
       workspaceId: z.string().optional(),
+      githubToken: z.string().regex(GITHUB_TOKEN_NAME).optional(),
       env: z.record(z.string(), z.string()).optional(),
       /** Shared services to attach (default: all services set to "every sandbox"). */
       services: z.array(z.string()).optional(),
@@ -384,6 +395,8 @@ export const methods = {
     params: SandboxRef.extend({
       name: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$/).optional(),
       workspaceId: z.string().nullable().optional(),
+      /** GitHub token (secret name); null = use the workspace's / default token. */
+      githubToken: z.string().regex(GITHUB_TOKEN_NAME).nullable().optional(),
     }),
     result: Sandbox,
   },
@@ -647,6 +660,46 @@ export const methods = {
     result: Task,
   },
   'task.stop': { description: 'Stops the running agent of a task and moves it back to the backlog.', mcp: true, params: TaskRef, result: Task },
+
+  // ── environment (.env injection) ──────────────────────────────────────────
+  // Admin methods (no MCP): an orchestrating agent must not read or change the secrets of other sandboxes.
+  'env.get': {
+    description: 'Variables defined on one level (workspace, repository or sandbox). Secret values are never returned.',
+    params: EnvScopeRef,
+    result: EnvScopeInfo,
+  },
+  'env.set': {
+    description:
+      'Creates or updates variables on one level. A variable without value keeps its stored value. filePath sets the .env file path inside the repository folders ("" resets it).',
+    params: EnvScopeRef.extend({ vars: z.array(EnvVarInput).max(500).default([]), filePath: z.string().nullable().optional() }),
+    result: EnvScopeInfo,
+  },
+  'env.unset': {
+    description: 'Removes variables from one level.',
+    params: EnvScopeRef.extend({ names: z.array(z.string()).min(1).max(500) }),
+    result: EnvScopeInfo,
+  },
+  'env.import': {
+    description: 'Imports the content of a .env file into one level. With replace, variables missing from the file are removed.',
+    params: EnvScopeRef.extend({
+      content: z.string().max(1_000_000),
+      target: EnvTarget.optional(),
+      secret: z.boolean().optional(),
+      replace: z.boolean().default(false),
+    }),
+    result: z.object({ scope: EnvScopeInfo, imported: z.array(z.string()), errors: z.array(z.object({ line: z.number(), message: z.string() })) }),
+  },
+  'env.resolve': {
+    description:
+      'The variables a sandbox (and an agent of the given type) gets: levels merged (workspace → repository → sandbox → agent type) with the origin of every value. Values of secrets are not returned.',
+    params: SandboxRef.extend({ agentKind: z.string().optional() }),
+    result: ResolvedEnv,
+  },
+  'env.apply': {
+    description: 'Writes the .env files of a running sandbox now (otherwise done when the next agent starts).',
+    params: SandboxRef,
+    result: z.object({ files: z.array(EnvFileStatus) }),
+  },
 
   // ── cockpit ───────────────────────────────────────────────────────────────
   'layout.get': {

@@ -217,7 +217,7 @@ export class WorkspaceService {
     const { repo, dir } = this.repo(sandboxId, path);
     const { remoteUrl } = await this.gitStatus(sandboxId, path);
     if (!remoteUrl) throw new CocoonError('bad_request', t('error.noRemote'));
-    const token = this.secrets.resolve('GITHUB_TOKEN');
+    const token = this.secrets.githubToken(this.sandboxes.record(sandboxId));
     if (!token && remoteUrl.includes('github.com')) {
       throw new CocoonError('bad_request', t('error.pushNeedsToken'));
     }
@@ -232,7 +232,7 @@ export class WorkspaceService {
     const { remoteUrl } = await this.gitStatus(sandboxId, path);
     const repo = remoteUrl && parseGithubRepo(remoteUrl);
     if (!repo) throw new CocoonError('bad_request', t('error.prGithubOnly'));
-    const token = this.secrets.resolve('GITHUB_TOKEN');
+    const token = this.secrets.githubToken(this.sandboxes.record(sandboxId));
     if (!token) throw new CocoonError('bad_request', t('error.prNeedsToken'));
 
     const gh = async (path: string, init?: RequestInit) => {

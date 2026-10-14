@@ -103,6 +103,9 @@ export const messages = {
     de: 'Zum Klonen eines Repositories braucht die Sandbox Internetzugang (nicht „Kein Internet“).',
     en: 'Cloning a repository requires internet access (not "No internet").',
   },
+  'error.skillInvalid': { de: 'Ungültiger Skill „{skill}“ – erwartet wird ein GitHub-Eintrag wie owner/repo oder owner/repo/pfad@ref.', en: 'Invalid skill "{skill}" – expected a GitHub reference like owner/repo or owner/repo/path@ref.' },
+  'error.skillNeedsNetwork': { de: 'Zum Installieren von Skills braucht die Sandbox Internetzugang (nicht „Kein Internet“).', en: 'Installing skills requires internet access (not "No internet").' },
+  'error.skillInstallFailed': { de: 'Skill {skill} konnte nicht installiert werden: {error}', en: 'Could not install skill {skill}: {error}' },
   'error.sandboxNameTaken': { de: 'Es gibt schon eine Sandbox namens „{name}“', en: 'A sandbox named "{name}" already exists' },
   'error.sandboxCreateFailed': { de: 'Sandbox konnte nicht erstellt werden: {error}', en: 'Could not create the sandbox: {error}' },
   'error.sandboxNoContainer': { de: 'Sandbox {name} hat keinen Container', en: 'Sandbox {name} has no container' },
@@ -177,6 +180,27 @@ export const messages = {
   'activity.proxyFailed': { de: 'Egress-Proxy konnte nicht gestartet werden: {error}', en: 'Egress proxy could not be started: {error}' },
   'activity.secretSaved': { de: 'Zugangsdaten „{name}“ gespeichert', en: 'Credential "{name}" saved' },
   'activity.secretDeleted': { de: 'Zugangsdaten „{name}“ gelöscht', en: 'Credential "{name}" deleted' },
+  'activity.envChanged': { de: 'Umgebungsvariablen ({level} „{label}“) geändert: {count}', en: 'Environment variables ({level} "{label}") changed: {count}' },
+  'activity.envFileFailed': { de: 'Die .env-Datei in „{sandbox}“ konnte nicht geschrieben werden: {error}', en: 'The .env file in "{sandbox}" could not be written: {error}' },
+  'error.envReserved': { de: '„{name}“ wird von CoCoon selbst gesetzt und lässt sich nicht überschreiben.', en: '"{name}" is set by CoCoon itself and cannot be overridden.' },
+  'error.envFilePath': {
+    de: 'Ungültiger Pfad „{path}“ für die .env-Datei: erlaubt sind relative Pfade aus Buchstaben, Ziffern, „.“, „_“ und „-“ (ohne „..“ und „.git“).',
+    en: 'Invalid .env file path "{path}": only relative paths of letters, digits, ".", "_" and "-" are allowed (no ".." or ".git").',
+  },
+  'error.envProxyHost': { de: '„{host}“ ist kein gültiger Hostname für den Credential-Proxy (z. B. api.stripe.com).', en: '"{host}" is not a valid host name for the credential proxy (e.g. api.stripe.com).' },
+  'error.envProxyName': {
+    de: 'Variablen für den Credential-Proxy brauchen einen Namen aus Großbuchstaben, Ziffern und „_“ (z. B. STRIPE_API_KEY): {name}',
+    en: 'Variables for the credential proxy need a name of capital letters, digits and "_" (e.g. STRIPE_API_KEY): {name}',
+  },
+  'error.envNoValue': { de: 'Für „{name}“ fehlt der Wert.', en: 'The value of "{name}" is missing.' },
+  'error.envValueUnreadable': { de: 'Der Wert von „{name}“ lässt sich nicht entschlüsseln (Schlüsseldatei env.key fehlt oder wurde ersetzt) – bitte neu setzen.', en: 'The value of "{name}" cannot be decrypted (key file env.key is missing or was replaced) – please set it again.' },
+  'env.skippedProxy': {
+    de: 'Nicht eingefügt: Der Credential-Proxy ist für diese Sandbox nicht verfügbar (Netzwerk „kein Netz“ oder Schutz für API-Keys aus) – der Wert würde sonst im Klartext in die Sandbox gelangen.',
+    en: 'Not injected: the credential proxy is not available for this sandbox (network "none" or API key protection off) – the value would otherwise reach the sandbox in plain text.',
+  },
+  'env.fileTracked': { de: '{path} ist im Repository versioniert – CoCoon schreibt dort nichts hinein, damit keine Secrets in Diffs landen.', en: '{path} is tracked in the repository – CoCoon does not write to it so that no secrets end up in diffs.' },
+  'env.fileForeign': { de: '{path} existiert und stammt nicht von CoCoon – sie wird nicht überschrieben.', en: '{path} exists and was not created by CoCoon – it is not overwritten.' },
+  'env.fileNoGit': { de: 'Der Ordner ist kein git-Repository – ohne git-Ausschluss wird keine .env-Datei geschrieben.', en: 'The folder is not a git repository – no .env file is written without a git exclude.' },
   'activity.tokenCreated': { de: 'API-Token „{name}“ erstellt', en: 'API token "{name}" created' },
 
   // provider test

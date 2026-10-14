@@ -236,6 +236,7 @@ export class EgressManager {
   private readonly runner: ProxyRunner;
   private version = Date.now();
   private relays: () => Relay[] = () => [];
+  private envRoutes: (sandboxId: string) => { name: string; upstream: string; secrets: Record<string, string> }[] = () => [];
 
   constructor(
     driver: SandboxDriver,
@@ -297,6 +298,12 @@ export class EgressManager {
     this.writePolicy();
   }
 
+  /** Supplies the routes for per-sandbox "API key for host X" environment variables. */
+  setEnvRoutes(source: (sandboxId: string) => { name: string; upstream: string; secrets: Record<string, string> }[]): void {
+    this.envRoutes = source;
+    this.writePolicy();
+  }
+
   /** Host under which the proxy reaches a server address ("localhost" means the CoCoon server). */
   reachableHost(host: string): string {
     return new URL(this.runner.reachableUrl(`tcp://${host.includes(':') && !host.startsWith('[') ? `[${host}]` : host}`)).hostname;
@@ -320,9 +327,12 @@ export class EgressManager {
     type Entry = { sandboxId: string; token: string; routes: string[] };
     const sandboxes: Record<string, Entry> = {};
     const tokens: Record<string, Entry> = {};
+    const envRoutes: Record<string, { upstream: string; secrets: Record<string, string> }> = {};
     for (const sb of this.store.sandboxes()) {
       if (sb.network === 'none' || (sb.status !== 'running' && sb.status !== 'creating')) continue;
-      const entry = { sandboxId: sb.id, token: sb.proxyToken, routes: sb.grants ?? [] };
+      const own = settings.egress.credentialProxy ? this.envRoutes(sb.id) : [];
+      const entry = { sandboxId: sb.id, token: sb.proxyToken, routes: [...(sb.grants ?? []), ...own.map((r) => r.name)] };
+      for (const route of own) envRoutes[route.name] = { upstream: this.runner.reachableUrl(route.upstream), secrets: route.secrets };
       // Credential routes work for every sandbox with network access (identified by token);
       // the forward proxy (by IP) only matters for "restricted" sandboxes on the internal network.
       tokens[sb.proxyToken] = entry;
@@ -335,7 +345,7 @@ export class EgressManager {
       /** Translate requests in this API style to the upstream's Chat Completions endpoint. */
       translate?: { from: 'messages' | 'responses'; chatPath: string; maxTokens?: Record<string, number> };
     };
-    const routes: Record<string, Route> = {};
+    const routes: Record<string, Route> = { ...envRoutes };
     if (settings.egress.credentialProxy) {
       for (const [name, def] of Object.entries(PROXIED_SECRETS)) {
         const value = this.secrets.resolve(name);

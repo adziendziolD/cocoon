@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { KNOWN_SECRETS, localize, type SecretInfo } from '@cocoon/protocol';
+import { isGithubTokenName, KNOWN_SECRETS, localize, type SecretInfo } from '@cocoon/protocol';
 import { ExternalLink, KeyRound, Plug, Plus, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { qk } from '../../api/keys';
@@ -27,6 +27,7 @@ export function SecretsSettings() {
   const secrets = useSecrets();
   const settings = useSettings();
   const [addOpen, setAddOpen] = useState(false);
+  const [addGithubOpen, setAddGithubOpen] = useState(false);
   const [toDelete, setToDelete] = useState<string | null>(null);
 
   const del = useAction((name: string) => rpc('secrets.delete', { name }), {
@@ -40,7 +41,8 @@ export function SecretsSettings() {
   if (secrets.error) return <ErrorState error={secrets.error} onRetry={() => secrets.refetch()} />;
 
   const byName = new Map((secrets.data ?? []).map((s) => [s.name, s]));
-  const custom = (secrets.data ?? []).filter((s) => !(s.name in KNOWN_SECRETS));
+  const githubTokens = (secrets.data ?? []).filter((s) => s.name !== 'GITHUB_TOKEN' && isGithubTokenName(s.name));
+  const custom = (secrets.data ?? []).filter((s) => !(s.name in KNOWN_SECRETS) && !isGithubTokenName(s.name));
   // Secret name -> labels of the API providers that use it as their key.
   const providersBySecret = new Map<string, string[]>();
   for (const p of Object.values(settings.data?.providers ?? {})) {
@@ -77,6 +79,27 @@ export function SecretsSettings() {
 
       <Card>
         <CardHeader
+          title={t('secrets.github.title')}
+          description={t('secrets.github.description')}
+          actions={
+            <Button size="sm" icon={<Plus className="size-3.5" />} onClick={() => setAddGithubOpen(true)}>
+              {t('common.add')}
+            </Button>
+          }
+        />
+        {githubTokens.length === 0 ? (
+          <p className="px-5 py-4 text-sm text-fg-muted">{t('secrets.github.empty')}</p>
+        ) : (
+          <ul className="divide-y divide-line">
+            {githubTokens.map((s) => (
+              <SecretRow key={s.name} name={s.name} info={s} onDelete={() => setToDelete(s.name)} />
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <Card>
+        <CardHeader
           title={t('secrets.custom.title')}
           description={t('secrets.custom.description')}
           actions={
@@ -97,6 +120,7 @@ export function SecretsSettings() {
       </Card>
 
       <AddSecretDialog open={addOpen} onClose={() => setAddOpen(false)} />
+      <AddSecretDialog open={addGithubOpen} onClose={() => setAddGithubOpen(false)} github />
       <ConfirmDialog
         open={!!toDelete}
         onClose={() => setToDelete(null)}
@@ -216,17 +240,17 @@ function SecretEditor({ name, onDone, overridesEnv }: { name: string; onDone: ()
   );
 }
 
-function AddSecretDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+function AddSecretDialog({ open, onClose, github = false }: { open: boolean; onClose: () => void; github?: boolean }) {
   const t = useT();
-  const [name, setName] = useState('');
+  const [name, setName] = useState(github ? 'GITHUB_TOKEN_' : '');
   const [value, setValue] = useState('');
-  const nameErr = name && !NAME_RE.test(name) ? t('secrets.add.invalidName') : undefined;
+  const nameErr = name && !NAME_RE.test(name) ? t('secrets.add.invalidName') : github && name && name !== 'GITHUB_TOKEN' && !isGithubTokenName(name) ? t('secrets.github.invalidName') : undefined;
   const save = useAction(() => rpc('secrets.set', { name, value }), {
     success: t('secrets.add.success'),
     error: t('common.saveFailed'),
     invalidate: [qk.secrets],
     onSuccess: () => {
-      setName('');
+      setName(github ? 'GITHUB_TOKEN_' : '');
       setValue('');
       onClose();
     },
@@ -236,7 +260,7 @@ function AddSecretDialog({ open, onClose }: { open: boolean; onClose: () => void
       open={open}
       onClose={onClose}
       size="sm"
-      title={t('secrets.add.title')}
+      title={github ? t('secrets.github.add') : t('secrets.add.title')}
       footer={
         <>
           <Button onClick={onClose}>{t('common.cancel')}</Button>
@@ -248,7 +272,7 @@ function AddSecretDialog({ open, onClose }: { open: boolean; onClose: () => void
     >
       <div className="space-y-4">
         <Field label={t('common.name')} error={nameErr} hint={t('secrets.add.nameHint')}>
-          <Input value={name} onChange={(e) => setName(e.target.value.toUpperCase())} placeholder={t('secrets.add.namePlaceholder')} className="font-mono" invalid={!!nameErr} />
+          <Input value={name} onChange={(e) => setName(e.target.value.toUpperCase())} placeholder={github ? 'GITHUB_TOKEN_COMPANY' : t('secrets.add.namePlaceholder')} className="font-mono" invalid={!!nameErr} />
         </Field>
         <Field label={t('common.value')}>
           <Input type="password" value={value} onChange={(e) => setValue(e.target.value)} className="font-mono" autoComplete="off" />

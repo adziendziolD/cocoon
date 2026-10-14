@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { isMethodName, methods, type MethodName, type MethodResult, type Methods, type SetupStep } from '@cocoon/protocol';
 import type { ActivityLog } from './activity.ts';
 import type { AgentManager } from './agents/manager.ts';
+import type { EnvService } from './env.ts';
 import type { EgressManager } from './egress.ts';
 import { CocoonError } from './errors.ts';
 import type { ImageService } from './images.ts';
@@ -45,12 +46,13 @@ export interface RpcContext {
   services: ServiceManager;
   updates: UpdateService;
   ports: PortService;
+  envs: EnvService;
 }
 
 const CREDENTIAL_SECRETS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'OPENAI_API_KEY', 'GEMINI_API_KEY'];
 
 export function createRpc(ctx: RpcContext) {
-  const { driver, store, settings, secrets, providers, tokens, images, egress, activity, sandboxes, workspace, agents, workspaces, tasks, notifier, services, updates, ports } = ctx;
+  const { driver, store, settings, secrets, providers, tokens, images, egress, activity, sandboxes, workspace, agents, workspaces, tasks, notifier, services, updates, ports, envs } = ctx;
   const ok = { ok: true as const };
 
   const handlers: Handlers = {
@@ -150,6 +152,7 @@ export function createRpc(ctx: RpcContext) {
     },
     'tokens.revoke': async (p) => (tokens.revoke(p.id), ok),
     'providers.test': (p) => ('id' in p ? providers.testAndRemember(p.id) : providers.test(p.provider)),
+    'models.list': async (p) => providers.defaultModels(p.adapter),
     'egress.denied': async () => egress.denied(),
     'notifications.test': (p) => notifier.test(p.webhookUrl),
 
@@ -160,10 +163,14 @@ export function createRpc(ctx: RpcContext) {
     'sandbox.start': (p) => sandboxes.start(p.sandboxId),
     'sandbox.stop': (p) => sandboxes.stop(p.sandboxId),
     'sandbox.delete': async (p) => (await sandboxes.delete(p.sandboxId), ok),
-    'sandbox.exec': (p) => sandboxes.exec(p.sandboxId, p.command, { timeoutMs: p.timeoutMs }),
+    'sandbox.exec': (p) => sandboxes.exec(p.sandboxId, p.command, { timeoutMs: p.timeoutMs, env: envs.injectedEnv(sandboxes.record(p.sandboxId)) }),
     'sandbox.diff': (p) => workspace.diff(p.sandboxId, p.repo),
     'sandbox.apply_patch': (p) => workspace.applyPatch(p.sandboxId, p.patch, p.repo),
-    'sandbox.add_repo': (p) => sandboxes.addRepo(p),
+    'sandbox.add_repo': async (p) => {
+      const sandbox = await sandboxes.addRepo(p);
+      await envs.applyFiles(p.sandboxId).catch(() => undefined); // the new repository's own variables
+      return sandbox;
+    },
     'sandbox.remove_repo': (p) => sandboxes.removeRepo(p.sandboxId, p.repo),
 
     'files.list': (p) => workspace.list(p.sandboxId, p.path),
@@ -224,6 +231,13 @@ export function createRpc(ctx: RpcContext) {
     'services.attach': (p) => services.attach(p.sandboxId, p.serviceId),
     'services.detach': async (p) => (await services.detach(p.sandboxId, p.serviceId), ok),
     'services.reset': (p) => services.reset(p.sandboxId, p.serviceId),
+
+    'env.get': async (p) => envs.get(p),
+    'env.set': async (p) => envs.set(p, p.vars, p.filePath),
+    'env.unset': async (p) => envs.unset(p, p.names),
+    'env.import': async (p) => envs.import(p),
+    'env.resolve': async (p) => envs.resolve(p.sandboxId, p.agentKind),
+    'env.apply': async (p) => ({ files: await envs.applyFiles(p.sandboxId) }),
 
     'layout.get': async (p) => store.layout(p.workspaceId ?? '_global') ?? null,
     'layout.save': async (p) => (store.putLayout(p.workspaceId ?? '_global', { ...p.layout, updatedAt: new Date().toISOString() }), ok),

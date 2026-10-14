@@ -7,6 +7,7 @@ import {
   DEFAULT_PROFILES,
   KNOWN_SECRETS,
   localize,
+  parseSkillSource,
   profileAdapter,
   profileTool,
   type AgentProfile,
@@ -15,7 +16,7 @@ import {
   type LocalizedText,
 } from '@cocoon/protocol';
 import { Bot, ChevronDown, ChevronRight, Plug, Plus, RotateCcw, Save, Sparkles, SquareTerminal, Trash2, Undo2 } from 'lucide-react';
-import { useImages, useSecrets, useSettings } from '../../api/queries';
+import { useDefaultModels, useImages, useSecrets, useSettings } from '../../api/queries';
 import { apiLabel, CompatBadge, InstallToolButton } from '../../components/CompatBits';
 import { ModelSelect } from '../../components/ModelSelect';
 import { Badge } from '../../components/Badge';
@@ -54,6 +55,8 @@ interface ProfileDraft {
   adapter: '' | AgentAdapter;
   tool: '' | AgentTool;
   promptFlag: string;
+  /** One GitHub skill reference per line. */
+  skills: string;
   /** Context window / answer length as typed ('' = from the model). */
   contextWindow: string;
   maxOutputTokens: string;
@@ -79,6 +82,7 @@ function toDraft(p: AgentProfile): ProfileDraft {
     adapter: p.adapter ?? '',
     tool: p.tool ?? '',
     promptFlag: p.promptFlag ?? '',
+    skills: p.skills.join('\n'),
     contextWindow: tokensText(p.contextWindow),
     maxOutputTokens: tokensText(p.maxOutputTokens),
   };
@@ -102,6 +106,7 @@ function fromDraft(d: ProfileDraft): AgentProfile {
     adapter: d.adapter || undefined,
     tool: d.tool || undefined,
     promptFlag: d.promptFlag.trim() || undefined,
+    skills: lines(d.skills),
     contextWindow: parseTokens(d.contextWindow),
     maxOutputTokens: parseTokens(d.maxOutputTokens),
   };
@@ -109,6 +114,8 @@ function fromDraft(d: ProfileDraft): AgentProfile {
 
 function validate(t: TFunction, d: ProfileDraft): string | undefined {
   if (splitCommand(d.commandText).length === 0) return t('profiles.err.command');
+  const badSkill = lines(d.skills).find((skill) => !parseSkillSource(skill));
+  if (badSkill) return t('profiles.err.skill', { skill: badSkill });
   const limitsError = limitsPairError(t, d.contextWindow, d.maxOutputTokens);
   if (limitsError) return `${t('limits.title')}: ${limitsError}`;
   for (const p of [...lines(d.workingPatterns), ...lines(d.blockedPatterns)]) {
@@ -368,8 +375,6 @@ function ProfileForm({
   const [advanced, setAdvanced] = useState(() => !!d.contextWindow || !!d.maxOutputTokens);
   const providerEntries = Object.entries(providers);
   const selectedProviders = d.providers.map((pid) => providers[pid]).filter((p): p is ApiProvider => !!p);
-  const modelSuggestions = Array.from(new Set(selectedProviders.flatMap((p) => [...(p.defaultModel ? [p.defaultModel] : []), ...p.models])));
-  const defaultModel = selectedProviders.find((p) => p.defaultModel)?.defaultModel;
   const missingProviders = d.providers.filter((pid) => !providers[pid]);
   const parsed = splitCommand(d.commandText);
   const images = useImages();
@@ -378,6 +383,11 @@ function ProfileForm({
   const derivedAdapter = profileAdapter({ tool: d.tool || undefined, command: parsed.length ? parsed : [''] });
   const adapter = d.adapter || derivedAdapter;
   const adapterInfo = ADAPTERS[adapter];
+  const vendorModels = useDefaultModels(adapter, selectedProviders.length === 0);
+  const modelSuggestions = Array.from(
+    new Set(selectedProviders.length ? selectedProviders.flatMap((p) => [...(p.defaultModel ? [p.defaultModel] : []), ...p.models]) : (vendorModels.data?.models ?? [])),
+  );
+  const defaultModel = selectedProviders.find((p) => p.defaultModel)?.defaultModel;
   const adapterName = (a: AgentAdapter) => (a === 'generic' ? t('profiles.adapter.generic') : toolLabel(a));
   const missingTool = tool && toolState({ tool, command: parsed.length ? parsed : [''] }, images.data) === 'missing';
   const compatFor = (p: ApiProvider): Compat | undefined => (isModelProvider(p) ? providerCompat(adapter, p) : undefined);
@@ -551,7 +561,6 @@ function ProfileForm({
           )}
           <Field label={t('profiles.model')} optional hint={defaultModel ? t('profiles.modelHintDefault', { model: defaultModel }) : t('profiles.modelHint')}>
             <ModelSelect
-              key={modelSuggestions.join(',')}
               value={d.model}
               onChange={(model) => onChange({ model })}
               models={modelSuggestions}
@@ -594,6 +603,10 @@ function ProfileForm({
 
         <Field label={t('profiles.form.env')} optional hint={t('profiles.form.envHint')}>
           <KeyValueEditor rows={d.env} onChange={(env) => onChange({ env })} />
+        </Field>
+
+        <Field label={t('profiles.form.skills')} optional hint={t('profiles.form.skillsHint')}>
+          <Textarea value={d.skills} onChange={(e) => onChange({ skills: e.target.value })} rows={3} className="font-mono text-xs" placeholder={'owner/repo\nowner/repo/skills/name@v1'} />
         </Field>
 
         <div className="rounded-xl border border-line">
@@ -669,7 +682,7 @@ function AddProfileDialog({ open, onClose, existing, onAdd }: { open: boolean; o
     let profile: AgentProfile;
     if (template === 'autonomous') profile = CLAUDE_AUTONOMOUS;
     else if (template.startsWith('copy:')) profile = fromDraft(existing[template.slice(5)]!);
-    else profile = { command: ['bash', '-l'], promptMode: 'input', secrets: [], env: {}, providers: [], workingPatterns: [], blockedPatterns: [], label: '' };
+    else profile = { command: ['bash', '-l'], promptMode: 'input', secrets: [], env: {}, providers: [], skills: [], workingPatterns: [], blockedPatterns: [], label: '' };
     onAdd(key, profile);
     onClose();
   };

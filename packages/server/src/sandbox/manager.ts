@@ -77,6 +77,7 @@ export class SandboxManager {
       if (params.workspaceId && !this.store.workspace(params.workspaceId)) throw notFound('Workspace', params.workspaceId);
       record.workspaceId = params.workspaceId ?? undefined;
     }
+    if (params.githubToken !== undefined) record.githubToken = params.githubToken ?? undefined;
     this.save(record);
     return publicSandbox(record);
   }
@@ -123,6 +124,7 @@ export class SandboxManager {
       createdAt: new Date().toISOString(),
       proxyToken: randomBytes(16).toString('hex'),
       workspaceId: params.workspaceId,
+      githubToken: params.githubToken,
       taskId: internal.taskId,
       services: [],
     };
@@ -273,7 +275,7 @@ export class SandboxManager {
           REPO_URL: repo.url,
           REPO_REF: repo.ref ?? '',
           EXISTS: t('error.repoPathTaken', { path: repo.path || '.' }),
-          ...githubAuthEnv(repo.url, this.secrets.resolve('GITHUB_TOKEN')),
+          ...githubAuthEnv(repo.url, this.secrets.githubToken(record)),
         },
         timeoutMs: 600_000,
       },

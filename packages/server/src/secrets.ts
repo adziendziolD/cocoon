@@ -19,6 +19,15 @@ export class SecretsService {
     return value === undefined ? undefined : normalize(name, value);
   }
 
+  /**
+   * The GitHub token a sandbox uses: its own choice, else its workspace's, else the default GITHUB_TOKEN.
+   * A chosen token that no longer exists yields nothing (never silently another account's token).
+   */
+  githubToken(sandbox: { githubToken?: string; workspaceId?: string }): string | undefined {
+    const workspace = sandbox.workspaceId ? this.store.workspace(sandbox.workspaceId) : undefined;
+    return this.resolve(sandbox.githubToken ?? workspace?.githubToken ?? 'GITHUB_TOKEN');
+  }
+
   list(): SecretInfo[] {
     const stored = this.store.secrets();
     const names = new Set([...Object.keys(KNOWN_SECRETS), ...Object.keys(stored)]);

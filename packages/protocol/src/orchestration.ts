@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { NetworkMode, RepoSource } from './models.ts';
+import { GITHUB_TOKEN_NAME, NetworkMode, RepoSource } from './models.ts';
 
 /** Short workspace key for task handles and branch names, e.g. "FD" → task FD-12, branch FD-12-add-apple-pay. */
 export const WORKSPACE_KEY = /^[A-Z][A-Z0-9]{1,5}$/;
@@ -46,6 +46,8 @@ export const Workspace = z.object({
   /** Repositories cloned into sandboxes of this workspace (e.g. several services of one platform). */
   repos: z.array(RepoSource).optional(),
   network: NetworkMode.optional(),
+  /** GitHub token (secret name) for this workspace's sandboxes; default: GITHUB_TOKEN. */
+  githubToken: z.string().regex(GITHUB_TOKEN_NAME).optional(),
   /** "per-task": every task gets its own sandbox (parallel, isolated); "shared": all tasks use one sandbox. */
   sandboxMode: z.enum(['per-task', 'shared']).default('per-task'),
   sharedSandboxId: z.string().optional(),

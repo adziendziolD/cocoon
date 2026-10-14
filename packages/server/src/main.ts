@@ -3,6 +3,7 @@ import { ActivityLog } from './activity.ts';
 import { AgentManager } from './agents/manager.ts';
 import { loadConfig } from './config.ts';
 import { setFallbackLanguage, t } from './i18n.ts';
+import { EnvService } from './env.ts';
 import { EgressManager } from './egress.ts';
 import { EventBus } from './events.ts';
 import { buildHttpServer } from './http.ts';
@@ -53,7 +54,9 @@ const egress = new EgressManager(driver, store, settings, secrets, providers, im
 const sandboxes = new SandboxManager(settings, secrets, driver, store, bus, egress);
 const workspace = new WorkspaceService(sandboxes, driver, secrets);
 const services = new ServiceManager(driver, store, bus, sandboxes, egress, logProxy);
-const agents = new AgentManager(settings, secrets, providers, driver, sandboxes, store, bus, egress, services, logProxy);
+const envs = new EnvService(store, settings, sandboxes, driver, egress, activity, logProxy);
+sandboxes.addHooks(envs);
+const agents = new AgentManager(settings, secrets, providers, driver, sandboxes, store, bus, egress, services, envs, logProxy);
 
 const ports = new PortService(config, driver, store, sandboxes, bus, activity, logProxy);
 
@@ -63,7 +66,7 @@ const tasks = new TaskService(store, bus, settings, workspaces, sandboxes, works
 
 const updates = new UpdateService(config, driver, images, store, bus, activity, () => void shutdown(RESTART_EXIT_CODE), logProxy);
 
-const rpc = createRpc({ driver, store, settings, secrets, providers, tokens, images, egress, activity, sandboxes, workspace, agents, workspaces, tasks, notifier, services, updates, ports });
+const rpc = createRpc({ driver, store, settings, secrets, providers, tokens, images, egress, activity, sandboxes, workspace, agents, workspaces, tasks, notifier, services, updates, ports, envs });
 const app = await buildHttpServer({ config, rpc, bus, tokens, agents, workspace, ports });
 log = (msg, err) => app.log.warn({ err }, msg);
 

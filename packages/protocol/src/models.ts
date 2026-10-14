@@ -12,6 +12,10 @@ export const localize = (text: LocalizedText | undefined, lang: Language): strin
 
 export const SECRET_NAME = /^[A-Z_][A-Z0-9_]{0,63}$/;
 
+/** GitHub tokens: the default "GITHUB_TOKEN" plus any number of named ones ("GITHUB_TOKEN_PRIVATE", "GITHUB_TOKEN_COMPANY", …). */
+export const GITHUB_TOKEN_NAME = /^GITHUB_TOKEN(_[A-Z0-9_]{1,48})?$/;
+export const isGithubTokenName = (name: string) => GITHUB_TOKEN_NAME.test(name);
+
 export const SandboxStatus = z.enum(['creating', 'running', 'stopped', 'error', 'missing']);
 export type SandboxStatus = z.infer<typeof SandboxStatus>;
 
@@ -101,6 +105,8 @@ export const Sandbox = z.object({
   workspaceId: z.string().optional(),
   /** Task this sandbox was created for (per-task sandboxes). */
   taskId: z.string().optional(),
+  /** GitHub token (secret name) used for clone, push and pull requests; default: the workspace's token, then GITHUB_TOKEN. */
+  githubToken: z.string().regex(GITHUB_TOKEN_NAME).optional(),
   /** Shared services (databases, mocks) attached to this sandbox. */
   services: z.array(z.string()).default([]),
 });
@@ -156,6 +162,9 @@ export type ApiStyle = z.infer<typeof ApiStyle>;
 export const AgentAdapter = z.enum(['claude-code', 'codex', 'opencode', 'pi', 'qwen-code', 'gemini', 'generic']);
 export type AgentAdapter = z.infer<typeof AgentAdapter>;
 
+/** CLI flag selecting the model for agents running on their own credentials (no custom provider). */
+export const DEFAULT_MODEL_FLAG: Partial<Record<AgentAdapter, string>> = { 'claude-code': '--model', codex: '-m', gemini: '-m' };
+
 export const ADAPTERS: Record<AgentAdapter, { native: ApiStyle[]; translated: ApiStyle[]; customProviders: boolean }> = {
   'claude-code': { native: ['messages'], translated: ['chat'], customProviders: true },
   codex: { native: ['responses'], translated: ['chat'], customProviders: true },
@@ -193,6 +202,8 @@ export const AgentProfile = z.object({
   /** Context window / answer length for this agent type (override the model's detected limits). */
   contextWindow: z.number().int().min(1024).optional(),
   maxOutputTokens: z.number().int().min(256).optional(),
+  /** Skills installed for this agent type at start: GitHub references like "owner/repo", "owner/repo/path@ref". */
+  skills: z.array(z.string()).default([]),
   /** Installs native status hooks into the agent CLI so it reports its own status. */
   hooks: z.enum(['claude-code', 'codex']).optional(),
   /** Regexes matched against the bottom of the screen. */

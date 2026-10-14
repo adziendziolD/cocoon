@@ -8,6 +8,7 @@ export const qk = {
   ports: (sandboxId: string) => ['ports', sandboxId] as const,
   settings: ['settings'] as const,
   secrets: ['secrets'] as const,
+  defaultModels: (adapter: string) => ['models.list', adapter] as const,
   tokens: ['tokens'] as const,
   denied: ['egress.denied'] as const,
   sandboxes: ['sandboxes'] as const,
@@ -30,6 +31,10 @@ export const qk = {
   serviceConnectionsAll: ['service.connections'] as const,
   serviceConnections: (sandboxId: string) => ['service.connections', sandboxId] as const,
   serviceCredentials: (serviceId: string) => ['service.credentials', serviceId] as const,
+  /** Prefix of all environment queries (levels and merged views). */
+  envAll: ['env'] as const,
+  envScope: (scope: string, id: string) => ['env', 'scope', scope, id] as const,
+  envResolved: (sandboxId: string) => ['env', 'resolved', sandboxId] as const,
   workspaces: ['workspaces'] as const,
   workspace: (id: string) => ['workspace', id] as const,
   /** All tasks of all workspaces; views filter client-side (like agents). */

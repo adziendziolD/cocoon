@@ -1,4 +1,4 @@
-import type { ApiProvider, ApiStyle, MethodResult, ModelInfo } from '@cocoon/protocol';
+import type { AgentAdapter, ApiProvider, ApiStyle, MethodResult, ModelInfo } from '@cocoon/protocol';
 import { CocoonError } from './errors.ts';
 import { t } from './i18n.ts';
 import type { SecretsService } from './secrets.ts';
@@ -51,8 +51,18 @@ export function authHeaderFor(provider: ApiProvider, key: string): { name: strin
   }
 }
 
+/** Vendor whose API lists the models of an agent's default credentials, and aliases the CLI accepts without a listing. */
+const VENDORS: Partial<Record<AgentAdapter, 'anthropic' | 'openai' | 'gemini'>> = { 'claude-code': 'anthropic', codex: 'openai', gemini: 'gemini' };
+const BUILTIN_MODELS: Record<string, string[]> = { anthropic: ['opus', 'sonnet', 'haiku', 'claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'], openai: [], gemini: [] };
+const CATALOG_TTL_MS = 5 * 60_000;
+/** A failed listing is remembered briefly so an invalid key or an outage doesn't cost a timeout per request. */
+const CATALOG_FAIL_TTL_MS = 30_000;
+
 /** Custom API endpoints (settings.providers) plus their keys (secrets). */
 export class ProviderService {
+  /** Listings per vendor, valid for the key they were fetched with. */
+  private readonly catalog = new Map<string, { at: number; key: string; result: MethodResult<'models.list'>; ttl: number }>();
+
   constructor(
     private readonly settings: SettingsService,
     private readonly secrets: SecretsService,
@@ -70,6 +80,43 @@ export class ProviderService {
 
   key(provider: ApiProvider): string | undefined {
     return provider.secret && provider.auth !== 'none' ? this.secrets.resolve(provider.secret) : undefined;
+  }
+
+  /** Models for an agent's default credentials (no custom provider): vendor listing with the stored key, else built-in aliases. */
+  async defaultModels(adapter: AgentAdapter): Promise<MethodResult<'models.list'>> {
+    const vendor = VENDORS[adapter];
+    if (!vendor) return { models: [], source: 'none' };
+    const builtin = BUILTIN_MODELS[vendor]!;
+    const fallback = { models: builtin, source: builtin.length ? ('builtin' as const) : ('none' as const) };
+    const apiKey = this.secrets.resolve(vendor === 'anthropic' ? 'ANTHROPIC_API_KEY' : vendor === 'openai' ? 'OPENAI_API_KEY' : 'GEMINI_API_KEY');
+    // Claude subscription token: the same listing, authorized as OAuth bearer token.
+    const oauth = vendor === 'anthropic' && !apiKey ? this.secrets.resolve('CLAUDE_CODE_OAUTH_TOKEN') : undefined;
+    const key = apiKey ?? oauth;
+    if (!key) return fallback;
+    const cached = this.catalog.get(vendor);
+    if (cached && cached.key === key && Date.now() - cached.at < cached.ttl) return cached.result;
+    const remember = (result: MethodResult<'models.list'>, ttl: number) => (this.catalog.set(vendor, { at: Date.now(), key, result, ttl }), result);
+    const [url, headers]: [string, Record<string, string>] =
+      vendor === 'anthropic'
+        ? [
+            'https://api.anthropic.com/v1/models?limit=100',
+            oauth
+              ? { authorization: `Bearer ${oauth}`, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'oauth-2025-04-20' }
+              : { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+          ]
+        : vendor === 'openai'
+          ? ['https://api.openai.com/v1/models', { authorization: `Bearer ${key}` }]
+          : ['https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { 'x-goog-api-key': key }];
+    try {
+      const res = await fetch(url, { headers: { accept: 'application/json', ...headers }, signal: AbortSignal.timeout(TEST_TIMEOUT_MS) });
+      if (!res.ok) return remember(fallback, CATALOG_FAIL_TTL_MS);
+      const listed = parseModels(await res.text()).map((id) => id.replace(/^models\//, ''));
+      const ids = vendor === 'openai' ? listed.filter((id) => /^(gpt-|o\d|codex)/.test(id) && !/(audio|realtime|transcribe|tts|image|embedding|moderation|search)/.test(id)) : vendor === 'gemini' ? listed.filter((id) => id.startsWith('gemini-')) : listed;
+      const models = Array.from(new Set([...builtin, ...ids.sort()]));
+      return remember({ models, source: 'api' }, CATALOG_TTL_MS);
+    } catch {
+      return remember(fallback, CATALOG_FAIL_TTL_MS);
+    }
   }
 
   /** Calls the provider's model list (or base URL for http kind) from the server. */

@@ -1,6 +1,7 @@
-import { ADAPTERS, AGENT_TOOLS, defaultMaxOutput, localize, profileAdapter, profileTool, type Agent, type AgentAdapter, type AgentProfile, type AgentStatus, type ApiStyle, type MethodParams, type MethodResult } from '@cocoon/protocol';
+import { ADAPTERS, AGENT_TOOLS, DEFAULT_MODEL_FLAG, defaultMaxOutput, localize, parseSkillSource, profileAdapter, profileTool, type Agent, type AgentAdapter, type AgentProfile, type AgentStatus, type ApiStyle, type MethodParams, type MethodResult } from '@cocoon/protocol';
 import { currentLanguage } from '../i18n.ts';
 import type { ServiceManager } from '../services/manager.ts';
+import type { EnvService } from '../env.ts';
 import { PROXIED_SECRETS, placeholderFor, type EgressManager } from '../egress.ts';
 import { GIT_CREDENTIAL_HELPER_SCRIPT } from '../sandbox/git-auth.ts';
 import { containerReachableUrl, envPrefixFor, providerRoute, providerUrls, translatedRoute, type ProviderService } from '../providers.ts';
@@ -16,6 +17,8 @@ import { publicAgent, type AgentRecord, type SandboxRecord, type Store } from '.
 import { singleFileTar } from '../sandbox/tar.ts';
 import { CODEX_TRUST_SCRIPT, MERGE_CONFIG_SCRIPT, wireEndpoint, type ConfigFile } from './adapters.ts';
 import { approveClaudeKeyScript } from './hooks.ts';
+import { INSTALL_SKILL_SCRIPT, skillsDirFor } from './skills.ts';
+import { githubAuthEnv } from '../sandbox/git-auth.ts';
 
 /** uid of the sandbox user in CoCoon's images and in bubblewrap sandboxes. */
 const SANDBOX_UID = 1000;
@@ -40,6 +43,7 @@ export class AgentManager {
     private readonly bus: EventBus,
     private readonly egress: EgressManager,
     private readonly services: ServiceManager,
+    private readonly envs: EnvService,
     private readonly log: (msg: string, err?: unknown) => void,
   ) {}
 
@@ -66,6 +70,8 @@ export class AgentManager {
 
     const id = newId('ag');
     await this.ensureTool(handle, profile);
+    // Current .env files, and the credential proxy knows the routes of proxied variables.
+    await this.envs.prepare(sandbox.id);
     const providerIds = params.providers ?? profile.providers;
     const wiring = await this.wireProviders(profile, providerIds, params.model ?? profile.model, sandbox, {
       contextWindow: params.contextWindow ?? profile.contextWindow,
@@ -76,6 +82,7 @@ export class AgentManager {
     if (wiring.files.length) {
       await this.driver.exec(handle, ['sh', '-c', MERGE_CONFIG_SCRIPT], { env: { COCOON_CONFIG_FILES: JSON.stringify(wiring.files) } });
     }
+    await this.installSkills(handle, profile, wiring.adapter, sandbox);
     if (wiring.adapter === 'codex') {
       // The sandbox workspace is the agent's own – skip Codex' "Trust this folder?" dialog.
       // Every repository folder is its own Codex project.
@@ -84,7 +91,9 @@ export class AgentManager {
       }
     }
 
+    // Precedence (later wins): workspace → repository → sandbox variables, agent type, credentials/provider wiring, explicit.
     const env: Record<string, string> = {
+      ...this.envs.injectedEnv(sandbox),
       ...profile.env,
       ...this.secretEnv(profile, sandbox, wiring.kinds, wiring.grants),
       ...wiring.env,
@@ -290,7 +299,8 @@ export class AgentManager {
     for (const name of profile.secrets) {
       // A custom model provider replaces the default Anthropic/OpenAI credentials of the agent.
       if (providerKinds.size && ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'OPENAI_API_KEY'].includes(name)) continue;
-      const value = this.secrets.resolve(name);
+      // GITHUB_TOKEN inside the sandbox is the token chosen for this sandbox / workspace.
+      const value = name === 'GITHUB_TOKEN' ? this.secrets.githubToken(sandbox) : this.secrets.resolve(name);
       if (!value) continue;
       const proxied = useProxy ? PROXIED_SECRETS[name] : undefined;
       if (proxied) {
@@ -398,13 +408,40 @@ export class AgentManager {
       args.push(...wiring.args);
       files.push(...wiring.files);
     }
-    if (model && !kinds.size) env.COCOON_MODEL = model;
+    if (model && !kinds.size) {
+      env.COCOON_MODEL = model;
+      // Default credentials (no custom provider): select the model through the CLI's own flag.
+      const flag = DEFAULT_MODEL_FLAG[adapter];
+      const set = (arg: string) => arg === '--model' || arg.startsWith('--model=') || arg === flag || (!!flag && arg.startsWith(`${flag}=`));
+      if (flag && !profile.command.some(set)) args.push(flag, model);
+    }
     if (adapter === 'codex') {
       // Codex' own command sandbox needs bubblewrap inside the container; CoCoon already isolates the agent.
       if (!profile.command.some((arg) => arg === '--sandbox' || arg === '-s')) args.unshift('--sandbox', 'danger-full-access');
     }
 
     return { env, args, files, kinds, grants, model, adapter, contextWindow, maxOutputTokens };
+  }
+
+  /** Installs the agent type's skills (GitHub references) into the skills folder of its CLI. */
+  private async installSkills(handle: string, profile: AgentProfile, adapter: AgentAdapter, sandbox: SandboxRecord): Promise<void> {
+    if (!profile.skills.length) return;
+    const dir = skillsDirFor(adapter);
+    if (!dir) return;
+    const sources = profile.skills.map((skill) => {
+      const source = parseSkillSource(skill);
+      if (!source) throw new CocoonError('bad_request', t('error.skillInvalid', { skill }));
+      return source;
+    });
+    if (sandbox.network === 'none') throw new CocoonError('bad_request', t('error.skillNeedsNetwork'));
+    const token = this.secrets.githubToken(sandbox);
+    for (const [i, source] of sources.entries()) {
+      const res = await this.driver.exec(handle, ['sh', '-c', INSTALL_SKILL_SCRIPT], {
+        env: { SKILLS_DIR: dir, SKILL_URL: source.url, SKILL_REF: source.ref ?? '', SKILL_PATH: source.path ?? '', SKILL_NAME: source.name, ...githubAuthEnv(source.url, token) },
+        timeoutMs: 120_000,
+      });
+      if (res.exitCode !== 0) throw new CocoonError('bad_request', t('error.skillInstallFailed', { skill: profile.skills[i] ?? source.url, error: res.stderr.trim() || `exit ${res.exitCode}` }));
+    }
   }
 
   /** One snapshot exec per sandbox with live agents; updates status and emits events on change. */
@@ -480,7 +517,7 @@ export class AgentManager {
     return record;
   }
 
-  private profile(kind: string): AgentProfile {
+  profile(kind: string): AgentProfile {
     const profile = this.settings.get().agents[kind];
     if (!profile) throw new CocoonError('bad_request', t('error.unknownAgentKind', { kind, available: this.kinds().join(', ') }));
     return profile;
@@ -488,7 +525,7 @@ export class AgentManager {
 
   private profileOrShell(kind: string): AgentProfile {
     const agents = this.settings.get().agents;
-    return agents[kind] ?? agents.shell ?? { command: ['sh'], promptMode: 'input', secrets: [], env: {}, providers: [], workingPatterns: [], blockedPatterns: [] };
+    return agents[kind] ?? agents.shell ?? { command: ['sh'], promptMode: 'input', secrets: [], env: {}, providers: [], skills: [], workingPatterns: [], blockedPatterns: [] };
   }
 }
 

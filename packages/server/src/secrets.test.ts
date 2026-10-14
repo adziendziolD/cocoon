@@ -102,3 +102,28 @@ describe('mask', () => {
     expect(mask('sk-ant-api03-verylongsecret')).toBe('sk-ant-…cret');
   });
 });
+
+describe('SecretsService.githubToken', () => {
+  beforeEach(() => vi.stubEnv('GITHUB_TOKEN', ''));
+  afterEach(() => vi.unstubAllEnvs());
+
+  function service(tokens: Record<string, string>, workspaceToken?: string) {
+    const { store } = fakeStore(tokens);
+    (store as unknown as { workspace: (id: string) => unknown }).workspace = (id) => (id === 'ws' ? { githubToken: workspaceToken } : undefined);
+    return new SecretsService(store);
+  }
+  const tokens = { GITHUB_TOKEN: 'default', GITHUB_TOKEN_PRIVATE: 'private', GITHUB_TOKEN_COMPANY: 'company' };
+
+  it('prefers the sandbox token, then the workspace token, then the default', () => {
+    const s = service(tokens, 'GITHUB_TOKEN_COMPANY');
+    expect(s.githubToken({ githubToken: 'GITHUB_TOKEN_PRIVATE', workspaceId: 'ws' })).toBe('private');
+    expect(s.githubToken({ workspaceId: 'ws' })).toBe('company');
+    expect(s.githubToken({})).toBe('default');
+  });
+
+  it('never falls back to another account when the chosen token is gone', () => {
+    const s = service({ GITHUB_TOKEN: 'default' }, 'GITHUB_TOKEN_COMPANY');
+    expect(s.githubToken({ workspaceId: 'ws' })).toBeUndefined();
+    expect(s.githubToken({ githubToken: 'GITHUB_TOKEN_PRIVATE' })).toBeUndefined();
+  });
+});
