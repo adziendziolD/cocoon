@@ -79,6 +79,14 @@ it. You can restart it anytime under *Settings → General*. What it covers:
    answer with one click.
 6. **Changes** shows what the agent changed – download it, push it to GitHub or open a pull request (add a GitHub token under Credentials).
 
+### Let agents work on a schedule
+
+Under **Schedules** (or in a workspace's *Schedules* tab) click *New scheduled agent*, pick what it should do – **Run all checks**
+(linting, type checking, tests, build, audit), **Update dependencies**, **Security check** or your own instructions – and when
+(e.g. daily at 03:00, Mondays at 04:00). Every run shows up as a task on the board. If the agent reports that everything is fine,
+the run closes itself; if it finds something or changes files, the task waits in *Review* and you get a notification.
+*Run now* tries it out immediately.
+
 ## 5. Keep it running
 
 To start CoCoon automatically after a reboot: copy `deploy/cocoond.service` (adjust paths) to `/etc/systemd/system/` and run
@@ -92,6 +100,9 @@ In "Restricted" mode only allowed sites are reachable. *Settings → Network & s
 **Can I use my own API or a different model?**
 Yes – under *Settings → API providers* add e.g. your company gateway, OpenRouter, a local Ollama or any HTTP API (templates included),
 enter the key and click "Test connection". Then assign the provider to an agent type or pick it when starting an agent. The key stays on the server.
+
+**Do scheduled agents run when no browser is open?**
+Yes – the schedule runs in the server. If the server was down at the scheduled time, the missed run is made up once after the start.
 
 **I lost the login token.**
 It's in `.data/admin-token.txt` on the server. Create more tokens (e.g. for the CLI) under *Settings → Access & integrations*.

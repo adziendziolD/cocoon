@@ -12,6 +12,7 @@ import { NotFoundPage } from './pages/NotFoundPage';
 import { OnboardingPage } from './pages/onboarding/OnboardingPage';
 import { SandboxDetailPage } from './pages/sandbox/SandboxDetailPage';
 import { SandboxesPage } from './pages/SandboxesPage';
+import { SchedulesPage } from './pages/SchedulesPage';
 import { TasksPage } from './pages/TasksPage';
 import { WorkspaceDetailPage } from './pages/WorkspaceDetailPage';
 import { WorkspacesPage } from './pages/WorkspacesPage';
@@ -41,6 +42,7 @@ export function App() {
           <Route index element={<DashboardPage />} />
           <Route path="cockpit" element={<CockpitPage />} />
           <Route path="tasks" element={<TasksPage />} />
+          <Route path="schedules" element={<SchedulesPage />} />
           <Route path="workspaces" element={<WorkspacesPage />} />
           <Route path="workspaces/:workspaceId" element={<WorkspaceDetailPage />} />
           <Route path="workspaces/:workspaceId/:tab" element={<WorkspaceDetailPage />} />

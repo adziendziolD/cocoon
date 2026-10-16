@@ -53,6 +53,11 @@
   installiert werden und wie der Bildschirm interpretiert wird. Standard: `claude-code`, `codex`, `shell`; in der UI editierbar.
 - **Settings** – zur Laufzeit änderbare Konfiguration (Sandbox-Standards, Netzwerk-Allowlist, Profile, Zeiten, Git-Autor),
   gespeichert im Store. `COCOON_CONFIG` dient nur als Startwert beim allerersten Start.
+- **Geplanter Agent (Schedule)** – Cron-Ausdruck (5 Felder, IANA-Zeitzone) + Anweisungen in einem Workspace. Zu jedem Termin
+  legt `ScheduleService` eine Aufgabe (`task.scheduleId`) an und startet sie sofort. Der letzte Agent des Laufs schreibt einen
+  Bericht (`<workdir>/.cocoon/report/<taskId>.json`, Pfad auch in `$COCOON_REPORT_FILE`): `ok` + `autoClose` → Aufgabe erledigt,
+  eigene Sandbox entfernt; sonst `review` mit Benachrichtigung. `overlap: skip` startet nichts, solange ein Lauf offen ist;
+  verpasste Termine werden beim Start einmal nachgeholt; ältere abgeschlossene Läufe werden samt Sandbox aufgeräumt (`keepRuns`).
 - **Secrets** – API-Keys/Tokens, serverseitig gespeichert (Fallback: Umgebungsvariablen), nie im Klartext an Clients zurück.
 
 ## 4. Agent-Status
@@ -105,7 +110,8 @@ Auth: `Authorization: Bearer <token>` oder `?token=` (für Browser-WebSockets/Do
 | Dateien | `files.list/read/write/mkdir/delete` |
 | Git | `git.status/commit/push/create_pr` (GitHub, via `GITHUB_TOKEN`) |
 | Agent | `agent.spawn/list/get/send_input/send_keys/read/wait/kill` |
-| Events (WS) | `sandbox.updated/deleted`, `agent.updated`, `settings.updated`, `image.build`, `activity` |
+| Geplante Agenten | `schedule.list/get/create/update/delete/run/preview` |
+| Events (WS) | `sandbox.updated/deleted`, `agent.updated`, `schedule.updated/deleted`, `settings.updated`, `image.build`, `activity` |
 
 Admin-Methoden (Settings, Secrets, Tokens, Images) sind **nicht** als MCP-Tools verfügbar – ein steuernder Agent kann Sandboxes und
 Agenten bedienen, aber keine Keys auslesen oder Sicherheitseinstellungen ändern.
@@ -197,7 +203,7 @@ löscht – nie über Kommandozeilen.
 ## 9. Code-Struktur
 
 ```
-packages/protocol   zod-Schemas: Modelle, Settings, Methoden-Registry, Events, Wire-Format
+packages/protocol   zod-Schemas: Modelle, Settings, Methoden-Registry, Events, Wire-Format, Cron-Parser
 packages/server     cocoond
   src/main.ts               Wiring, Ersteinrichtung, Start
   src/http.ts               Fastify: Auth, /v1/rpc, /v1/ws, Attach, Archive, /mcp, Web-UI
@@ -213,6 +219,8 @@ packages/server     cocoond
   src/agents/status.ts      Statuserkennung (Hooks + Heuristik)
   src/agents/hooks.ts       Hook-Konfiguration für Claude Code / Codex
   src/agents/tmux.ts        tmux-Kommandos und Snapshot-Parser
+  src/tasks.ts              Aufgaben-Engine (Lebenszyklus, Workflows, Reviews, Auto-Run, Berichte geplanter Läufe)
+  src/schedules.ts          Geplante Agenten (fällige Termine → Aufgaben, Überlappung, Nachholen, Aufräumen)
 packages/web        Management-UI (React, Vite, Tailwind, xterm.js)
 packages/cli        cocoon – Remote-CLI + typisierter Client
 images/sandbox      Basis-Image (Node, Git, tmux, Claude Code, Codex)

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ActivityEntry, Agent, ImageKind, Sandbox, SandboxPort, Settings, UpdateStatus } from './models.ts';
 import { Task, Workspace } from './orchestration.ts';
+import { Schedule } from './schedules.ts';
 import { ServiceInfo } from './services.ts';
 
 export const CocoonEvent = z.discriminatedUnion('type', [
@@ -32,6 +33,8 @@ export const CocoonEvent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('workspace.deleted'), workspaceId: z.string() }),
   z.object({ type: z.literal('task.updated'), task: Task }),
   z.object({ type: z.literal('task.deleted'), taskId: z.string(), workspaceId: z.string() }),
+  z.object({ type: z.literal('schedule.updated'), schedule: Schedule }),
+  z.object({ type: z.literal('schedule.deleted'), scheduleId: z.string(), workspaceId: z.string() }),
   z.object({ type: z.literal('service.updated'), service: ServiceInfo }),
   z.object({ type: z.literal('service.removed'), serviceId: z.string() }),
 ]);

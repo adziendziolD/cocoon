@@ -67,8 +67,8 @@ describe('IssueService', () => {
     const created: Task[] = [];
     const tasks = {
       list: () => created,
-      create: (params: { title: string; description?: string }, issue: Task['issue']) => {
-        const task = { id: `ts_${created.length + 1}`, workspaceId: ws.id, ...params, issue } as Task;
+      create: (params: { title: string; description?: string }, origin: Pick<Task, 'issue'>) => {
+        const task = { id: `ts_${created.length + 1}`, workspaceId: ws.id, ...params, issue: origin.issue } as Task;
         created.push(task);
         return task;
       },

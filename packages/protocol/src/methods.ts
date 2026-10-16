@@ -34,6 +34,7 @@ import {
   UpdateTarget,
 } from './models.ts';
 import { EnvFileStatus, EnvScopeInfo, EnvScopeRef, EnvTarget, EnvVarInput, ResolvedEnv } from './env.ts';
+import { CronExpression, Schedule, ScheduleOverlap, ScheduleTemplate, TimeZone } from './schedules.ts';
 import { SERVICE_ID, ServiceAdminCredentials, ServiceConnection, ServiceInfo, ServiceKind, SharedService } from './services.ts';
 
 /**
@@ -94,6 +95,24 @@ const TaskInput = z.object({
   dependsOn: z.array(z.string()).optional(),
   sandboxId: z.string().nullable().optional(),
 });
+/** Optional schedule fields accept "" or null to clear them. */
+const ScheduleInput = z.object({
+  name: Schedule.shape.name,
+  enabled: z.boolean().optional(),
+  cron: CronExpression,
+  timezone: TimeZone.nullable().optional().or(z.literal('')),
+  template: ScheduleTemplate.optional(),
+  prompt: Schedule.shape.prompt,
+  agentKind: z.string().optional(),
+  workflowId: z.string().nullable().optional(),
+  providers: z.array(z.string()).nullable().optional(),
+  model: z.string().nullable().optional(),
+  priority: TaskPriority.optional(),
+  overlap: ScheduleOverlap.optional(),
+  autoClose: z.boolean().optional(),
+  keepRuns: z.number().int().min(1).max(100).optional(),
+});
+const ScheduleRef = z.object({ scheduleId: z.string() });
 const AgentRef = z.object({ agentId: z.string() });
 const Ok = z.object({ ok: z.literal(true) });
 const Empty = z.object({}).default({});
@@ -677,6 +696,46 @@ export const methods = {
     result: Task,
   },
   'task.stop': { description: 'Stops the running agent of a task and moves it back to the backlog.', mcp: true, params: TaskRef, result: Task },
+
+  // ── scheduled agents ──────────────────────────────────────────────────────
+  'schedule.list': {
+    description: 'Lists scheduled agents (recurring tasks), optionally of one workspace.',
+    mcp: true,
+    params: z.object({ workspaceId: z.string().optional() }).default({}),
+    result: z.array(Schedule),
+  },
+  'schedule.get': { description: 'Gets one scheduled agent.', mcp: true, params: ScheduleRef, result: Schedule },
+  'schedule.create': {
+    description:
+      'Creates a scheduled agent: on every cron run (5 fields "minute hour day month weekday" in the given IANA time zone) it creates a task with the prompt in the workspace and starts it. Templates: checks (run all linting/tests/build), dependencies (update frameworks/libraries), security, custom.',
+    mcp: true,
+    params: ScheduleInput.extend({ workspaceId: z.string() }),
+    result: Schedule,
+  },
+  'schedule.update': {
+    description: 'Edits a scheduled agent (e.g. enabled=false pauses it).',
+    mcp: true,
+    params: ScheduleRef.extend(ScheduleInput.partial().shape),
+    result: Schedule,
+  },
+  'schedule.delete': {
+    description: 'Deletes a scheduled agent. Its tasks stay on the board unless deleteTasks is set (running ones are stopped).',
+    mcp: true,
+    params: ScheduleRef.extend({ deleteTasks: z.boolean().default(false) }),
+    result: Ok,
+  },
+  'schedule.run': {
+    description: 'Runs a scheduled agent now (once, independent of its schedule). Skipped while a previous run is open, unless force is set.',
+    mcp: true,
+    params: ScheduleRef.extend({ force: z.boolean().default(false) }),
+    result: z.object({ schedule: Schedule, result: z.enum(['started', 'skipped', 'error']), task: Task.optional() }),
+  },
+  'schedule.preview': {
+    description: 'Checks a cron expression and returns its next run times.',
+    mcp: true,
+    params: z.object({ cron: z.string(), timezone: z.string().optional(), count: z.number().int().min(1).max(20).default(5) }),
+    result: z.object({ valid: z.boolean(), error: z.string().optional(), timezone: z.string(), next: z.array(z.string()) }),
+  },
 
   // ── environment (.env injection) ──────────────────────────────────────────
   // Admin methods (no MCP): an orchestrating agent must not read or change the secrets of other sandboxes.

@@ -1,7 +1,7 @@
 import type { Agent, Settings, Task } from '@cocoon/protocol';
 import { Bot, Check, CircleStop, Hand, Link2, MessageSquareReply, MonitorPlay, MoreHorizontal, Pencil, Play, RotateCcw, Trash2, Workflow as WorkflowIcon } from 'lucide-react';
 import { useLanguage, useT } from '../../i18n';
-import { useWorkspaces } from '../../api/queries';
+import { useSchedules, useWorkspaces } from '../../api/queries';
 import { cn } from '../../lib/cn';
 import { agentStatusMeta } from '../../lib/status';
 import { openDependencies, taskRunLabel } from '../../lib/tasks';
@@ -9,6 +9,7 @@ import { useAppDialogs } from '../AppDialogs';
 import { StatusDot } from '../Badge';
 import { Button } from '../Button';
 import { MenuItem, MenuSeparator, Popover } from '../Popover';
+import { ReportBadge, ScheduledTag } from '../schedules/ScheduleBits';
 import { WorkspaceTag } from '../WorkspaceSwitcher';
 import { PriorityIcon } from './TaskBits';
 import { useOpenInCockpit, useOpenTask, useTaskActions } from './useTaskActions';
@@ -34,6 +35,8 @@ export function TaskCard({ task, allTasks, agent, settings, compact, showWorkspa
   const openInCockpit = useOpenInCockpit();
   const dialogs = useAppDialogs();
   const { start, approve, stop } = useTaskActions();
+  const schedules = useSchedules();
+  const scheduleName = task.scheduleId ? schedules.data?.find((x) => x.id === task.scheduleId)?.name : undefined;
   const reviewOnApprove = useWorkspaces().data?.find((w) => w.id === task.workspaceId)?.review?.enabled;
   const run = taskRunLabel(task, settings, lang);
   const deps = openDependencies(task, allTasks);
@@ -119,6 +122,8 @@ export function TaskCard({ task, allTasks, agent, settings, compact, showWorkspa
             {t('taskCard.blockedBy', { count: deps.length })}
           </span>
         )}
+        {task.scheduleId && <ScheduledTag name={scheduleName} />}
+        {task.report && <ReportBadge report={task.report} />}
         {showWorkspace && <WorkspaceTag workspaceId={task.workspaceId} />}
       </div>
 

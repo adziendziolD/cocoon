@@ -1,5 +1,5 @@
 import { GIT_CREDENTIAL_HELPER_SCRIPT } from './sandbox/git-auth.ts';
-import { DEFAULT_REVIEW_PROMPT, localize, type Agent, type Language, type MethodParams, type ReviewResult, type Task, type TaskStatus, type WorkflowStage, type Workspace } from '@cocoon/protocol';
+import { DEFAULT_REVIEW_PROMPT, localize, parseReport, reportInstructions, type Agent, type Language, type MethodParams, type ReviewResult, type Task, type TaskStatus, type WorkflowStage, type Workspace } from '@cocoon/protocol';
 import type { AgentManager } from './agents/manager.ts';
 import { CocoonError, notFound } from './errors.ts';
 import type { EventBus } from './events.ts';
@@ -72,7 +72,8 @@ export class TaskService {
 
   // ── commands ───────────────────────────────────────────────────────────────
 
-  create(params: MethodParams<'task.create'>, issue?: Task['issue']): Task {
+  /** `origin`: the GitHub issue the task was imported from, or the scheduled agent it is a run of. */
+  create(params: MethodParams<'task.create'>, origin: Pick<Task, 'issue' | 'scheduleId'> = {}): Task {
     const workspace = this.workspaces.get(params.workspaceId);
     this.validate(workspace, params);
     const now = new Date().toISOString();
@@ -99,7 +100,8 @@ export class TaskService {
       attention: false,
       reviews: [],
       pullRequests: [],
-      issue,
+      issue: origin.issue,
+      scheduleId: origin.scheduleId,
       createdAt: now,
       updatedAt: now,
     };
@@ -136,9 +138,12 @@ export class TaskService {
     return localizeTask(task, currentLanguage());
   }
 
-  async delete(taskId: string): Promise<void> {
+  /** `removeSandbox`: also delete the sandbox that was created for this task alone. */
+  async delete(taskId: string, { removeSandbox = false } = {}): Promise<void> {
     const task = this.record(taskId);
     if (task.status === 'running') this.stopAgent(task);
+    const own = task.sandboxId ? this.store.sandbox(task.sandboxId) : undefined;
+    if (removeSandbox && own?.taskId === task.id) await this.sandboxes.delete(own.id).catch((err) => this.log(`removing sandbox ${own.id} failed`, err));
     this.store.deleteTask(taskId);
     for (const other of this.store.tasks()) {
       if (other.dependsOn.includes(taskId)) {
@@ -260,16 +265,7 @@ export class TaskService {
           return;
         }
         // Fresh verdict file; .cocoon/ stays out of every repository (also the workspace folder's own one).
-        await this.sandboxes.sh(
-          sandboxId,
-          `mkdir -p "$(dirname "$FILE")" && rm -f "$FILE"
-           for d in "$WORKDIR" "$WORKDIR"/*/; do
-             [ -d "$d/.git" ] || continue
-             grep -qxF '/.cocoon/' "$d/.git/info/exclude" 2>/dev/null || echo '/.cocoon/' >> "$d/.git/info/exclude"
-           done
-           ${GIT_CREDENTIAL_HELPER_SCRIPT}`,
-          { FILE: file, WORKDIR: sandbox?.workdir ?? '/workspace' },
-        );
+        await this.sandboxes.sh(sandboxId, `${FRESH_RESULT_FILE_SCRIPT}\n${GIT_CREDENTIAL_HELPER_SCRIPT}`, { FILE: file, WORKDIR: sandbox?.workdir ?? '/workspace' });
         const stage: WorkflowStage = {
           name: { de: 'Code-Review', en: 'Code review' },
           agentKind: kind,
@@ -516,12 +512,56 @@ export class TaskService {
       this.launch(task);
       return;
     }
+    if (task.scheduleId && last) return void this.finishScheduledRun(task);
     task.status = 'review';
     task.attention = false;
     clearNote(task);
     task.order = this.nextOrder(task.workspaceId, 'review');
     this.save(task);
     this.notifier.notify('task.review', 'notify.taskReview', { title: task.title }, `/tasks?task=${task.id}`);
+  }
+
+  // ── scheduled runs ─────────────────────────────────────────────────────────
+
+  /** Where the agent of a scheduled run writes its report (excluded from every repository, like review verdicts). */
+  private reportFile(task: Task): string {
+    const workdir = (task.sandboxId && this.store.sandbox(task.sandboxId)?.workdir) || '/workspace';
+    return `${workdir}/.cocoon/report/${task.id}.json`;
+  }
+
+  /**
+   * The last stage of a scheduled run is finished: read the report. "ok" with autoClose closes the run (no review, the
+   * sandbox created for it is removed); anything else waits for your review like a normal task.
+   */
+  private async finishScheduledRun(task: Task): Promise<void> {
+    const raw = task.sandboxId ? await this.sandboxes.sh(task.sandboxId, 'cat "$FILE" 2>/dev/null || true', { FILE: this.reportFile(task) }).catch(() => '') : '';
+    const current = this.store.task(task.id);
+    if (!current || current.status !== 'running') return;
+    current.report = parseReport(raw);
+    current.attention = false;
+    const schedule = current.scheduleId ? this.store.schedule(current.scheduleId) : undefined;
+    const summary = current.report.summary ?? '';
+    if (schedule?.autoClose && current.report.status === 'ok') {
+      this.stopTaskAgents(current);
+      const sandbox = current.sandboxId ? this.store.sandbox(current.sandboxId) : undefined;
+      if (sandbox?.taskId === current.id) {
+        await this.sandboxes.delete(sandbox.id).catch((err) => this.log(`removing sandbox ${sandbox.id} failed`, err));
+        delete current.sandboxId;
+      }
+      current.status = 'done';
+      setNote(current, 'note.scheduledOk', { summary });
+      current.order = this.nextOrder(current.workspaceId, 'done');
+      this.save(current);
+      this.notifier.notify('task.done', 'notify.taskDone', { title: current.title }, `/tasks?task=${current.id}`);
+      void this.schedule();
+      return;
+    }
+    current.status = 'review';
+    if (current.report.status === 'missing') setNote(current, 'note.scheduledNoReport');
+    else setNote(current, 'note.scheduledActionNeeded', { summary });
+    current.order = this.nextOrder(current.workspaceId, 'review');
+    this.save(current);
+    this.notifier.notify('task.review', 'notify.scheduledReview', { title: current.title, summary }, `/tasks?task=${current.id}`);
   }
 
   private fail(task: Task, key: MessageKey, params: Record<string, string | number> = {}): void {
@@ -557,13 +597,23 @@ export class TaskService {
       try {
         const previousAgentId = task.runs.at(-1)?.agentId;
         const sandboxId = await this.ensureSandbox(task);
-        const prompt = await this.renderPrompt(stage, task, sandboxId, previousAgentId, feedback);
+        let prompt = await this.renderPrompt(stage, task, sandboxId, previousAgentId, feedback);
+        let env: Record<string, string> | undefined;
+        if (task.scheduleId && task.stage === this.stages(task).length - 1) {
+          // The last agent of a scheduled run leaves a report (read in finishScheduledRun). Shell agents run the prompt
+          // as a command, so they only get the path – a command can write the report itself.
+          const file = this.reportFile({ ...task, sandboxId });
+          await this.sandboxes.sh(sandboxId, FRESH_RESULT_FILE_SCRIPT, { FILE: file, WORKDIR: this.store.sandbox(sandboxId)?.workdir ?? '/workspace' });
+          env = { COCOON_REPORT_FILE: file };
+          if (!this.shellLike(stage.agentKind)) prompt += `\n${reportInstructions(file)}`;
+        }
         const agent = await this.agents.spawn({
           sandboxId,
           kind: stage.agentKind,
           prompt,
           providers: task.providers,
           model: task.model,
+          env,
         });
         const current = this.store.task(task.id);
         if (!current || current.status !== 'running') {
@@ -708,9 +758,14 @@ export class TaskService {
     const profile = this.settings.get().agents[kind];
     const label = localize(profile?.label, currentLanguage()) ?? kind;
     // Shell-like agents execute what they get: only send the description (the command), not the title.
-    const shellLike = profile?.promptMode === 'input' && !profile.hooks;
-    const prompt = shellLike ? (task.description ? '{{task.description}}' : '{{task.title}}') : '{{task}}{{feedback}}';
+    const prompt = this.shellLike(kind) ? (task.description ? '{{task.description}}' : '{{task.title}}') : '{{task}}{{feedback}}';
     return [{ name: label, agentKind: kind, prompt, approval: false }];
+  }
+
+  /** Shell-like agents execute what they get, so they get no extra instructions. */
+  private shellLike(kind: string): boolean {
+    const profile = this.settings.get().agents[kind];
+    return profile?.promptMode === 'input' && !profile.hooks;
   }
 
   private validate(workspace: Workspace, params: { workflowId?: string | null; dependsOn?: string[]; taskId?: string }): void {
@@ -761,6 +816,13 @@ export class TaskService {
     this.bus.publish({ type: 'task.updated', task: { ...task, runs: [...task.runs] } });
   }
 }
+
+/** Removes an old result file and keeps .cocoon/ out of every repository of the workspace folder ($FILE, $WORKDIR). */
+const FRESH_RESULT_FILE_SCRIPT = `mkdir -p "$(dirname "$FILE")" && rm -f "$FILE"
+for d in "$WORKDIR" "$WORKDIR"/*/; do
+  [ -d "$d/.git" ] || continue
+  grep -qxF '/.cocoon/' "$d/.git/info/exclude" 2>/dev/null || echo '/.cocoon/' >> "$d/.git/info/exclude"
+done`;
 
 /** Sandbox-name-safe slug, e.g. "Fix login bug!" → "fix-login-bug". */
 function slug(text: string): string {

@@ -102,7 +102,7 @@ export class IssueService {
         continue;
       }
       // Sequential: every task takes the next task number of the workspace.
-      created.push(this.tasks.create({ workspaceId, status, ...taskFromIssue(issue) }, { repo, number, url: issue.url }));
+      created.push(this.tasks.create({ workspaceId, status, ...taskFromIssue(issue) }, { issue: { repo, number, url: issue.url } }));
       issue.taskId = created.at(-1)!.id;
     }
     return { tasks: created, skipped };

@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
-import type { ActivityEntry, Agent, CocoonEvent, Sandbox, ServiceInfo, Task, WireError, Workspace } from '@cocoon/protocol';
+import type { ActivityEntry, Agent, CocoonEvent, Sandbox, Schedule, ServiceInfo, Task, WireError, Workspace } from '@cocoon/protocol';
 import { useLanguage } from '../i18n';
 import { buildStore } from './builds';
 import { qk } from './keys';
@@ -99,6 +99,7 @@ export function applyEvent(qc: QueryClient, event: CocoonEvent): void {
       const id = event.workspaceId;
       qc.setQueryData<Workspace[]>(qk.workspaces, (old) => old?.filter((w) => w.id !== id));
       qc.setQueryData<Task[]>(qk.tasks, (old) => old?.filter((x) => x.workspaceId !== id));
+      qc.setQueryData<Schedule[]>(qk.schedules, (old) => old?.filter((x) => x.workspaceId !== id));
       // Sandboxes become unassigned (or are deleted) – the server sends sandbox events, but refetch to be safe.
       qc.setQueryData<Sandbox[]>(qk.sandboxes, (old) => old?.map((s) => (s.workspaceId === id ? { ...s, workspaceId: undefined } : s)));
       qc.removeQueries({ queryKey: qk.workspace(id) });
@@ -112,6 +113,12 @@ export function applyEvent(qc: QueryClient, event: CocoonEvent): void {
       qc.setQueryData<Task[]>(qk.tasks, (old) => upsert(old, task));
       break;
     }
+    case 'schedule.updated':
+      qc.setQueryData<Schedule[]>(qk.schedules, (old) => upsert(old, event.schedule));
+      break;
+    case 'schedule.deleted':
+      qc.setQueryData<Schedule[]>(qk.schedules, (old) => old?.filter((x) => x.id !== event.scheduleId));
+      break;
     case 'service.updated': {
       const svc = event.service;
       const before = qc.getQueryData<ServiceInfo[]>(qk.services)?.find((x) => x.id === svc.id);
