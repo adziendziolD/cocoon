@@ -50,7 +50,15 @@ export function servePreview(ports: PortService, req: IncomingMessage, res: Serv
   if (token) {
     const session = ports.redeem(token, host);
     if (!session) {
-      return page(res, 403, 'Preview link expired', 'This link was already used or is too old. Open the preview again from CoCoon. / Der Link ist abgelaufen – öffne die Vorschau erneut in CoCoon.');
+      const problem = ports.linkProblem(token, host);
+      console.warn(`preview link rejected (${problem}): host=${host} expected suffix=${ports.previewSuffix}`);
+      const hint =
+        problem === 'wrong-host'
+          ? `Host mismatch: the link was opened on "${host.replace(/[<>&"]/g, '')}", expected p&lt;port&gt;-&lt;sandbox&gt;.${ports.previewSuffix}. / Der Host passt nicht zum Link.`
+          : problem === 'unknown-token'
+            ? 'The link is unknown to the server (already used, or CoCoon was restarted). / Der Link ist dem Server unbekannt (benutzt oder CoCoon neu gestartet).'
+            : 'This link is too old. / Der Link ist zu alt.';
+      return page(res, 403, 'Preview link expired', `${hint}<br>Open the preview again from CoCoon. / Öffne die Vorschau erneut in CoCoon.`);
     }
     url.searchParams.delete('cocoon_preview');
     res.writeHead(302, {

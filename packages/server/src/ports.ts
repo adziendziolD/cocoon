@@ -229,6 +229,15 @@ export class PortService {
     return session;
   }
 
+  /** Why a link token was rejected (for the error page and the log). */
+  linkProblem(token: string, host: string): 'unknown-token' | 'wrong-host' | 'expired' {
+    const link = this.links.get(token);
+    if (!link) return 'unknown-token';
+    const target = parsePreviewHost(host, this.previewSuffix);
+    if (!target || target.sandboxId !== link.sandboxId || target.port !== link.port) return 'wrong-host';
+    return 'expired';
+  }
+
   /** Gateway port a preview request may be proxied to, if the session is valid for this host and the port is opened. */
   previewTarget(host: string, session: string | undefined): number | undefined {
     const target = parsePreviewHost(host, this.previewSuffix);
