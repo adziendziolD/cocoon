@@ -60,12 +60,16 @@ describe.runIf(available)('port forwarding', () => {
     // Without a session: no access.
     expect((await get(host, '/')).status).toBe(401);
 
-    // The link sets a cookie and redirects; the token works only once.
+    // The link sets a cookie and redirects; a repeat within the grace period (reload/prefetch) gets the same session.
     const login = await get(host, link.pathname + link.search);
     expect(login.status).toBe(302);
     const cookie = String(login.headers['set-cookie']).split(';')[0]!;
     expect(cookie).toMatch(/^cocoon_preview=/);
-    expect((await get(host, link.pathname + link.search)).status).toBe(403);
+    const again = await get(host, link.pathname + link.search);
+    expect(again.status).toBe(302);
+    expect(String(again.headers['set-cookie']).split(';')[0]).toBe(cookie);
+    // A token for another preview host is rejected.
+    expect((await get(host.replace('p5173-', 'p3000-'), link.pathname + link.search)).status).toBe(403);
 
     // The app sees Host localhost:<port> and never the session cookie.
     const page = await waitFor('preview answers', async () => {
