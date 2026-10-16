@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { planRepos, type Workspace } from '@cocoon/protocol';
-import { Bot, Box, FolderGit2, FolderInput, Hand, KanbanSquare, LayoutDashboard, Layers, MonitorPlay, Plus, Settings2, Trash2 } from 'lucide-react';
-import { useAgents, useSandboxes, useSettings, useTasks, useWorkspaces } from '../api/queries';
+import { Bot, Box, CalendarClock, FolderGit2, FolderInput, Hand, KanbanSquare, LayoutDashboard, Layers, MonitorPlay, Plus, Settings2, Trash2 } from 'lucide-react';
+import { useAgents, useSandboxes, useSchedules, useSettings, useTasks, useWorkspaces } from '../api/queries';
 import { rpc } from '../api/rpc';
 import { useAction } from '../api/useAction';
 import { qk } from '../api/keys';
@@ -18,6 +18,7 @@ import { SaveBar } from '../components/SaveBar';
 import { ErrorState, LoadingState } from '../components/States';
 import { Tabs, type TabDef } from '../components/Tabs';
 import { AutomationBar } from '../components/tasks/AutomationBar';
+import { NewScheduleButton, ScheduleList } from '../components/schedules/ScheduleList';
 import { TaskBoard } from '../components/tasks/TaskBoard';
 import { TaskStatusBadge } from '../components/tasks/TaskBits';
 import { useOpenTask } from '../components/tasks/useTaskActions';
@@ -32,8 +33,8 @@ import { useDraft } from '../lib/useDraft';
 import { setWorkspaceScope } from '../lib/workspace';
 import { workspaceStats } from './WorkspacesPage';
 
-type TabId = 'overview' | 'tasks' | 'settings';
-const TAB_IDS: TabId[] = ['overview', 'tasks', 'settings'];
+type TabId = 'overview' | 'tasks' | 'schedules' | 'settings';
+const TAB_IDS: TabId[] = ['overview', 'tasks', 'schedules', 'settings'];
 
 export function WorkspaceDetailPage() {
   const { workspaceId = '', tab: tabParam } = useParams();
@@ -43,6 +44,7 @@ export function WorkspaceDetailPage() {
   const sandboxes = useSandboxes();
   const agents = useAgents();
   const tasks = useTasks();
+  const schedules = useSchedules();
   const dialogs = useAppDialogs();
   const tab: TabId = TAB_IDS.includes(tabParam as TabId) ? (tabParam as TabId) : 'overview';
 
@@ -69,6 +71,12 @@ export function WorkspaceDetailPage() {
   const tabs: TabDef<TabId>[] = [
     { id: 'overview', label: t('workspaceDetail.tab.overview'), icon: <LayoutDashboard className="size-4" />, count: stats.attention, attention: stats.attention > 0 },
     { id: 'tasks', label: t('layout.nav.tasks'), icon: <KanbanSquare className="size-4" />, count: stats.openTasks },
+    {
+      id: 'schedules',
+      label: t('layout.nav.schedules'),
+      icon: <CalendarClock className="size-4" />,
+      count: (schedules.data ?? []).filter((s) => s.workspaceId === ws.id && s.enabled).length,
+    },
     { id: 'settings', label: t('workspaceDetail.tab.settings'), icon: <Settings2 className="size-4" /> },
   ];
 
@@ -115,6 +123,21 @@ export function WorkspaceDetailPage() {
             <ErrorState error={tasks.error} onRetry={() => tasks.refetch()} />
           ) : (
             <TaskBoard tasks={stats.tasks} allTasks={tasks.data ?? []} workspaceId={ws.id} />
+          )}
+        </div>
+      )}
+      {tab === 'schedules' && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="max-w-3xl text-sm text-fg-muted">{t('schedulesPage.workspaceIntro')}</p>
+            <NewScheduleButton workspaceId={ws.id} />
+          </div>
+          {schedules.isLoading ? (
+            <LoadingState />
+          ) : schedules.error ? (
+            <ErrorState error={schedules.error} onRetry={() => schedules.refetch()} />
+          ) : (
+            <ScheduleList schedules={(schedules.data ?? []).filter((s) => s.workspaceId === ws.id)} workspaceId={ws.id} />
           )}
         </div>
       )}

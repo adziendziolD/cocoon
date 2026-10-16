@@ -125,6 +125,17 @@ export const GithubIssues = z.object({
 });
 export type GithubIssues = z.infer<typeof GithubIssues>;
 
+/** Result file of a scheduled run, written by its agent (see reportInstructions). */
+export const TaskReport = z.object({
+  /** ok: everything passed, nothing to do; action_needed: failures, findings or changes; missing: no readable report. */
+  status: z.enum(['ok', 'action_needed', 'missing']),
+  summary: z.string().optional(),
+  /** Full report (Markdown). */
+  details: z.string().optional(),
+  at: z.string(),
+});
+export type TaskReport = z.infer<typeof TaskReport>;
+
 export const Task = z.object({
   id: z.string(),
   workspaceId: z.string(),
@@ -161,6 +172,10 @@ export const Task = z.object({
   pullRequests: z.array(z.object({ repo: z.string(), url: z.string() })).default([]),
   /** Set when the task was imported from a GitHub issue. */
   issue: TaskIssue.optional(),
+  /** Set when the task is a run of a scheduled agent. */
+  scheduleId: z.string().optional(),
+  /** Report the agent of a scheduled run left behind. */
+  report: TaskReport.optional(),
   /** Human-readable progress or error note (rendered in the client's language). */
   note: z.string().optional(),
   /** Message key + parameters behind `note`. */

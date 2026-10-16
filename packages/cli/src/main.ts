@@ -2,6 +2,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { Command, Option } from 'commander';
 import type { Agent, AgentStatus, EnvScopeInfo, Sandbox, UpdateStatus, UpdateTarget } from '@cocoon/protocol';
+import { SCHEDULE_TEMPLATES } from '@cocoon/protocol';
 import { attach } from './attach.ts';
 import { CocoonApiError, CocoonClient } from './client.ts';
 import { parseAssignments, readStdin, scopeFrom } from './env.ts';
@@ -329,6 +330,67 @@ tasks.command('approve <taskId>').action(async (taskId) => print(await client().
 tasks.command('reject <taskId> <feedback>').action(async (taskId, feedback) => print(await client().call('task.reject', { taskId, feedback })));
 tasks.command('stop <taskId>').action(async (taskId) => print(await client().call('task.stop', { taskId })));
 tasks.command('rm <taskId>').action(async (taskId) => print(await client().call('task.delete', { taskId })));
+
+const schedules = program.command('schedule').description('scheduled agents: recurring tasks such as running all checks or updating dependencies');
+schedules.command('ls').option('--workspace <id>').action(async (o) => {
+  const rows = await client().call('schedule.list', { workspaceId: o.workspace });
+  print(rows, () =>
+    console.table(
+      rows.map((s) => ({ id: s.id, name: s.name, cron: s.cron, timezone: s.timezone ?? '', enabled: s.enabled, next: s.nextRunAt ?? '', last: s.lastResult ? `${s.lastResult} ${s.lastRunAt ?? ''}` : '' })),
+    ),
+  );
+});
+schedules
+  .command('create <workspaceId> <name> <cron>')
+  .description('cron: "minute hour day month weekday", e.g. "0 3 * * *" (daily at 03:00) or "0 4 * * 1" (Mondays at 04:00)')
+  .option('-t, --template <name>', `checks | dependencies | security (prefills the prompt)`)
+  .option('-p, --prompt <text>', 'what the agent should do (required without --template)')
+  .option('--tz <zone>', 'IANA time zone, e.g. Europe/Berlin (default: the server\'s)')
+  .option('--agent <kind>', 'agent type')
+  .option('--workflow <id>', 'workflow instead of a single agent')
+  .option('--always', 'start a new run even if the previous one is still open')
+  .option('--no-auto-close', 'let every run wait for review, also when its report says ok')
+  .option('--keep <n>', 'finished runs to keep', (v) => Number(v))
+  .option('--paused', 'create it disabled')
+  .action(async (workspaceId, name, cron, o) => {
+    const template = o.template as keyof typeof SCHEDULE_TEMPLATES | undefined;
+    if (template && !SCHEDULE_TEMPLATES[template]) throw new Error(`unknown template ${template} (checks | dependencies | security)`);
+    const prompt = o.prompt ?? (template ? SCHEDULE_TEMPLATES[template].prompt : undefined);
+    if (!prompt) throw new Error('--prompt or --template is required');
+    print(
+      await client().call('schedule.create', {
+        workspaceId,
+        name,
+        cron,
+        timezone: o.tz,
+        template: template ?? 'custom',
+        prompt,
+        agentKind: o.agent,
+        workflowId: o.workflow,
+        overlap: o.always ? 'always' : 'skip',
+        autoClose: o.autoClose,
+        keepRuns: o.keep,
+        enabled: !o.paused,
+      }),
+    );
+  });
+schedules.command('get <scheduleId>').action(async (scheduleId) => print(await client().call('schedule.get', { scheduleId })));
+schedules
+  .command('run <scheduleId>')
+  .description('run it now, once')
+  .option('--force', 'also if the previous run is still open')
+  .action(async (scheduleId, o) => print(await client().call('schedule.run', { scheduleId, force: !!o.force })));
+schedules.command('pause <scheduleId>').action(async (scheduleId) => print(await client().call('schedule.update', { scheduleId, enabled: false })));
+schedules.command('resume <scheduleId>').action(async (scheduleId) => print(await client().call('schedule.update', { scheduleId, enabled: true })));
+schedules
+  .command('rm <scheduleId>')
+  .option('--delete-tasks', 'also delete its runs (tasks) and their sandboxes')
+  .action(async (scheduleId, o) => print(await client().call('schedule.delete', { scheduleId, deleteTasks: !!o.deleteTasks })));
+schedules
+  .command('preview <cron>')
+  .description('check a cron expression and show the next run times')
+  .option('--tz <zone>', 'IANA time zone')
+  .action(async (cron, o) => print(await client().call('schedule.preview', { cron, timezone: o.tz })));
 
 const providers = program.command('providers').description('custom API providers (own model endpoints or other HTTP APIs)');
 providers.command('ls').action(async () => {

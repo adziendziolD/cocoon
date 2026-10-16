@@ -22,7 +22,7 @@ import {
   Workflow as WorkflowIcon,
   X,
 } from 'lucide-react';
-import { useAgents, useSandboxes, useSettings, useTask, useTasks, useWorkspaces } from '../../api/queries';
+import { useAgents, useSandboxes, useSchedules, useSettings, useTask, useTasks, useWorkspaces } from '../../api/queries';
 import { isNotFound, rpc } from '../../api/rpc';
 import { useAction } from '../../api/useAction';
 import { rich, useLanguage, useT } from '../../i18n';
@@ -37,6 +37,7 @@ import { ConfirmDialog } from '../Dialog';
 import { CopyButton } from '../CodeBlock';
 import { Callout } from '../HelpText';
 import { ErrorState, LoadingState } from '../States';
+import { ReportBadge, ScheduledTag } from '../schedules/ScheduleBits';
 import { WorkspaceTag } from '../WorkspaceSwitcher';
 import { PriorityIcon, StageChips, TaskStatusBadge } from './TaskBits';
 import { useOpenInCockpit, useOpenTask, useTaskActions } from './useTaskActions';
@@ -123,6 +124,7 @@ function TaskDetail({ task, allTasks, onClose }: { task: Task; allTasks: Task[];
   const settings = useSettings();
   const agents = useAgents();
   const sandboxes = useSandboxes();
+  const schedule = useSchedules().data?.find((x) => x.id === task.scheduleId);
   const dialogs = useAppDialogs();
   const openTask = useOpenTask();
   const openInCockpit = useOpenInCockpit();
@@ -238,6 +240,17 @@ function TaskDetail({ task, allTasks, onClose }: { task: Task; allTasks: Task[];
 
         {task.note && s !== 'failed' && <p className="text-sm text-fg-muted italic">{task.note}</p>}
 
+        {task.report && (
+          <Section title={t('schedule.reportTitle')} action={<ReportBadge report={task.report} />}>
+            {task.report.summary && <p className="mb-2 text-sm font-medium text-fg">{task.report.summary}</p>}
+            {task.report.details ? (
+              <pre className="max-h-96 overflow-auto rounded-lg bg-surface-2 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-fg">{task.report.details}</pre>
+            ) : (
+              task.report.status === 'missing' && <p className="text-sm text-fg-muted">{t('schedule.reportMissing')}</p>
+            )}
+          </Section>
+        )}
+
         <Section title={t('taskDrawer.description')}>
           {task.description ? (
             <p className="text-sm leading-relaxed whitespace-pre-wrap text-fg">{task.description}</p>
@@ -286,6 +299,16 @@ function TaskDetail({ task, allTasks, onClose }: { task: Task; allTasks: Task[];
                   <GitBranch className="size-3.5 shrink-0 text-fg-subtle" />
                   <span className="truncate">{task.branch}</span>
                   <CopyButton text={task.branch} />
+                </dd>
+              </>
+            )}
+            {task.scheduleId && (
+              <>
+                <dt className="text-fg-muted">{t('schedule.scheduled')}</dt>
+                <dd className="min-w-0">
+                  <Link to={`/workspaces/${task.workspaceId}/schedules`} onClick={onClose} className="hover:underline">
+                    <ScheduledTag name={schedule?.name} />
+                  </Link>
                 </dd>
               </>
             )}

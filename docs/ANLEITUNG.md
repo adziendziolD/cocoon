@@ -87,6 +87,14 @@ Folgende – folge ihm einfach. Du kannst ihn jederzeit unter *Einstellungen →
 6. Unter **Änderungen** siehst du, was der Agent verändert hat – und kannst es herunterladen, auf GitHub hochladen
    oder direkt einen Pull Request erstellen (dafür einen GitHub-Token unter Zugangsdaten hinterlegen).
 
+### Agenten nach Zeitplan arbeiten lassen
+
+Unter **Zeitpläne** (oder im Reiter *Zeitpläne* eines Workspaces) auf *Neuer geplanter Agent* klicken, auswählen, was er tun soll –
+**Alle Checks ausführen** (Linting, Typprüfung, Tests, Build, Audit), **Abhängigkeiten aktualisieren**, **Sicherheits-Check** oder
+eigene Anweisungen – und wann (z. B. täglich um 3 Uhr, montags um 4 Uhr). Jeder Lauf erscheint als Aufgabe auf dem Board. Meldet der
+Agent, dass alles in Ordnung ist, schließt sich der Lauf selbst ab; findet er etwas oder ändert er Dateien, wartet die Aufgabe in
+*Prüfen* auf dich und du bekommst eine Benachrichtigung. Mit *Jetzt ausführen* probierst du ihn sofort aus.
+
 ## 5. Dauerhaft im Hintergrund laufen lassen
 
 Damit CoCoon nach einem Neustart des Servers automatisch startet: `deploy/cocoond.service` (Pfade anpassen) nach
@@ -97,6 +105,9 @@ Damit CoCoon nach einem Neustart des Servers automatisch startet: `deploy/cocoon
 **Ein Agent kommt nicht ins Internet / Installation schlägt fehl.**
 Im Modus „Eingeschränkt“ sind nur freigegebene Seiten erreichbar. Unter *Einstellungen → Netzwerk & Sicherheit* siehst du
 blockierte Verbindungen und kannst sie mit einem Klick erlauben.
+
+**Laufen geplante Agenten auch, wenn kein Browser offen ist?**
+Ja – der Zeitplan läuft im Server. War der Server zum geplanten Zeitpunkt aus, wird der verpasste Lauf nach dem Start einmal nachgeholt.
 
 **Ich habe den Anmelde-Token verloren.**
 Er steht in `.data/admin-token.txt` auf dem Server. Weitere Tokens (z. B. für die CLI) erstellst du unter

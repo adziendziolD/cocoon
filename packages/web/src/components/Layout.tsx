@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useMatch } from 'react-router-dom';
-import { Activity, Bot, Boxes, KanbanSquare, Layers, LayoutDashboard, Menu, MonitorPlay, Settings, X } from 'lucide-react';
+import { Activity, Bot, Boxes, CalendarClock, KanbanSquare, Layers, LayoutDashboard, Menu, MonitorPlay, Settings, X } from 'lucide-react';
 import { useConnectionState, useEventSync } from '../api/events';
 import { useAgents, useSystemInfo, useTasks, useUpdateStatus } from '../api/queries';
 import { useT, type MessageKey } from '../i18n';
@@ -17,11 +17,12 @@ export const useOpenCreateSandbox = () => {
   return () => createSandbox();
 };
 
-type NavId = 'dashboard' | 'cockpit' | 'tasks' | 'workspaces' | 'sandboxes' | 'agents' | 'activity' | 'settings';
+type NavId = 'dashboard' | 'cockpit' | 'tasks' | 'schedules' | 'workspaces' | 'sandboxes' | 'agents' | 'activity' | 'settings';
 const NAV: Array<{ id: NavId; to: string; label: MessageKey; icon: typeof Activity; end?: boolean; prominent?: boolean; gapBefore?: boolean }> = [
   { id: 'dashboard', to: '/', label: 'layout.nav.dashboard', icon: LayoutDashboard, end: true },
   { id: 'cockpit', to: '/cockpit', label: 'layout.nav.cockpit', icon: MonitorPlay, prominent: true },
   { id: 'tasks', to: '/tasks', label: 'layout.nav.tasks', icon: KanbanSquare },
+  { id: 'schedules', to: '/schedules', label: 'layout.nav.schedules', icon: CalendarClock },
   { id: 'workspaces', to: '/workspaces', label: 'layout.nav.workspaces', icon: Layers, gapBefore: true },
   { id: 'sandboxes', to: '/sandboxes', label: 'layout.nav.sandboxes', icon: Boxes },
   { id: 'agents', to: '/agents', label: 'layout.nav.agents', icon: Bot },

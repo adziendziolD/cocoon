@@ -1,6 +1,6 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Agent, CockpitLayout, EnvTarget, Sandbox, Settings, SharedService, Task, Workspace } from '@cocoon/protocol';
+import type { Agent, CockpitLayout, EnvTarget, Sandbox, Schedule, Settings, SharedService, Task, Workspace } from '@cocoon/protocol';
 
 export interface SandboxRecord extends Sandbox {
   /** Driver-specific handle, e.g. Docker container id. */
@@ -86,6 +86,8 @@ interface State {
   tokens: Record<string, TokenRecord>;
   workspaces: Record<string, Workspace>;
   tasks: Record<string, Task>;
+  /** Scheduled agents. */
+  schedules: Record<string, Schedule>;
   /** Cockpit layouts by workspace id ("_global" for the overall layout). */
   layouts: Record<string, CockpitLayout>;
   /** Installed agent toolbox (agent CLIs shared by all sandboxes). */
@@ -102,7 +104,7 @@ interface State {
  */
 export class Store {
   private readonly file: string;
-  private state: State = { sandboxes: {}, agents: {}, secrets: {}, tokens: {}, workspaces: {}, tasks: {}, layouts: {}, services: {}, envScopes: {} };
+  private state: State = { sandboxes: {}, agents: {}, secrets: {}, tokens: {}, workspaces: {}, tasks: {}, schedules: {}, layouts: {}, services: {}, envScopes: {} };
 
   constructor(readonly dataDir: string) {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
@@ -194,6 +196,7 @@ export class Store {
     delete this.state.layouts[id];
     delete this.state.envScopes[`workspace:${id}`];
     for (const task of this.tasks()) if (task.workspaceId === id) delete this.state.tasks[task.id];
+    for (const schedule of this.schedules()) if (schedule.workspaceId === id) delete this.state.schedules[schedule.id];
     this.flush();
   }
 
@@ -212,6 +215,24 @@ export class Store {
 
   deleteTask(id: string): void {
     delete this.state.tasks[id];
+    this.flush();
+  }
+
+  schedules(): Schedule[] {
+    return Object.values(this.state.schedules);
+  }
+
+  schedule(id: string): Schedule | undefined {
+    return this.state.schedules[id];
+  }
+
+  putSchedule(schedule: Schedule): void {
+    this.state.schedules[schedule.id] = schedule;
+    this.flush();
+  }
+
+  deleteSchedule(id: string): void {
+    delete this.state.schedules[id];
     this.flush();
   }
 

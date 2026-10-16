@@ -16,6 +16,7 @@ import type { ProviderService } from './providers.ts';
 import type { SecretsService } from './secrets.ts';
 import type { SettingsService } from './settings.ts';
 import type { Store } from './store.ts';
+import type { ScheduleService } from './schedules.ts';
 import type { TaskService } from './tasks.ts';
 import type { TokenService } from './tokens.ts';
 import type { WorkspaceService as WorkspacesService } from './workspaces.ts';
@@ -49,12 +50,13 @@ export interface RpcContext {
   ports: PortService;
   envs: EnvService;
   issues: IssueService;
+  schedules: ScheduleService;
 }
 
 const CREDENTIAL_SECRETS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'OPENAI_API_KEY', 'GEMINI_API_KEY'];
 
 export function createRpc(ctx: RpcContext) {
-  const { driver, store, settings, secrets, providers, tokens, images, egress, activity, sandboxes, workspace, agents, workspaces, tasks, notifier, services, updates, ports, envs, issues } = ctx;
+  const { driver, store, settings, secrets, providers, tokens, images, egress, activity, sandboxes, workspace, agents, workspaces, tasks, notifier, services, updates, ports, envs, issues, schedules } = ctx;
   const ok = { ok: true as const };
 
   const handlers: Handlers = {
@@ -222,6 +224,14 @@ export function createRpc(ctx: RpcContext) {
     'task.approve': async (p) => tasks.approve(p.taskId),
     'task.reject': (p) => tasks.reject(p.taskId, p.feedback),
     'task.stop': async (p) => tasks.stop(p.taskId),
+
+    'schedule.list': async (p) => schedules.list(p.workspaceId),
+    'schedule.get': async (p) => schedules.get(p.scheduleId),
+    'schedule.create': async (p) => schedules.create(p),
+    'schedule.update': async (p) => schedules.update(p),
+    'schedule.delete': async (p) => (await schedules.delete(p.scheduleId, p.deleteTasks), ok),
+    'schedule.run': (p) => schedules.run(p.scheduleId, p.force),
+    'schedule.preview': async (p) => schedules.preview(p.cron, p.timezone, p.count),
 
     'services.list': async () => services.list(),
     'services.add': (p) => services.add(p),

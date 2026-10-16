@@ -20,6 +20,7 @@ import { SecretsService } from './secrets.ts';
 import { ServiceManager } from './services/manager.ts';
 import { SettingsService } from './settings.ts';
 import { Store } from './store.ts';
+import { ScheduleService } from './schedules.ts';
 import { TaskService } from './tasks.ts';
 import { IssueService } from './github-issues.ts';
 import { TokenService } from './tokens.ts';
@@ -65,16 +66,18 @@ const notifier = new Notifier(settings, store, bus, config.publicUrl, logProxy);
 const workspaces = new WorkspacesService(store, bus, activity);
 const tasks = new TaskService(store, bus, settings, workspaces, sandboxes, workspace, agents, notifier, logProxy, secrets);
 const issues = new IssueService(workspaces, tasks, secrets);
+const schedules = new ScheduleService(store, bus, settings, workspaces, tasks, activity, logProxy);
 
 const updates = new UpdateService(config, driver, images, store, bus, activity, () => void shutdown(RESTART_EXIT_CODE), logProxy);
 
-const rpc = createRpc({ driver, store, settings, secrets, providers, tokens, images, egress, activity, sandboxes, workspace, agents, workspaces, tasks, notifier, services, updates, ports, envs, issues });
+const rpc = createRpc({ driver, store, settings, secrets, providers, tokens, images, egress, activity, sandboxes, workspace, agents, workspaces, tasks, notifier, services, updates, ports, envs, issues, schedules });
 const app = await buildHttpServer({ config, rpc, bus, tokens, agents, workspace, ports });
 log = (msg, err) => app.log.warn({ err }, msg);
 
 await sandboxes.reconcile();
 agents.start();
 tasks.startEngine();
+schedules.start();
 updates.start();
 await app.listen({ host: config.host, port: config.port });
 
@@ -124,6 +127,7 @@ async function shutdown(code: number): Promise<void> {
   stopping = true;
   agents.stop();
   tasks.stopEngine();
+  schedules.stop();
   updates.stop();
   ports.stop();
   await app.close();

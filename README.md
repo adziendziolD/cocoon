@@ -61,6 +61,7 @@ it too. The design is inspired by [herdr](https://vercel.com/docs/sandbox/ecosys
 |---|---|
 | **Onboarding wizard** | After installation a guided, full-screen wizard walks new users through system check, AI access (with key verification), GitHub, safety defaults, the first sandbox and the first agent |
 | **Cockpit** | herdr-style multi-agent window: tiled live terminals (split, resize, maximize), workspace tree, attention queue, broadcast input, keyboard control, layouts saved per workspace |
+| **Scheduled agents** | Agents that run on a schedule (cron + time zone) in a workspace – templates to **run every check** of a project (format, lint, typecheck, unit/integration tests, build, audit), **update dependencies** or do a **security check**. Every run is a task with a report; runs without findings close themselves, findings land in *Review* with a notification |
 | **Orchestration** | Workspaces, a task board (backlog → queued → running → review → done), multi-stage workflows (e.g. plan → build → review) with approvals, review feedback loop, dependencies, auto-run with parallelism limits, webhook notifications |
 | **Web UI** | Setup checklist, sandbox wizard, live in-browser terminals, file browser/editor, diff viewer, commit/push/pull request, activity log, every setting – written for non-technical users |
 | **Sandbox backends** | **Docker**, **Podman** (rootless, no daemon) or **bubblewrap** (lightweight Linux process sandboxes, no images, start in ~0.3 s) – picked automatically. Containers are hardened (non-root, no capabilities, `no-new-privileges`, CPU/RAM/PID limits) with optional gVisor or Kata/Firecracker runtimes |
@@ -481,6 +482,30 @@ default) get the stored token in their environment, and CoCoon sets up a git cre
 `{{diff}}` (changed files) and `{{feedback}}` (review feedback). Stages with `approval` pause in `review` until you approve.
 Built-in: **Plan → Build → Review** (approve the plan before implementation) and **Build → Review**.
 
+**Scheduled agents** (*Schedules* in the navigation, or the *Schedules* tab of a workspace) start a task on a schedule:
+"run all checks every night at 03:00", "look for dependency updates every Monday", or anything you write yourself.
+
+- **When**: hourly / daily / weekdays / weekly / monthly in the UI, or any five-field **cron expression**
+  (`minute hour day month weekday`, with lists, ranges, steps, names and `@daily`-style macros), evaluated in an **IANA time
+  zone** (daylight saving time included). The dialog previews the next runs.
+- **Templates** prefill the instructions (editable): **Run all checks** – the agent discovers every check of the project (package
+  scripts, Makefile, CI config, pyproject, Cargo, …) and runs formatting, linting, type checking, unit/integration tests, build and a
+  dependency audit, without changing code; **Update dependencies** – lists outdated packages and vulnerabilities, applies patch/minor
+  updates and security fixes, runs all checks, reverts what breaks, lists major updates with migration notes and commits;
+  **Security check**; **Own task**.
+- **Each run is a task** (`Name · 2026-10-17 03:00`) that is started right away (independent of auto-run) with the schedule's
+  agent type or workflow, in a fresh sandbox (per-task workspaces) or the shared sandbox.
+- **Report**: the last agent of a run writes `{"status": "ok" | "action_needed", "summary", "report"}` to
+  `<workspace>/.cocoon/report/<task>.json` (excluded from git; the path is also in `$COCOON_REPORT_FILE`, so a plain shell
+  command can write it, e.g. `pnpm test && echo '{"status":"ok"}' > "$COCOON_REPORT_FILE"`). The task drawer shows it.
+- **Auto-close** (default on): runs whose report says `ok` are marked done and their sandbox is removed – no review needed.
+  Findings, changed files or a missing report move the task to *Review* (notification "Scheduled run needs you"); approving it
+  then works like any task (push, code review, pull request).
+- **Overlap** (default *skip*): no new run while the previous one is still queued, running or waiting for review, so the same
+  task does not pile up; *Run now* can force an extra run. Runs missed while the server was down are made up once on start.
+- **Housekeeping**: only the newest `keepRuns` (default 10) finished runs are kept; older ones are deleted with their sandbox.
+  The schedule list shows next/last run, the last result and a coloured history of recent runs.
+
 **Notifications** (*Settings → Notifications*): an incoming webhook (Slack, Mattermost, Discord via `/slack`, or any JSON
 endpoint) receives `{ text, content, event, url }` when an agent is waiting for you, a task is ready for review, failed or done.
 Messages use the server's default language; set `COCOON_PUBLIC_URL` to get links.
@@ -673,6 +698,13 @@ pnpm cocoon task create <workspace-id> "Add dark mode" -d "Details for the agent
 pnpm cocoon task ls [--workspace <id>]
 pnpm cocoon task start | approve | stop | rm <task-id>
 pnpm cocoon task reject <task-id> "Please also add tests"
+pnpm cocoon schedule create <workspace-id> "Nightly checks" "0 3 * * *" --template checks --tz Europe/Berlin
+pnpm cocoon schedule create <workspace-id> "Weekly updates" "0 4 * * 1" --template dependencies [--agent codex] [--always] [--no-auto-close]
+pnpm cocoon schedule ls [--workspace <id>]
+pnpm cocoon schedule run <schedule-id> [--force]    # run once now
+pnpm cocoon schedule pause | resume <schedule-id>
+pnpm cocoon schedule rm <schedule-id> [--delete-tasks]
+pnpm cocoon schedule preview "*/30 8-18 * * 1-5" --tz Europe/Berlin
 
 # shared services (databases, mocks)
 pnpm cocoon services add postgres                  # also: mysql | mongodb | redis | wiremock | mailpit
@@ -739,12 +771,13 @@ GET  /healthz                        health check (no auth)
 | Admin | `settings.get/update/reset`, `secrets.list/set/delete`, `tokens.list/create/revoke`, `providers.test`, `notifications.test`, `egress.denied` |
 | Workspaces | `workspace.list/get/create/update/delete` |
 | Tasks | `task.list/get/create/update/delete/start/approve/reject/stop` |
+| Scheduled agents | `schedule.list/get/create/update/delete/run/preview` |
 | Cockpit | `layout.get/save` |
 | Sandboxes | `sandbox.create/list/get/update/start/stop/delete/exec/diff/apply_patch` |
 | Files | `files.list/read/write/mkdir/delete` |
 | Git | `git.status/commit/push/create_pr` |
 | Agents | `agent.spawn/list/get/send_input/send_keys/read/wait/kill` |
-| Events | `sandbox.updated/deleted`, `agent.updated`, `workspace.updated/deleted`, `task.updated/deleted`, `settings.updated`, `image.build`, `activity` |
+| Events | `sandbox.updated/deleted`, `agent.updated`, `workspace.updated/deleted`, `task.updated/deleted`, `schedule.updated/deleted`, `settings.updated`, `image.build`, `activity` |
 
 Example:
 
@@ -798,14 +831,15 @@ workdir), `egress` (allowlist, credential proxy), `agents` (agent types), `statu
 ## Project structure
 
 ```
-packages/protocol     Shared zod schemas: models, settings, method registry, events, wire format
+packages/protocol     Shared zod schemas: models, settings, method registry, events, wire format, cron parser
 packages/server       cocoond
   src/main.ts             wiring, first-time setup, startup
   src/http.ts             Fastify: auth, RPC, WebSockets, attach, archive, MCP, web UI, language per request
   src/rpc.ts              method → handler
   src/mcp.ts              MCP server generated from the method registry
   src/i18n.ts             server messages (de/en)
-  src/tasks.ts            task orchestration engine (lifecycle, workflows, reviews, auto-run)
+  src/tasks.ts            task orchestration engine (lifecycle, workflows, reviews, auto-run, reports of scheduled runs)
+  src/schedules.ts        scheduled agents (cron engine: due runs → tasks, overlap, catch-up, pruning)
   src/workspaces.ts · notifications.ts
   src/settings.ts · secrets.ts · tokens.ts · providers.ts · activity.ts · images.ts · egress.ts · store.ts
   src/sandbox/            driver interface + drivers (docker.ts: Docker/Podman, bwrap.ts: bubblewrap, select.ts: auto-selection),
