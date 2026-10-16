@@ -49,7 +49,7 @@ export async function buildHttpServer({ config, rpc, bus, tokens, agents, worksp
 
   // Previews of sandbox servers (p<port>-<sandbox>.<domain>) have their own login (one-time link → cookie for that host).
   app.addHook('onRequest', async (req, reply) => {
-    if (!ports.isPreviewHost(req.headers.host)) return;
+    if (!ports.previewRoute(req.headers.host, req.url)) return;
     reply.hijack();
     servePreview(ports, req.raw, reply.raw, Boolean(config.ports.previewDomain));
   });

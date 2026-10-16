@@ -126,7 +126,7 @@ export function createRpc(ctx: RpcContext) {
     'ports.list': async (p) => ports.list(p.sandboxId),
     'ports.open': (p) => ports.open(p.sandboxId, p.port, p.mode, p.name),
     'ports.close': async (p) => (await ports.close(p.sandboxId, p.port), ok),
-    'ports.preview_link': async (p) => ports.previewLink(p.sandboxId, p.port),
+    'ports.preview_link': async (p) => ports.previewLink(p.sandboxId, p.port, p.origin),
 
     'update.status': (p) => updates.status(p.refresh),
     'update.apply': async (p) => ({ targets: await updates.apply(p.targets) }),

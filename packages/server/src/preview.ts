@@ -1,7 +1,7 @@
 import { request, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { connect } from 'node:net';
 import type { Duplex } from 'node:stream';
-import { parsePreviewHost, PREVIEW_COOKIE, type PortService } from './ports.ts';
+import { PREVIEW_COOKIE, type PortService } from './ports.ts';
 
 /** Cookie header without the preview session cookie (the app in the sandbox must never see it). */
 function stripSessionCookie(value: string | string[] | undefined): string | undefined {
@@ -21,13 +21,14 @@ function sessionOf(req: IncomingMessage): string | undefined {
 }
 
 /** Headers for the app in the sandbox: Host as the dev server expects it (dev servers often only allow localhost). */
-function upstreamHeaders(req: IncomingMessage, port: number): Record<string, string | string[]> {
+function upstreamHeaders(req: IncomingMessage, port: number, prefix = ''): Record<string, string | string[]> {
   const headers: Record<string, string | string[]> = {};
   for (const [key, value] of Object.entries(req.headers)) if (value !== undefined) headers[key] = value;
   const cookie = stripSessionCookie(req.headers.cookie);
   if (cookie) headers.cookie = cookie;
   else delete headers.cookie;
   headers['x-forwarded-host'] = req.headers.host ?? '';
+  if (prefix) headers['x-forwarded-prefix'] = prefix;
   headers['x-forwarded-proto'] = (req.headers['x-forwarded-proto'] as string | undefined) ?? 'http';
   headers.host = `localhost:${port}`;
   return headers;
@@ -42,16 +43,17 @@ function page(res: ServerResponse, status: number, title: string, text: string):
   );
 }
 
-/** Handles an HTTP request for a preview host (p<port>-<sandbox>.<suffix>). */
+/** Handles an HTTP request for a preview (host name p<port>-<sandbox>.<suffix> or path /preview/p<port>-<sandbox>/). */
 export function servePreview(ports: PortService, req: IncomingMessage, res: ServerResponse, secure: boolean): void {
   const host = req.headers.host ?? '';
-  const url = new URL(req.url ?? '/', 'http://preview');
+  const route = ports.previewRoute(host, req.url)!;
+  const url = new URL(route.rest, 'http://preview');
   const token = url.searchParams.get('cocoon_preview');
   if (token) {
-    const session = ports.redeem(token, host);
+    const session = ports.redeemFor(token, route);
     if (!session) {
-      const problem = ports.linkProblem(token, host);
-      console.warn(`preview link rejected (${problem}): host=${host} expected suffix=${ports.previewSuffix}`);
+      const problem = ports.linkProblem(token, route);
+      console.warn(`preview link rejected (${problem}): host=${host} url=${req.url?.split('?')[0]} expected suffix=${ports.previewSuffix}`);
       const hint =
         problem === 'wrong-host'
           ? `Host mismatch: the link was opened on "${host.replace(/[<>&"]/g, '')}", expected p&lt;port&gt;-&lt;sandbox&gt;.${ports.previewSuffix}. / Der Host passt nicht zum Link.`
@@ -61,20 +63,21 @@ export function servePreview(ports: PortService, req: IncomingMessage, res: Serv
       return page(res, 403, 'Preview link expired', `${hint}<br>Open the preview again from CoCoon. / Öffne die Vorschau erneut in CoCoon.`);
     }
     url.searchParams.delete('cocoon_preview');
+    const https = secure || req.headers['x-forwarded-proto'] === 'https';
     res.writeHead(302, {
-      location: url.pathname + url.search,
-      'set-cookie': `${PREVIEW_COOKIE}=${session}; Path=/; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}`,
+      location: route.prefix + url.pathname + url.search,
+      'set-cookie': `${PREVIEW_COOKIE}=${session}; Path=${route.prefix || '/'}${route.prefix ? '/' : ''}; HttpOnly; SameSite=Lax${https ? '; Secure' : ''}`,
       'cache-control': 'no-store',
     });
     return void res.end();
   }
 
-  const target = parsePreviewHost(host, ports.previewSuffix)!;
-  const hostPort = ports.previewTarget(host, sessionOf(req));
+  const target = route;
+  const hostPort = ports.previewTargetFor(route, sessionOf(req));
   if (!hostPort) {
     return page(res, 401, 'Not logged in to this preview', 'Open the preview from CoCoon (Sandbox → Ports). / Öffne die Vorschau aus CoCoon heraus (Sandbox → Ports).');
   }
-  const upstream = request({ host: '127.0.0.1', port: hostPort, method: req.method, path: req.url, headers: upstreamHeaders(req, target.port) }, (up) => {
+  const upstream = request({ host: '127.0.0.1', port: hostPort, method: req.method, path: route.rest, headers: upstreamHeaders(req, target.port, route.prefix) }, (up) => {
     res.writeHead(up.statusCode ?? 502, up.headers);
     up.pipe(res);
   });
@@ -92,15 +95,15 @@ export function servePreview(ports: PortService, req: IncomingMessage, res: Serv
 
 /** Handles a WebSocket (or other) upgrade for a preview host by piping raw TCP to the gateway. */
 export function upgradePreview(ports: PortService, req: IncomingMessage, socket: Duplex, head: Buffer): void {
-  const target = parsePreviewHost(req.headers.host, ports.previewSuffix);
-  const hostPort = target && ports.previewTarget(req.headers.host ?? '', sessionOf(req));
+  const target = ports.previewRoute(req.headers.host, req.url);
+  const hostPort = target && ports.previewTargetFor(target, sessionOf(req));
   if (!target || !hostPort) {
     socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
     return;
   }
   const upstream = connect(hostPort, '127.0.0.1', () => {
-    const headers = upstreamHeaders(req, target.port);
-    let raw = `${req.method} ${req.url} HTTP/${req.httpVersion}\r\n`;
+    const headers = upstreamHeaders(req, target.port, target.prefix);
+    let raw = `${req.method} ${target.rest} HTTP/${req.httpVersion}\r\n`;
     for (const [key, value] of Object.entries(headers)) for (const v of Array.isArray(value) ? value : [value]) raw += `${key}: ${v}\r\n`;
     upstream.write(`${raw}\r\n`);
     if (head.length) upstream.write(head);
@@ -119,7 +122,7 @@ export function routePreviewUpgrades(server: Server, ports: PortService): void {
   const existing = server.listeners('upgrade') as ((req: IncomingMessage, socket: Duplex, head: Buffer) => void)[];
   server.removeAllListeners('upgrade');
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    if (ports.isPreviewHost(req.headers.host)) return upgradePreview(ports, req, socket, head);
+    if (ports.previewRoute(req.headers.host, req.url)) return upgradePreview(ports, req, socket, head);
     for (const listener of existing) listener.call(server, req, socket, head);
   });
 }

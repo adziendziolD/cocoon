@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 // @ts-expect-error plain JavaScript module of the gateway container
 import { parsePorts } from '../../../images/port-gateway/gateway.mjs';
-import { parseListening, parsePreviewHost, parseRange, PortService, previewLabel } from './ports.ts';
+import { parseListening, parsePreviewHost, parsePreviewPath, parseRange, PortService, previewLabel } from './ports.ts';
 
 const TCP = `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
    0: 00000000:1435 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 1 1
@@ -99,5 +99,42 @@ describe('preview link redemption', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('path-based previews (CoCoon opened from another machine)', () => {
+  const make = () => {
+    const sandboxes = { record: () => ({ ports: [{ port: 8765 }] }), addHooks: () => {}, update: () => {} };
+    const config = { ports: { enabled: true, previewRange: '7500-7501', shareRange: '7550-7551', shareBind: '', previewDomain: undefined }, port: 7420 };
+    const svc = new PortService(config as never, {} as never, { dataDir: '/tmp', sandbox: () => ({ ports: [{ port: 8765, hostPort: 7500 }] }) } as never, sandboxes as never, { subscribe: () => {} } as never, {} as never, () => {});
+    return Object.assign(svc, { assertEnabled: () => {}, enabled: true }) as PortService;
+  };
+
+  it('parses /preview/p<port>-<id>/ paths', () => {
+    expect(parsePreviewPath('/preview/p8765-ca0845d20e84/app/x.js?y=1')).toEqual({ sandboxId: 'sb_ca0845d20e84', port: 8765, prefix: '/preview/p8765-ca0845d20e84', rest: '/app/x.js?y=1' });
+    expect(parsePreviewPath('/preview/p8765-ca0845d20e84')?.rest).toBe('/');
+    expect(parsePreviewPath('/preview/p8765-ca0845d20e84?a=b')?.rest).toBe('/?a=b');
+    expect(parsePreviewPath('/v1/rpc')).toBeUndefined();
+    expect(parsePreviewPath('/preview/other')).toBeUndefined();
+  });
+
+  it('builds a path link for a remote origin and keeps the subdomain link for local use', () => {
+    const svc = make();
+    const remote = svc.previewLink('sb_ca0845d20e84', 8765, 'https://mbp-32.puma-fiordland.ts.net').url;
+    expect(remote).toMatch(/^https:\/\/mbp-32\.puma-fiordland\.ts\.net\/preview\/p8765-ca0845d20e84\/\?cocoon_preview=/);
+    expect(svc.previewLink('sb_ca0845d20e84', 8765, 'http://localhost:7420').url).toMatch(/^http:\/\/p8765-ca0845d20e84\.localhost:7420\//);
+    expect(svc.previewLink('sb_ca0845d20e84', 8765).url).toMatch(/^http:\/\/p8765-ca0845d20e84\.localhost:7420\//);
+  });
+
+  it('redeems a path link and authorises the path route', () => {
+    const svc = make();
+    const url = new URL(svc.previewLink('sb_ca0845d20e84', 8765, 'https://cocoon.example').url);
+    const route = svc.previewRoute('cocoon.example', url.pathname + url.search)!;
+    expect(route.prefix).toBe('/preview/p8765-ca0845d20e84');
+    const session = svc.redeemFor(url.searchParams.get('cocoon_preview')!, route);
+    expect(session).toBeTruthy();
+    expect(svc.previewTargetFor(route, session)).toBe(7500);
+    expect(svc.previewTargetFor(route, undefined)).toBeUndefined();
+    expect(svc.previewTargetFor({ sandboxId: 'sb_ca0845d20e84', port: 3000 }, session)).toBeUndefined();
   });
 });

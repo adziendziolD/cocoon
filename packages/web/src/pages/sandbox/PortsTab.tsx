@@ -50,7 +50,7 @@ export function PortsTab({ sandbox: s }: { sandbox: Sandbox }) {
       try {
         const list = ports.data ?? [];
         if (!list.find((p) => p.port === v.port)?.opened) await rpc('ports.open', { sandboxId: s.id, port: v.port, mode: 'preview' });
-        const { url } = await rpc('ports.preview_link', { sandboxId: s.id, port: v.port });
+        const { url } = await rpc('ports.preview_link', { sandboxId: s.id, port: v.port, origin: window.location.origin });
         if (v.win) v.win.location.href = url;
         else window.open(url, '_blank', 'noopener');
         return url;
