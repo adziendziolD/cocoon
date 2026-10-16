@@ -190,7 +190,7 @@ export class PortService {
     this.publish(sandboxId);
   }
 
-  /** One-time link that logs a browser in to this preview only. */
+  /** Short-lived link (single use, plus a brief grace period) that logs a browser in to this preview only. */
   previewLink(sandboxId: string, port: number): { url: string; expiresAt: string } {
     this.assertEnabled();
     const record = this.sandboxes.record(sandboxId);
