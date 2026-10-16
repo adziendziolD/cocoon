@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 // @ts-expect-error plain JavaScript module of the gateway container
 import { parsePorts } from '../../../images/port-gateway/gateway.mjs';
-import { parseListening, parsePreviewHost, parseRange, previewLabel } from './ports.ts';
+import { parseListening, parsePreviewHost, parseRange, PortService, previewLabel } from './ports.ts';
 
 const TCP = `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
    0: 00000000:1435 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 1 1
@@ -65,5 +65,39 @@ describe('preview host names', () => {
     expect(parsePreviewHost('p5173-3f9a1c2b4d5e.evil.com', 'localhost')).toBeUndefined();
     expect(parsePreviewHost('localhost:7420', 'localhost')).toBeUndefined();
     expect(parsePreviewHost(undefined, 'localhost')).toBeUndefined();
+  });
+});
+
+describe('preview link redemption', () => {
+  const make = () => {
+    const sandboxes = { record: () => ({ ports: [{ port: 5173 }] }), addHooks: () => {}, update: () => {} };
+    const config = { ports: { enabled: true, previewRange: '7500-7501', shareRange: '7550-7551', shareBind: '', previewDomain: undefined }, port: 7420 };
+    const svc = new PortService(config as never, {} as never, { dataDir: '/tmp', sandbox: () => ({ ports: [{ port: 5173, hostPort: 7500 }] }) } as never, sandboxes as never, { subscribe: () => {} } as never, {} as never, () => {});
+    return Object.assign(svc, { assertEnabled: () => {} }) as PortService;
+  };
+  const host = `${previewLabel('sb_abc123', 5173)}.localhost:7420`;
+
+  it('gives the same session on a quick repeat and rejects other hosts without consuming the link', () => {
+    const svc = make();
+    const { url } = svc.previewLink('sb_abc123', 5173);
+    const token = new URL(url).searchParams.get('cocoon_preview')!;
+    expect(svc.redeem(token, `${previewLabel('sb_abc123', 3000)}.localhost`)).toBeUndefined();
+    const session = svc.redeem(token, host);
+    expect(session).toBeTruthy();
+    expect(svc.redeem(token, host)).toBe(session);
+    expect(svc.previewTarget(host, session)).toBe(7500);
+  });
+
+  it('expires the link after the grace period', () => {
+    vi.useFakeTimers();
+    try {
+      const svc = make();
+      const token = new URL(svc.previewLink('sb_abc123', 5173).url).searchParams.get('cocoon_preview')!;
+      expect(svc.redeem(token, host)).toBeTruthy();
+      vi.advanceTimersByTime(31_000);
+      expect(svc.redeem(token, host)).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

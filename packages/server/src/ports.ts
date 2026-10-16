@@ -20,6 +20,8 @@ export const GATEWAY_CONTAINER = scoped('cocoon-ports');
 const POLL_MS = 3000;
 const LINK_TTL_MS = 2 * 60 * 1000;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+/** After the first use a link keeps working briefly (reloads, browser prefetch/duplicate navigation) and yields the same session. */
+const LINK_GRACE_MS = 30 * 1000;
 export const PREVIEW_COOKIE = 'cocoon_preview';
 
 export type Listening = { port: number; address: 'all' | 'loopback' };
@@ -85,7 +87,7 @@ export class PortService {
   private readonly sharePorts: number[];
   private readonly dir: string;
   private readonly listening = new Map<string, Listening[]>();
-  private readonly links = new Map<string, { sandboxId: string; port: number; expires: number }>();
+  private readonly links = new Map<string, { sandboxId: string; port: number; expires: number; session?: string; graceUntil?: number }>();
   private readonly sessions = new Map<string, { host: string; expires: number }>();
   private timer?: NodeJS.Timeout;
   private polling = false;
@@ -202,14 +204,28 @@ export class PortService {
     return { url: `${base}/?cocoon_preview=${token}`, expiresAt: new Date(expires).toISOString() };
   }
 
-  /** Exchanges a one-time link token for a session id (cookie value) bound to the preview host. */
+  /**
+   * Exchanges a link token for a session id (cookie value) bound to the preview host. A token is consumed by its first
+   * use but may be repeated for a short grace period (same session); a request for the wrong host does not consume it.
+   */
   redeem(token: string, host: string): string | undefined {
     const link = this.links.get(token);
-    this.links.delete(token);
+    const now = Date.now();
     const target = parsePreviewHost(host, this.previewSuffix);
-    if (!link || link.expires < Date.now() || !target || target.sandboxId !== link.sandboxId || target.port !== link.port) return undefined;
+    if (!link || !target || target.sandboxId !== link.sandboxId || target.port !== link.port) return undefined;
+    if (link.session) {
+      if ((link.graceUntil ?? 0) >= now && this.sessions.has(link.session)) return link.session;
+      this.links.delete(token);
+      return undefined;
+    }
+    if (link.expires < now) {
+      this.links.delete(token);
+      return undefined;
+    }
     const session = randomBytes(24).toString('base64url');
-    this.sessions.set(session, { host: previewLabel(link.sandboxId, link.port), expires: Date.now() + SESSION_TTL_MS });
+    this.sessions.set(session, { host: previewLabel(link.sandboxId, link.port), expires: now + SESSION_TTL_MS });
+    link.session = session;
+    link.graceUntil = now + LINK_GRACE_MS;
     return session;
   }
 
@@ -244,7 +260,7 @@ export class PortService {
 
   private prune(): void {
     const now = Date.now();
-    for (const [k, v] of this.links) if (v.expires < now) this.links.delete(k);
+    for (const [k, v] of this.links) if (v.expires < now && (v.graceUntil ?? 0) < now) this.links.delete(k);
     for (const [k, v] of this.sessions) if (v.expires < now) this.sessions.delete(k);
   }
 
