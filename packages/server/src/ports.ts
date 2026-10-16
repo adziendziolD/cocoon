@@ -69,6 +69,24 @@ export function parsePreviewHost(host: string | undefined, suffix: string): { sa
   return { sandboxId: `sb_${match[2]}`, port: Number(match[1]) };
 }
 
+/** Origin of a CoCoon opened from another machine (where *.localhost would point to the wrong host); undefined for local use. */
+function remoteOrigin(origin: string): string | undefined {
+  try {
+    const url = new URL(origin);
+    if (!/^https?:$/.test(url.protocol) || ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || url.hostname.endsWith('.localhost')) return undefined;
+    return url.origin;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Path-based preview: /preview/p<port>-<id>/<rest> (for setups without wildcard host names, e.g. behind Tailscale Serve). */
+export function parsePreviewPath(url: string | undefined): { sandboxId: string; port: number; prefix: string; rest: string } | undefined {
+  const match = /^\/preview\/(p(\d{1,5})-([a-f0-9]+))(\/[^?#]*)?(\?[^#]*)?/i.exec(url ?? '');
+  if (!match) return undefined;
+  return { sandboxId: `sb_${match[3]!.toLowerCase()}`, port: Number(match[2]), prefix: `/preview/${match[1]}`, rest: `${match[4] ?? '/'}${match[5] ?? ''}` };
+}
+
 /** First non-internal IPv4 address of the host (for "shared" URLs). */
 function lanAddress(): string {
   for (const list of Object.values(networkInterfaces())) {
@@ -191,7 +209,7 @@ export class PortService {
   }
 
   /** One-time link that logs a browser in to this preview only. */
-  previewLink(sandboxId: string, port: number): { url: string; expiresAt: string } {
+  previewLink(sandboxId: string, port: number, origin?: string): { url: string; expiresAt: string } {
     this.assertEnabled();
     const record = this.sandboxes.record(sandboxId);
     if (!record.ports?.some((p) => p.port === port)) throw new CocoonError('not_found', t('error.portNotOpen', { port }));
@@ -199,7 +217,10 @@ export class PortService {
     const token = randomBytes(24).toString('base64url');
     const expires = Date.now() + LINK_TTL_MS;
     this.links.set(token, { sandboxId, port, expires });
-    const host = `${previewLabel(sandboxId, port)}.${this.previewSuffix}`;
+    const label = previewLabel(sandboxId, port);
+    const remote = origin && !this.config.ports.previewDomain ? remoteOrigin(origin) : undefined;
+    if (remote) return { url: `${remote}/preview/${label}/?cocoon_preview=${token}`, expiresAt: new Date(expires).toISOString() };
+    const host = `${label}.${this.previewSuffix}`;
     const base = this.config.ports.previewDomain ? `https://${host}` : `http://${host}:${this.config.port}`;
     return { url: `${base}/?cocoon_preview=${token}`, expiresAt: new Date(expires).toISOString() };
   }
@@ -209,9 +230,12 @@ export class PortService {
    * use but may be repeated for a short grace period (same session); a request for the wrong host does not consume it.
    */
   redeem(token: string, host: string): string | undefined {
+    return this.redeemFor(token, parsePreviewHost(host, this.previewSuffix));
+  }
+
+  redeemFor(token: string, target: { sandboxId: string; port: number } | undefined): string | undefined {
     const link = this.links.get(token);
     const now = Date.now();
-    const target = parsePreviewHost(host, this.previewSuffix);
     if (!link || !target || target.sandboxId !== link.sandboxId || target.port !== link.port) return undefined;
     if (link.session) {
       if ((link.graceUntil ?? 0) >= now && this.sessions.has(link.session)) return link.session;
@@ -229,9 +253,20 @@ export class PortService {
     return session;
   }
 
+  /** Why a link token was rejected (for the error page and the log). */
+  linkProblem(token: string, target: { sandboxId: string; port: number } | undefined): 'unknown-token' | 'wrong-host' | 'expired' {
+    const link = this.links.get(token);
+    if (!link) return 'unknown-token';
+    if (!target || target.sandboxId !== link.sandboxId || target.port !== link.port) return 'wrong-host';
+    return 'expired';
+  }
+
   /** Gateway port a preview request may be proxied to, if the session is valid for this host and the port is opened. */
   previewTarget(host: string, session: string | undefined): number | undefined {
-    const target = parsePreviewHost(host, this.previewSuffix);
+    return this.previewTargetFor(parsePreviewHost(host, this.previewSuffix), session);
+  }
+
+  previewTargetFor(target: { sandboxId: string; port: number } | undefined, session: string | undefined): number | undefined {
     const entry = session ? this.sessions.get(session) : undefined;
     if (!target || !entry || entry.expires < Date.now() || entry.host !== previewLabel(target.sandboxId, target.port)) return undefined;
     return this.store.sandbox(target.sandboxId)?.ports?.find((p) => p.port === target.port)?.hostPort;
@@ -239,6 +274,14 @@ export class PortService {
 
   isPreviewHost(host: string | undefined): boolean {
     return this.enabled && Boolean(parsePreviewHost(host, this.previewSuffix));
+  }
+
+  /** Preview a request belongs to: by host name (p<port>-<id>.<suffix>) or by path (/preview/p<port>-<id>/). */
+  previewRoute(host: string | undefined, url: string | undefined): { sandboxId: string; port: number; prefix: string; rest: string } | undefined {
+    if (!this.enabled) return undefined;
+    const byHost = parsePreviewHost(host, this.previewSuffix);
+    if (byHost) return { ...byHost, prefix: '', rest: url ?? '/' };
+    return parsePreviewPath(url);
   }
 
   private assertEnabled(): void {

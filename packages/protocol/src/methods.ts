@@ -187,8 +187,8 @@ export const methods = {
     result: z.object({ ok: z.literal(true) }),
   },
   'ports.preview_link': {
-    description: 'Link to the preview of an opened port. Contains a one-time token that logs the browser in to this preview only.',
-    params: SandboxRef.extend({ port: z.number().int() }),
+    description: 'Link to the preview of an opened port. Contains a one-time token that logs the browser in to this preview only. origin: the URL CoCoon is opened on; for a remote origin the link is path-based (<origin>/preview/p<port>-<id>/) because *.localhost would point to the wrong machine.',
+    params: SandboxRef.extend({ port: z.number().int(), origin: z.string().max(300).optional() }),
     result: z.object({ url: z.string(), expiresAt: z.string() }),
   },
 

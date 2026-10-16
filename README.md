@@ -336,7 +336,10 @@ listening TCP ports of every running sandbox). From there:
 
 - **Open preview** – opens the server in the browser, only for people logged in to CoCoon. The preview runs on its own host
   name, `http://p<port>-<sandbox>.localhost:7420/` (browsers resolve `*.localhost` to the local machine), or
-  `https://p<port>-<sandbox>.<COCOON_PREVIEW_DOMAIN>/` with a wildcard domain behind your reverse proxy. The link contains a
+  `https://p<port>-<sandbox>.<COCOON_PREVIEW_DOMAIN>/` with a wildcard domain behind your reverse proxy. When CoCoon is opened
+  from another machine (e.g. via Tailscale Serve, where `*.localhost` would point to your own computer) and no preview domain
+  is set, the link is path-based instead: `<CoCoon URL>/preview/p<port>-<sandbox>/` (cookie scoped to that path, prefix stripped
+  before it reaches the app and sent as `X-Forwarded-Prefix`; apps with absolute asset paths need a base path setting). The link contains a
   one-time token that is exchanged for a cookie valid for that preview only. The app sees `Host: localhost:<port>`, so dev
   servers that only allow localhost (e.g. Vite) work, and WebSockets / hot reload are proxied as well.
 - **Share on the network** – publishes the server on a host port (`http://<host-ip>:7550`) for everyone who can reach the
