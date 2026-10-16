@@ -86,8 +86,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # Sandbox image (the test server would build it too; doing it first gives readable build logs).
-      - run: pnpm build:image
+      # No separate "docker build": the test server builds the sandbox image itself on first start, with CoCoon's labels
+      # (variant, build fingerprint) – a plain docker build would count as an untracked custom image.
       # Real server with its own instance name: sandboxes, agents, egress/credential proxy and API translation,
       # several repositories, shared services (PostgreSQL, Redis, WireMock), every agent CLI from the toolbox in the slim image.
       - run: pnpm test:integration
