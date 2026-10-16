@@ -6,8 +6,11 @@ import { CocoonError } from '../errors.ts';
 import { t } from '../i18n.ts';
 import { scoped } from '../instance.ts';
 import {
+  INSTALL_TOOLBOX_SCRIPT,
+  parseNodeVersion,
   READ_TOOL_VERSIONS_JS,
   SANDBOX_PATH,
+  TOOLBOX_NODE,
   TOOLBOX_PATH,
   type ExecOptions,
   type ExecResult,
@@ -173,20 +176,27 @@ export class DockerDriver implements SandboxDriver {
     }
   }
 
-  /** Runs `npm install -g --prefix /opt/agents …` in a throwaway container with the toolbox volume mounted. */
+  /** Installs Node.js and the agent CLIs into the toolbox volume, in a throwaway container of the installer image. */
   async installTools(packages: string[], image: string, onOutput: (line: string) => void): Promise<void> {
     if (!(await this.imageDetails(image))) throw new CocoonError('bad_request', t('error.imageMissing', { image }));
-    const script = `rm -rf ${TOOLBOX_PATH}/* && npm install -g --prefix ${TOOLBOX_PATH} --no-fund --no-audit --loglevel=http ${packages.join(' ')} && npm cache clean --force >/dev/null 2>&1; ls ${TOOLBOX_PATH}/bin`;
-    const code = await this.runWithToolbox(image, ['sh', '-c', script], { writable: true, network: true }, onOutput);
+    const code = await this.runWithToolbox(image, ['sh', '-c', INSTALL_TOOLBOX_SCRIPT, 'sh', ...packages], { writable: true, network: true }, onOutput);
     if (code !== 0) throw new Error(`npm install exited with ${code}`);
   }
 
   async toolVersions(image: string): Promise<Record<string, string>> {
     if (!(await this.imageDetails(image))) return {};
     let output = '';
-    const code = await this.runWithToolbox(image, ['node', '-e', READ_TOOL_VERSIONS_JS, `${TOOLBOX_PATH}/lib/node_modules`], {}, (line) => (output += line));
+    const script = `${TOOLBOX_NODE}; exec "$N" -e "$1" "$2"`;
+    const code = await this.runWithToolbox(image, ['sh', '-c', script, 'sh', READ_TOOL_VERSIONS_JS, `${TOOLBOX_PATH}/lib/node_modules`], {}, (line) => (output += line));
     if (code !== 0) throw new Error(`reading the toolbox versions exited with ${code}`);
     return JSON.parse(output) as Record<string, string>;
+  }
+
+  async toolboxRuntime(image: string): Promise<string | undefined> {
+    if (!(await this.imageDetails(image))) return undefined;
+    let output = '';
+    const code = await this.runWithToolbox(image, ['sh', '-c', `[ -x ${TOOLBOX_PATH}/bin/node ] && exec ${TOOLBOX_PATH}/bin/node --version`], {}, (line) => (output += line));
+    return code === 0 ? parseNodeVersion(output) : undefined;
   }
 
   /** Runs a command in a throwaway container with the toolbox volume mounted; streams its output line by line. */

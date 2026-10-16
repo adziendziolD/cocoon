@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_TOOLS, type AgentTool, type ImageInfo, type ImageKind } from '@cocoon/protocol';
+import { AGENT_TOOLS, AgentTool, SandboxVariant, type ImageInfo, type ImageKind } from '@cocoon/protocol';
 import type { Config } from './config.ts';
 import { CocoonError } from './errors.ts';
 import type { EventBus } from './events.ts';
@@ -45,8 +45,14 @@ export function baseImage(dockerfile: string): string | undefined {
   return `docker.io/${ref.includes('/') ? ref : `library/${ref}`}`;
 }
 
-export function buildArgsFor(kind: ContainerImageKind, variant: 'slim' | 'full' = 'slim'): Record<string, string> {
-  // Agent CLIs live in the toolbox, so the base image stays small.
+/** Variant of one of CoCoon's sandbox builds (from its label; untracked builds count as slim). Undefined for other images. */
+export function variantOf(labels: Record<string, string> | undefined): SandboxVariant | undefined {
+  if (!labels?.[LABEL_CONTEXT]) return undefined;
+  return SandboxVariant.catch('slim').parse(labels[LABEL_VARIANT]);
+}
+
+export function buildArgsFor(kind: ContainerImageKind, variant: SandboxVariant = 'slim'): Record<string, string> {
+  // Agent CLIs and their Node.js runtime live in the toolbox, so the base image stays small.
   return kind === 'sandbox' ? { TOOLCHAIN: variant, AGENTS: '' } : {};
 }
 
@@ -54,9 +60,9 @@ export function buildArgsFor(kind: ContainerImageKind, variant: 'slim' | 'full' 
 export const DEFAULT_TOOLS: AgentTool[] = ['claude-code', 'codex', 'opencode', 'pi'];
 
 export interface BuildOptions {
-  variant?: 'slim' | 'full';
+  variant?: SandboxVariant;
   tools?: AgentTool[];
-  /** Pull the base image first, so the build uses its newest version. */
+  /** Pull the base image (agents: the toolbox installer image) first, so the build uses its newest version. */
   pull?: boolean;
 }
 
@@ -120,6 +126,27 @@ export class ImageService {
     return Boolean(this.store.toolbox()?.installedAt);
   }
 
+  /** Agent CLIs installed in the toolbox (unknown names from older versions are skipped). */
+  installedTools(): AgentTool[] {
+    return (this.store.toolbox()?.tools ?? []).flatMap((name) => {
+      const parsed = AgentTool.safeParse(name);
+      return parsed.success ? [parsed.data] : [];
+    });
+  }
+
+  /**
+   * Whether the installed toolbox brings its own Node.js (toolboxes installed by older CoCoon versions do not; agent CLIs
+   * then only run in images that have Node.js). Checks the toolbox once and remembers the version.
+   */
+  async toolboxHasRuntime(): Promise<boolean> {
+    const toolbox = this.store.toolbox();
+    if (!toolbox?.installedAt) return false;
+    if (toolbox.runtime) return true;
+    const runtime = await this.driver.toolboxRuntime(this.settings.get().sandbox.image).catch(() => undefined);
+    if (runtime) this.store.putToolbox({ ...toolbox, runtime });
+    return Boolean(runtime);
+  }
+
   async status(): Promise<ImageInfo[]> {
     const toolbox = this.store.toolbox();
     const agents: ImageInfo = {
@@ -130,6 +157,7 @@ export class ImageService {
       building: this.building.has('agents'),
       tools: toolbox?.tools,
       versions: toolbox?.versions,
+      runtime: toolbox?.runtime,
     };
     if (!this.driver.capabilities.images) return [agents];
     const images = await Promise.all(
@@ -143,6 +171,7 @@ export class ImageService {
           exists: Boolean(details),
           createdAt: details?.createdAt,
           sizeMb: details?.sizeMb,
+          ...(kind === 'sandbox' ? { variant: variantOf(details?.labels) } : {}),
         };
       }),
     );
@@ -171,10 +200,17 @@ export class ImageService {
         if (kind === 'agents') {
           const tools = opts.tools?.length ? opts.tools : DEFAULT_TOOLS;
           emit('running', { line: `Installing ${tools.map((tool) => AGENT_TOOLS[tool].label).join(', ')} into the agent toolbox …` });
+          // Container drivers install with the toolbox image, whose Node.js is copied into the toolbox as well.
+          const installer = this.config.toolboxImage;
+          if (this.driver.capabilities.images && (opts.pull || !(await this.driver.imageDetails(installer)))) {
+            emit('running', { line: `Pulling ${installer} …` });
+            await this.driver.pullImage(installer).catch((err) => emit('running', { line: `Pull failed, using the local image: ${(err as Error).message}` }));
+          }
+          await this.driver.installTools(tools.map((tool) => AGENT_TOOLS[tool].npm), installer, onOutput);
           const image = this.settings.get().sandbox.image;
-          await this.driver.installTools(tools.map((tool) => AGENT_TOOLS[tool].npm), image, onOutput);
           const versions = await this.driver.toolVersions(image).catch(() => undefined);
-          this.store.putToolbox({ tools, installedAt: new Date().toISOString(), versions });
+          const runtime = await this.driver.toolboxRuntime(image).catch(() => undefined);
+          this.store.putToolbox({ tools, installedAt: new Date().toISOString(), versions, runtime });
         } else {
           // Never overwrite a custom image the user configured; only (re)build CoCoon's own sandbox tags.
           const configured = this.settings.get().sandbox.image;

@@ -170,6 +170,10 @@ export const messages = {
     de: 'Agent-Werkzeuge (Claude Code, Codex, OpenCode, Pi) werden jetzt installiert (dauert einige Minuten)',
     en: 'Installing the agent tools (Claude Code, Codex, OpenCode, Pi) now (takes a few minutes)',
   },
+  'activity.toolboxRuntimeInstall': {
+    de: 'Die Agent-Werkzeuge werden neu installiert, jetzt mit eigenem Node.js (das schlanke Sandbox-Image enthält keins mehr)',
+    en: 'Reinstalling the agent tools, now with their own Node.js (the slim sandbox image no longer contains it)',
+  },
   'activity.updatesAvailable': {
     de: 'Updates verfügbar ({items}) – siehe Einstellungen → Updates',
     en: 'Updates available ({items}) – see Settings → Updates',

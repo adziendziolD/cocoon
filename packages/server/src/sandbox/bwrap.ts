@@ -9,6 +9,8 @@ import { COCOON_DIR, TMUX_CONF, TMUX_CONF_PATH } from '../agents/tmux.ts';
 import { CocoonError } from '../errors.ts';
 import { t } from '../i18n.ts';
 import {
+  INSTALL_TOOLBOX_SCRIPT,
+  parseNodeVersion,
   readToolVersions,
   SANDBOX_PATH,
   TOOLBOX_PATH,
@@ -195,12 +197,13 @@ export class BwrapDriver implements SandboxDriver {
     return spawn('tar', ['-c', '-C', dirname(source), basename(source)], { stdio: ['ignore', 'pipe', 'ignore'] }).stdout;
   }
 
-  /** Installs the agent CLIs with the host's npm into <dataDir>/agents (mounted read-only into sandboxes). */
+  /** Installs the host's Node.js and the agent CLIs into <dataDir>/agents (mounted read-only into sandboxes). */
   async installTools(packages: string[], _image: string, onOutput: (line: string) => void): Promise<void> {
-    rmSync(this.toolboxDir, { recursive: true, force: true });
     mkdirSync(this.toolboxDir, { recursive: true });
-    const npm = join(dirname(process.execPath), 'npm');
-    const child = spawn(existsSync(npm) ? npm : 'npm', ['install', '-g', '--prefix', this.toolboxDir, '--no-fund', '--no-audit', '--loglevel=http', ...packages], {
+    // The Node.js running CoCoon (and the npm next to it) comes first, even if it is not on PATH.
+    const path = [dirname(process.execPath), process.env.PATH ?? '/usr/bin:/bin'].join(':');
+    const child = spawn('sh', ['-c', INSTALL_TOOLBOX_SCRIPT, 'sh', ...packages], {
+      env: { ...process.env, PATH: path, TOOLBOX_DIR: this.toolboxDir },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     for (const stream of [child.stdout, child.stderr]) {
@@ -221,6 +224,13 @@ export class BwrapDriver implements SandboxDriver {
 
   async toolVersions(): Promise<Record<string, string>> {
     return readToolVersions(join(this.toolboxDir, 'lib', 'node_modules'));
+  }
+
+  async toolboxRuntime(): Promise<string | undefined> {
+    const node = join(this.toolboxDir, 'bin', 'node');
+    if (!existsSync(node)) return undefined;
+    const { stdout } = await run(node, ['--version'], { timeout: 10_000 }).catch(() => ({ stdout: '' }));
+    return parseNodeVersion(stdout);
   }
 
   async imageDetails(): Promise<ImageDetails | undefined> {

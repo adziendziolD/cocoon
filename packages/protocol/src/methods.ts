@@ -9,6 +9,7 @@ import {
   GitFileStatus,
   ImageInfo,
   ImageKind,
+  SandboxVariant,
   NetworkMode,
   RepoSource,
   Resources,
@@ -156,8 +157,8 @@ export const methods = {
     description: 'Builds an image in the background; progress arrives as "image.build" events.',
     params: z.object({
       kind: ImageKind,
-      /** sandbox: "slim" (default) or "full" (adds compilers and Python). */
-      variant: z.enum(['slim', 'full']).default('slim'),
+      /** sandbox: "slim" (default), "db" (adds database clients) or "full" (database clients, compilers and Python). */
+      variant: SandboxVariant.default('slim'),
       /** agents: which agent CLIs to install into the toolbox (default: all). */
       tools: z.array(AgentTool).optional(),
       /** @deprecated kept for older clients; agent CLIs now live in the toolbox. */

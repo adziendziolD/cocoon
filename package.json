@@ -21,6 +21,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build:image": "docker build -t cocoon/sandbox:latest images/sandbox",
+    "build:image:db": "docker build --build-arg TOOLCHAIN=db -t cocoon/sandbox:latest images/sandbox",
+    "build:image:full": "docker build --build-arg TOOLCHAIN=full -t cocoon/sandbox:latest images/sandbox",
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "devDependencies": {

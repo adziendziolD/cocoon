@@ -41,6 +41,39 @@ for(const name of names){if(!scope&&name.startsWith('@')){scan(path.join(base,na
 try{const v=JSON.parse(fs.readFileSync(path.join(base,name,'package.json'),'utf8')).version;if(typeof v==='string')out[scope+name]=v}catch{}}};
 scan(process.argv[1],'');console.log(JSON.stringify(out));`;
 
+/**
+ * Image the Docker/Podman driver installs the toolbox with. Its Node.js runtime (node, npm, npx, corepack) is copied into
+ * the toolbox, so sandbox images need no Node.js of their own. Same distribution as CoCoon's sandbox image (glibc), so
+ * native binaries npm picks for the agent CLIs run there. COCOON_TOOLBOX_IMAGE overrides it (e.g. for musl-based images).
+ */
+export const DEFAULT_TOOLBOX_IMAGE = 'docker.io/library/node:24-bookworm-slim';
+
+/**
+ * Shell script (npm packages as arguments): replaces the content of the toolbox directory (env TOOLBOX_DIR, default
+ * TOOLBOX_PATH) with the Node.js runtime found on PATH plus the given agent CLIs.
+ */
+export const INSTALL_TOOLBOX_SCRIPT = `set -e
+T="\${TOOLBOX_DIR:-${TOOLBOX_PATH}}"
+rm -rf "$T"/* "$T/.npm-cache"
+mkdir -p "$T/bin" "$T/lib/node_modules"
+cp "$(command -v node)" "$T/bin/node"
+root=$(npm root -g)
+for pkg in npm corepack; do [ ! -d "$root/$pkg" ] || cp -R "$root/$pkg" "$T/lib/node_modules/$pkg"; done
+[ ! -d "$T/lib/node_modules/npm" ] || { ln -s ../lib/node_modules/npm/bin/npm-cli.js "$T/bin/npm"; ln -s ../lib/node_modules/npm/bin/npx-cli.js "$T/bin/npx"; }
+[ ! -d "$T/lib/node_modules/corepack" ] || ln -s ../lib/node_modules/corepack/dist/corepack.js "$T/bin/corepack"
+export PATH="$T/bin:$PATH" npm_config_cache="$T/.npm-cache"
+npm install -g --prefix "$T" --no-fund --no-audit --loglevel=http "$@"
+rm -rf "$T/.npm-cache"
+ls "$T/bin"`;
+
+/** Node.js of the toolbox, or (toolboxes installed before it had one) the image's own – for commands run in a sandbox image. */
+export const TOOLBOX_NODE = `N=${TOOLBOX_PATH}/bin/node; [ -x "$N" ] || N=node`;
+
+/** Parses `node --version` output ("v24.1.0") into "24.1.0"; undefined for anything else. */
+export function parseNodeVersion(output: string): string | undefined {
+  return /^v?(\d+\.\d+\.\d+\S*)\s*$/.exec(output.trim())?.[1];
+}
+
 export interface SandboxSpec {
   sandboxId: string;
   name: string;
@@ -112,10 +145,15 @@ export interface SandboxDriver {
   /** Streams a file or directory from the sandbox as tar. */
   getArchive(handle: string, path: string): Promise<Readable>;
 
-  /** Installs npm packages into the shared agent toolbox (replacing its previous content). */
+  /**
+   * Installs npm packages plus the Node.js runtime that runs them into the shared agent toolbox (replacing its previous
+   * content). `image`: container drivers install with this image (see DEFAULT_TOOLBOX_IMAGE).
+   */
   installTools(packages: string[], image: string, onOutput: (line: string) => void): Promise<void>;
-  /** Installed version per npm package in the toolbox (empty if not installed). */
+  /** Installed version per npm package in the toolbox (empty if not installed). `image`: the sandbox image. */
   toolVersions(image: string): Promise<Record<string, string>>;
+  /** Node.js version in the toolbox ("24.1.0"), undefined if the toolbox has none. `image`: the sandbox image. */
+  toolboxRuntime(image: string): Promise<string | undefined>;
 
   /** Container image details, or undefined if missing / not applicable. */
   imageDetails(ref: string): Promise<ImageDetails | undefined>;

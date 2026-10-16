@@ -89,7 +89,7 @@ interface State {
   /** Cockpit layouts by workspace id ("_global" for the overall layout). */
   layouts: Record<string, CockpitLayout>;
   /** Installed agent toolbox (agent CLIs shared by all sandboxes). */
-  toolbox?: { tools: string[]; installedAt: string; versions?: Record<string, string> };
+  toolbox?: { tools: string[]; installedAt: string; versions?: Record<string, string>; /** Node.js version in the toolbox. */ runtime?: string };
   /** Shared services (databases, mocks). */
   services: Record<string, ServiceRecord>;
   /** Environment variables (.env injection) by level. */

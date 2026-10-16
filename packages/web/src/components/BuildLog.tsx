@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { AgentTool, ImageKind, MethodParams } from '@cocoon/protocol';
+import type { AgentTool, ImageKind, MethodParams, SandboxVariant } from '@cocoon/protocol';
 import { CircleCheck, CircleX, Hammer } from 'lucide-react';
 import { buildStore, useBuild, type BuildKey } from '../api/builds';
 import { qk } from '../api/keys';
@@ -20,7 +20,7 @@ export function imageLabel(t: TFunction, kind: ImageKind): string {
 
 /**
  * Button that starts an image build (the log appears in <BuildLog/>).
- * - sandbox: `sandboxVariant` picks the slim (default) or full image (adds compilers + Python).
+ * - sandbox: `sandboxVariant` picks the image variant: slim (default), db (+ database clients) or full (+ compilers, Python).
  * - agents:  `tools` limits which agent CLIs are installed into the toolbox (default: all).
  */
 export function BuildImageButton({
@@ -33,7 +33,7 @@ export function BuildImageButton({
   disabled,
 }: {
   kind: ImageKind;
-  sandboxVariant?: 'slim' | 'full';
+  sandboxVariant?: SandboxVariant;
   tools?: AgentTool[];
   label?: string;
   variant?: 'primary' | 'secondary';
