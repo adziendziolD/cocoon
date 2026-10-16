@@ -654,6 +654,15 @@ export type ActivityEntry = z.infer<typeof ActivityEntry>;
 export const ImageKind = z.enum(['sandbox', 'proxy', 'agents']);
 export type ImageKind = z.infer<typeof ImageKind>;
 
+/**
+ * Variant of CoCoon's sandbox image:
+ * - slim: shell, git, tmux, ripgrep, curl, jq (the Node.js runtime for agent CLIs comes from the toolbox)
+ * - db:   slim + database clients (psql, mysql, redis-cli)
+ * - full: db + compilers and Python for native builds
+ */
+export const SandboxVariant = z.enum(['slim', 'db', 'full']);
+export type SandboxVariant = z.infer<typeof SandboxVariant>;
+
 
 /** Isolation backend of the server. */
 export const DriverKind = z.enum(['docker', 'podman', 'bwrap']);
@@ -682,6 +691,10 @@ export const ImageInfo = z.object({
   tools: z.array(z.string()).optional(),
   /** agents kind: installed version per npm package. */
   versions: z.record(z.string(), z.string()).optional(),
+  /** sandbox kind: variant of CoCoon's build (missing for custom images). */
+  variant: SandboxVariant.optional(),
+  /** agents kind: Node.js version in the toolbox (missing for toolboxes installed before CoCoon put Node.js there). */
+  runtime: z.string().optional(),
 });
 export type ImageInfo = z.infer<typeof ImageInfo>;
 
@@ -766,11 +779,11 @@ export const ImageUpdateInfo = z.object({
    * untracked = built before CoCoon recorded build information, custom = a custom image CoCoon does not manage.
    */
   reason: z.enum(['definition', 'base', 'untracked', 'custom']).optional(),
-  /** Base image of the Dockerfile, e.g. docker.io/library/node:24-bookworm-slim. */
+  /** Base image of the Dockerfile, e.g. docker.io/library/debian:bookworm-slim. */
   base: z.string().optional(),
   builtAt: z.string().optional(),
-  /** sandbox: variant of the last build (slim or full). */
-  variant: z.enum(['slim', 'full']).optional(),
+  /** sandbox: variant of the last build. */
+  variant: SandboxVariant.optional(),
 });
 export type ImageUpdateInfo = z.infer<typeof ImageUpdateInfo>;
 

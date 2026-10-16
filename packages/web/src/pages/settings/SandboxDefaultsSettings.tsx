@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { DriverKind, ImageInfo, NetworkMode, Settings } from '@cocoon/protocol';
+import { SandboxVariant, type DriverKind, type ImageInfo, type NetworkMode, type Settings } from '@cocoon/protocol';
 import { Boxes, RotateCcw } from 'lucide-react';
 import { useImages, useSettings, useSystemInfo } from '../../api/queries';
 import { Badge } from '../../components/Badge';
@@ -8,7 +8,7 @@ import { Button } from '../../components/Button';
 import { Card, CardBody, CardHeader } from '../../components/Card';
 import { CodeBlock } from '../../components/CodeBlock';
 import { ConfirmDialog } from '../../components/Dialog';
-import { Field, Input, Select, Toggle } from '../../components/Field';
+import { Field, Input, Select } from '../../components/Field';
 import { ToolboxPicker } from '../../components/ToolboxPicker';
 import { Callout } from '../../components/HelpText';
 import { SaveBar } from '../../components/SaveBar';
@@ -190,7 +190,10 @@ function ImagesCard() {
   const t = useT();
   const images = useImages();
   const { capabilities } = useBackend();
-  const [full, setFull] = useState(false);
+  const builtVariant = images.data?.find((i) => i.kind === 'sandbox')?.variant;
+  const [chosenVariant, setVariant] = useState<SandboxVariant>();
+  // Rebuilding keeps the variant of the current image unless another one is picked.
+  const variant = chosenVariant ?? builtVariant ?? 'slim';
   const containerImages = (images.data ?? []).filter((i) => i.kind !== 'agents');
   const toolbox = images.data?.find((i) => i.kind === 'agents');
   return (
@@ -208,7 +211,9 @@ function ImagesCard() {
           <div className="space-y-4">
             {capabilities.images && (
               <>
-                <Toggle checked={full} onChange={setFull} label={t('sandboxDefaults.images.full')} description={t('sandboxDefaults.images.fullHint')} />
+                <Field label={t('sandboxDefaults.images.variant')} hint={t('sandboxDefaults.images.variantHint')}>
+                  <VariantTiles value={variant} onChange={setVariant} />
+                </Field>
                 {containerImages.map((img) => (
                   <div key={img.kind} className="rounded-xl border border-line p-4">
                     <div className="flex flex-wrap items-start gap-3">
@@ -230,7 +235,7 @@ function ImagesCard() {
                       </div>
                       <BuildImageButton
                         kind={img.kind}
-                        sandboxVariant={full ? 'full' : 'slim'}
+                        sandboxVariant={variant}
                         variant={img.exists ? 'secondary' : 'primary'}
                         label={img.exists ? t('sandboxDefaults.images.rebuild') : t('sandboxDefaults.images.build')}
                       />
@@ -248,6 +253,30 @@ function ImagesCard() {
   );
 }
 
+function VariantTiles({ value, onChange }: { value: SandboxVariant; onChange: (variant: SandboxVariant) => void }) {
+  const t = useT();
+  return (
+    <div className="grid gap-2.5 sm:grid-cols-3" role="radiogroup">
+      {SandboxVariant.options.map((v) => (
+        <button
+          key={v}
+          type="button"
+          role="radio"
+          aria-checked={value === v}
+          onClick={() => onChange(v)}
+          className={cn(
+            'rounded-xl border p-3.5 text-left transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+            value === v ? 'border-accent bg-accent-soft ring-2 ring-accent/30' : 'border-line hover:border-line-strong hover:bg-surface-2/60',
+          )}
+        >
+          <div className="font-medium text-fg">{t(`sandboxDefaults.images.variant.${v}`)}</div>
+          <div className="mt-1 text-xs leading-relaxed text-fg-muted">{t(`sandboxDefaults.images.variant.${v}Hint`)}</div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function ImageBadge({ img }: { img: Pick<ImageInfo, 'building' | 'exists'> }) {
   const t = useT();
   if (img.building) return <Badge tone="blue">{t('sandboxDefaults.images.building')}</Badge>;
@@ -258,6 +287,7 @@ function ImageBadge({ img }: { img: Pick<ImageInfo, 'building' | 'exists'> }) {
 /** The shared agent toolbox (agent CLIs), mounted read-only into every sandbox. */
 function ToolboxEntry({ img }: { img: ImageInfo | undefined }) {
   const t = useT();
+  const { capabilities } = useBackend();
   const exists = !!img?.exists;
   return (
     <div className="rounded-xl border border-line p-4">
@@ -265,9 +295,15 @@ function ToolboxEntry({ img }: { img: ImageInfo | undefined }) {
         <span className="font-medium text-fg">{t('sandboxDefaults.toolbox.title')}</span>
         <ImageBadge img={{ building: !!img?.building, exists }} />
         {img?.createdAt && exists && <span className="text-xs text-fg-muted">{t('sandboxDefaults.toolbox.installed', { date: formatDateTime(img.createdAt) })}</span>}
+        {img?.runtime && exists && <span className="text-xs text-fg-muted">· {t('sandboxDefaults.toolbox.runtime', { version: img.runtime })}</span>}
       </div>
       {img?.ref && <div className="mt-0.5 font-mono text-xs text-fg-subtle">{img.ref}</div>}
       <p className="mt-1 mb-3 text-sm text-fg-muted">{t('sandboxDefaults.toolbox.description')}</p>
+      {exists && !img?.runtime && capabilities.images && !img?.building && (
+        <Callout tone="warning" className="mb-3">
+          {t('sandboxDefaults.toolbox.noRuntime')}
+        </Callout>
+      )}
       <ToolboxPicker />
     </div>
   );

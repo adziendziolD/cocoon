@@ -167,9 +167,9 @@ Der Server spricht Sandboxes nur über `SandboxDriver` an. Implementiert sind:
 Auswahl über `COCOON_DRIVER` (`auto`: Podman-Socket → Docker → bubblewrap). `system.info` liefert `driverKind` und `capabilities`,
 die UI blendet nicht verfügbare Optionen aus bzw. weist auf Einschränkungen hin.
 
-**Werkzeugkiste:** Agent-CLIs (Claude Code, Codex) werden einmal in ein Volume (`cocoon-agents`) bzw. `.data/agents` installiert und
-schreibgeschützt unter `/opt/agents` eingehängt – das Basis-Image bleibt klein (~500 MB, Variante `full` mit Compilern/Python),
-Updates brauchen keinen Image-Neubau. **Agent-Secrets** gehen über eine private Env-Datei (0600), die der Agent-Start einliest und
+**Werkzeugkiste:** Agent-CLIs (Claude Code, Codex, …) samt Node.js-Laufzeit werden einmal in ein Volume (`cocoon-agents`) bzw.
+`.data/agents` installiert und schreibgeschützt unter `/opt/agents` eingehängt – das Basis-Image (Debian slim, ohne Node.js) bleibt
+unter 250 MB (Variante `db` mit Datenbank-Clients, `full` zusätzlich mit Compilern/Python), Updates brauchen keinen Image-Neubau. **Agent-Secrets** gehen über eine private Env-Datei (0600), die der Agent-Start einliest und
 löscht – nie über Kommandozeilen.
 
 ## 7. Sicherheit

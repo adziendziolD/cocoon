@@ -64,7 +64,7 @@ it too. The design is inspired by [herdr](https://vercel.com/docs/sandbox/ecosys
 | **Orchestration** | Workspaces, a task board (backlog → queued → running → review → done), multi-stage workflows (e.g. plan → build → review) with approvals, review feedback loop, dependencies, auto-run with parallelism limits, webhook notifications |
 | **Web UI** | Setup checklist, sandbox wizard, live in-browser terminals, file browser/editor, diff viewer, commit/push/pull request, activity log, every setting – written for non-technical users |
 | **Sandbox backends** | **Docker**, **Podman** (rootless, no daemon) or **bubblewrap** (lightweight Linux process sandboxes, no images, start in ~0.3 s) – picked automatically. Containers are hardened (non-root, no capabilities, `no-new-privileges`, CPU/RAM/PID limits) with optional gVisor or Kata/Firecracker runtimes |
-| **Small footprint** | ~500 MB base image; agent CLIs live in a shared, read-only **toolbox** that is installed once and updated without rebuilding images |
+| **Small footprint** | Slim base image under 250 MB (Debian, no Node.js); agent CLIs and their Node.js runtime live in a shared, read-only **toolbox** that is installed once and updated without rebuilding images |
 | **Network control** | Per sandbox: no internet, allowlisted domains only (via egress proxy, default), or open internet. Blocked connections are logged and can be allowed with one click |
 | **Credential proxy** | API keys stay on the server – sandboxes only see placeholders, the proxy adds the real key on the way out |
 | **Many agents** | Claude Code, OpenAI Codex, OpenCode, Pi, Qwen Code, Gemini CLI and plain shells – switch the agent of a sandbox at any time, with handover of task, changes and last output |
@@ -173,11 +173,26 @@ Force one with `COCOON_DRIVER=docker|podman|bwrap`. The UI shows the active back
   as a local process on `127.0.0.1:7431/7432` (`COCOON_PROXY_PORT`). Sandbox options and secrets are passed to `bwrap` via a file
   descriptor, so they never show up in the host's process list.
 
-**Agent toolbox:** the agent CLIs are not part of the sandbox image. They are installed once (`npm install -g --prefix /opt/agents …`)
-into a Docker/Podman volume (`cocoon-agents`) or `.data/agents` for bubblewrap, and mounted **read-only** at `/opt/agents` in every
-sandbox (`PATH` includes `/opt/agents/bin`, self-updaters are disabled). Install or update them in *Settings → Sandbox defaults* or
-via `image.build({ kind: "agents" })` – no image rebuild needed. The base image comes in two variants: `slim` (default, ~500 MB) and
-`full` (+ compilers and Python for native builds).
+**Agent toolbox:** the agent CLIs – and the Node.js runtime they need – are not part of the sandbox image. They are installed once
+(`npm install -g --prefix /opt/agents …`) into a Docker/Podman volume (`cocoon-agents`) or `.data/agents` for bubblewrap, and
+mounted **read-only** at `/opt/agents` in every sandbox (`PATH` includes `/opt/agents/bin`, also in login shells; self-updaters are
+disabled). Docker/Podman install with `node:24-bookworm-slim` and copy its `node`, `npm`, `npx` and `corepack` into the toolbox;
+bubblewrap copies the Node.js that runs CoCoon. Install or update them in *Settings → Sandbox defaults* or via
+`image.build({ kind: "agents" })` – no image rebuild needed. A toolbox installed by an older CoCoon (without Node.js) is reinstalled
+automatically on the next start.
+
+**Sandbox image variants** (`images/sandbox`, Debian `bookworm-slim`, build argument `TOOLCHAIN`; pick one in
+*Settings → Sandbox defaults*, `image.build({ kind: "sandbox", variant })` or `pnpm build:image[:db|:full]`):
+
+| Variant | Contents | Size |
+| --- | --- | --- |
+| `slim` *(default)* | bash, git, tmux, ripgrep, curl, jq, less, procps, CA certificates | < 250 MB (checked in CI) |
+| `db` | `slim` + database clients: `psql`, `mysql`/MariaDB, `redis-cli` – handy with [shared services](#shared-services-databases--mocks) | + ~100 MB |
+| `full` | `db` + compilers (`build-essential`) and Python 3 for projects that build native code | + ~400 MB |
+
+Debian rather than Alpine on purpose: the agent CLIs ship glibc binaries (Claude Code, Codex, OpenCode) and most projects' prebuilt
+native modules assume glibc too. CI builds every variant, checks its contents and fails if `slim` reaches 250 MB; multi-arch
+(amd64/arm64) builds are published as `ghcr.io/<owner>/cocoon-sandbox:{slim,db,full}` (`.github/workflows/images.yml`).
 
 **Agent secrets** are written to a private file (mode 0600) that the agent's session sources and deletes immediately, so API keys
 never appear in a command line (`ps`/`docker top`).
@@ -598,7 +613,7 @@ the heuristic takes over. Statuses survive control-plane restarts.
 | --- | --- | --- |
 | **CoCoon** | the upstream branch of the git clone (`git fetch`) | `git merge --ff-only`, `pnpm install --frozen-lockfile`, web build, restart. If a step fails, CoCoon goes back to the previous commit. Not offered with local changes to tracked files or diverged history. |
 | **Agent tools** | the `latest` version on npm | reinstalls the installed tools into the toolbox |
-| **Images** | CoCoon's Dockerfile (fingerprint stored as image label) and the registry digest of the base image | pulls the base image and rebuilds; existing sandboxes keep their image |
+| **Images** | CoCoon's Dockerfile (fingerprint stored as image label) and the registry digest of the base image | pulls the base image and rebuilds in the variant of the existing image (`slim`, `db`, `full`); existing sandboxes keep their image. A toolbox without its own Node.js is reinstalled along with it |
 
 CoCoon checks once a day by itself (`COCOON_UPDATE_CHECK=0` turns this off) and shows a badge next to *Settings*.
 `pnpm start` runs the server under a small supervisor that restarts it after an update (`pnpm dev` does not – restart by hand).
@@ -756,6 +771,7 @@ Everything is configurable in the UI. Environment variables (all optional, see [
 | `COCOON_DRIVER` | `auto` | Sandbox backend: `auto`, `docker`, `podman`, `bwrap` |
 | `COCOON_INSTANCE` | – | Name suffix for this server's Docker resources (network, proxy, services, toolbox) – lets several servers share one Docker host |
 | `COCOON_TOOLBOX_AUTOINSTALL` | `1` | `0` skips installing the agent CLIs on first start |
+| `COCOON_TOOLBOX_IMAGE` | `docker.io/library/node:24-bookworm-slim` | Docker/Podman: image the agent toolbox is installed with; its Node.js is copied into the toolbox |
 | `COCOON_UPDATE_CHECK` | `1` | `0` turns off the daily update check |
 | `COCOON_PORTS` | `1` | `0` turns off port forwarding (previews and sharing) |
 | `COCOON_PORTS_PREVIEW_RANGE` | `7500-7549` | host ports for previews (published on 127.0.0.1) |
@@ -798,15 +814,16 @@ packages/server       cocoond
 packages/web          Management UI (React 19, Vite, Tailwind CSS v4, TanStack Query, xterm.js; i18n in src/i18n)
 packages/cli          `cocoon` CLI + typed API client
 site/                 Project website (GitHub Pages, branch gh-pages)
-images/sandbox        Sandbox base image (Node.js 24, git, tmux, ripgrep; variant "full" adds compilers + Python)
+images/sandbox        Sandbox base image (Debian slim: git, tmux, ripgrep; variants "db" + database clients, "full" + compilers, Python)
 images/egress-proxy   Allowlist + credential proxy
 images/port-gateway   TCP forwarder for previews and shared ports (runs in the egress-proxy image)
 deploy/               systemd unit, Caddyfile
 docs/                 Beginner's guides (EN/DE), architecture (DE)
 ```
 
-Requirements for custom sandbox images: `sh`, `git`, `tmux`, a non-root default user and a writable `/workspace`
-(`node` is needed for Claude Code key pre-approval).
+Requirements for custom sandbox images: `sh`, `git`, `tmux`, a non-root default user and a writable `/workspace`. Node.js comes from
+the toolbox; it is a glibc build, so for musl-based images (Alpine) set `COCOON_TOOLBOX_IMAGE` to a matching installer image
+(e.g. `node:24-alpine`).
 
 ## Development
 
@@ -815,7 +832,7 @@ pnpm dev            # server in watch mode
 pnpm dev:web        # Vite dev server on :5173, proxying the API to :7420
 pnpm typecheck      # all packages
 pnpm build:web      # production build of the UI (served by cocoond)
-pnpm build:image    # build the sandbox image manually
+pnpm build:image    # build the sandbox image manually (pnpm build:image:db / build:image:full for the other variants)
 ```
 
 
@@ -824,7 +841,8 @@ pnpm build:image    # build the sandbox image manually
 ```bash
 pnpm test               # unit tests (Vitest, no Docker/network, < 1 s)
 pnpm test:integration   # integration tests against a real server with Docker (sandboxes, agents, proxy,
-                        # API translation, several repositories, shared services, .env injection)
+                        # API translation, several repositories, shared services, .env injection, every agent CLI
+                        # from the toolbox in the slim image; builds the "db" variant for the shared-services test)
 ```
 
 The integration tests start their own server with `COCOON_INSTANCE=it…` (own port, data folder, Docker network,

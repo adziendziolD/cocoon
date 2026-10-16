@@ -105,10 +105,15 @@ void (async () => {
       if (!(await images.build('sandbox').done)) return;
     }
   }
-  // The agent CLIs (Claude Code, Codex) live in a shared toolbox, installed once.
-  if (!images.toolboxReady() && process.env.COCOON_TOOLBOX_AUTOINSTALL !== '0') {
+  // The agent CLIs (Claude Code, Codex, …) and their Node.js runtime live in a shared toolbox, installed once.
+  if (process.env.COCOON_TOOLBOX_AUTOINSTALL === '0') return;
+  if (!images.toolboxReady()) {
     activity.add('info', 'activity.toolboxAutoInstall');
     images.build('agents');
+  } else if (!(await images.toolboxHasRuntime()) && images.installedTools().length) {
+    // Installed by an older version, without Node.js: the slim sandbox image has none, so add it.
+    activity.add('info', 'activity.toolboxRuntimeInstall');
+    images.build('agents', { tools: images.installedTools() });
   }
 })();
 

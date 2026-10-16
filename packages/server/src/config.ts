@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DEFAULT_TOOLBOX_IMAGE } from './sandbox/driver.ts';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -36,6 +37,8 @@ export function loadConfig(env = process.env) {
       previewDomain: env.COCOON_PREVIEW_DOMAIN || undefined,
     },
     imagesDir: resolve(env.COCOON_IMAGES_DIR ?? resolve(repoRoot, 'images')),
+    /** Image the agent toolbox (agent CLIs + Node.js) is installed with (Docker/Podman). */
+    toolboxImage: env.COCOON_TOOLBOX_IMAGE || DEFAULT_TOOLBOX_IMAGE,
     webDir: resolve(env.COCOON_WEB_DIR ?? resolve(repoRoot, 'packages/web/dist')),
     /** Initial settings on first start (later edited via UI/API). */
     seedSettings: env.COCOON_CONFIG ? (JSON.parse(readFileSync(resolve(env.COCOON_CONFIG), 'utf8')) as unknown) : undefined,

@@ -623,6 +623,9 @@ export class ServiceManager {
       `These services run outside this sandbox and are meant for development and tests. Credentials are in the environment (also in \`${SERVICES_ENV_FILE}\`).`,
       '',
       ...lines,
+      ...(['postgres', 'mysql', 'redis'] as const).some((kind) => seenKinds.has(kind))
+        ? ['', 'If `psql`, `mysql` or `redis-cli` are missing, the sandbox runs the slim image (database clients come with the `db` and `full` variants): connect with a client library of the project’s language instead.']
+        : [],
       '',
       'Never print or commit these credentials. To start over with an empty database, drop your own objects (or ask the user to reset it in CoCoon).',
     ].join('\n');

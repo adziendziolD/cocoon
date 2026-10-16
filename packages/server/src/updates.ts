@@ -23,7 +23,7 @@ import {
   contextHash,
   LABEL_BASE,
   LABEL_CONTEXT,
-  LABEL_VARIANT,
+  variantOf,
   type ContainerImageKind,
   type ImageService,
 } from './images.ts';
@@ -335,7 +335,7 @@ export class UpdateService {
         const base = this.images.baseOf(kind);
         if (kind === 'sandbox' && !this.images.managesSandboxImage()) return { kind, ref, state: 'unknown', reason: 'custom' };
         const details = await this.driver.imageDetails(ref);
-        const variant = details?.labels?.[LABEL_VARIANT] === 'full' ? 'full' : 'slim';
+        const variant = variantOf(details?.labels) ?? 'slim';
         const expectedContext = contextHash(this.images.contextDir(kind), buildArgsFor(kind, variant));
         const remoteBaseDigest = details?.labels?.[LABEL_BASE] && base ? await this.driver.registryDigest(base) : undefined;
         return {
@@ -368,12 +368,11 @@ export class UpdateService {
           await this.images.build(img.kind as ContainerImageKind, { variant: img.variant, pull: true }).done;
         }
       }
-      if (targets.includes('tools')) {
-        const tools = (this.store.toolbox()?.tools ?? []).flatMap((name) => {
-          const parsed = AgentTool.safeParse(name);
-          return parsed.success ? [parsed.data] : [];
-        });
-        if (tools.length) await this.images.build('agents', { tools }).done;
+      // Toolboxes from before the sandbox image lost Node.js have none of their own: reinstall them with the rebuilt image.
+      const runtimeMissing = targets.includes('images') && this.images.toolboxReady() && !(await this.images.toolboxHasRuntime());
+      if (targets.includes('tools') || runtimeMissing) {
+        const tools = this.images.installedTools();
+        if (tools.length) await this.images.build('agents', { tools, pull: true }).done;
       }
     } catch (err) {
       this.log('update failed', err);

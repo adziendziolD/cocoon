@@ -1,0 +1,64 @@
+name: Publish sandbox images
+
+# Multi-arch (amd64/arm64) builds of the sandbox image variants, published to the GitHub Container Registry:
+#   ghcr.io/<owner>/cocoon-sandbox:slim (also :latest), :db, :full – plus :<variant>-<commit> and, for releases, :<variant>-<version>.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths: ['images/sandbox/**', '.github/workflows/images.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Publish ${{ matrix.variant }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [slim, db, full]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Image name and tags
+        id: meta
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cocoon-sandbox"
+          tags="$image:$VARIANT,$image:$VARIANT-${GITHUB_SHA::7}"
+          [ "$VARIANT" != slim ] || tags="$tags,$image:latest"
+          [ "$GITHUB_REF_TYPE" != tag ] || tags="$tags,$image:$VARIANT-${GITHUB_REF_NAME#v}"
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: images/sandbox
+          platforms: linux/amd64,linux/arm64
+          build-args: TOOLCHAIN=${{ matrix.variant }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.description=CoCoon sandbox base image (${{ matrix.variant }})
+            cocoon.variant=${{ matrix.variant }}
+          cache-from: type=gha,scope=sandbox-${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=sandbox-${{ matrix.variant }}

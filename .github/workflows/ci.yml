@@ -32,6 +32,47 @@ jobs:
       - run: pnpm test
       - run: pnpm build:web
 
+  image:
+    name: Sandbox image (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [slim, db, full]
+    env:
+      VARIANT: ${{ matrix.variant }}
+      IMAGE: cocoon/sandbox:${{ matrix.variant }}
+      # Goal of issue #4: the slim image at most 250 MB (was ~630 MB with Node.js and database clients).
+      MAX_SLIM_MB: 250
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build --build-arg TOOLCHAIN=$VARIANT -t $IMAGE images/sandbox
+      - name: Contents
+        run: |
+          docker run --rm $IMAGE sh -c 'set -e; [ "$(id -un)" = agent ]; [ "$(pwd)" = /workspace ]; git --version; tmux -V; rg --version | head -n1; curl --version | head -n1; jq --version
+            if command -v node; then echo "the image must not contain Node.js (it comes from the toolbox)" >&2; exit 1; fi
+            case "$0" in
+              slim) ! command -v psql ;;
+              db) psql --version; mysql --version; redis-cli --version ;;
+              full) psql --version; mysql --version; redis-cli --version; gcc --version | head -n1; python3 --version ;;
+            esac' "$VARIANT"
+          docker run --rm $IMAGE bash -lc 'case ":$PATH:" in *:/opt/agents/bin:*) ;; *) echo "login shells lose the toolbox: $PATH" >&2; exit 1 ;; esac'
+      - name: Size
+        run: |
+          mb=$(( $(docker save $IMAGE | wc -c) / 1024 / 1024 ))
+          echo "$IMAGE: $mb MB"
+          {
+            echo "### Sandbox image \`$VARIANT\`: $mb MB"
+            echo '```'
+            docker history --no-trunc --format '{{.Size}}\t{{.CreatedBy}}' $IMAGE | cut -c1-200
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$VARIANT" = slim ] && [ "$mb" -ge "$MAX_SLIM_MB" ]; then
+            echo "::error::The slim image is $mb MB – the limit is $MAX_SLIM_MB MB."
+            exit 1
+          fi
+
   integration:
     name: Integration tests (Docker)
     runs-on: ubuntu-latest
@@ -45,10 +86,10 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # Sandbox image (the test server would build it too; doing it first gives readable build logs).
-      - run: pnpm build:image
+      # No separate "docker build": the test server builds the sandbox image itself on first start, with CoCoon's labels
+      # (variant, build fingerprint) – a plain docker build would count as an untracked custom image.
       # Real server with its own instance name: sandboxes, agents, egress/credential proxy and API translation,
-      # several repositories, shared services (PostgreSQL, Redis, WireMock).
+      # several repositories, shared services (PostgreSQL, Redis, WireMock), every agent CLI from the toolbox in the slim image.
       - run: pnpm test:integration
       - name: Server log on failure
         if: failure()

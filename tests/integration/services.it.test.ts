@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { DB_IMAGE } from './global-setup.ts';
 import { available, createSandbox, docker, instance, rpc, sh, waitFor } from './harness.ts';
 
 const svcContainer = (id: string) => `cocoon-svc-${instance}-${id}`;
@@ -11,7 +12,8 @@ describe.runIf(available)('shared services', () => {
   beforeAll(async () => {
     for (const kind of ['postgres', 'redis', 'wiremock']) await rpc('services.add', { kind });
     for (const id of ['postgres', 'redis', 'wiremock']) await waitFor(`${id} running`, async () => (await status(id)) === 'running', 600_000, 2000);
-    const sb = await rpc('sandbox.create', { name: `svc-${Math.random().toString(16).slice(2, 6)}`, network: 'egress' });
+    // psql and redis-cli come with the "db" image variant (built by the global setup).
+    const sb = await rpc('sandbox.create', { name: `svc-${Math.random().toString(16).slice(2, 6)}`, network: 'egress', image: DB_IMAGE });
     sandboxId = sb.id;
     dbName = sandboxId.toLowerCase();
     expect(sb.services.sort()).toEqual(['postgres', 'redis', 'wiremock']);
@@ -83,7 +85,7 @@ describe.runIf(available)('shared services', () => {
   it('pauses unused services and wakes them on demand', async () => {
     // COCOON_SERVICE_IDLE_MINUTES=0.1 in the test server: no running sandbox uses the services any more.
     await waitFor('redis paused', async () => (await status('redis')) === 'idle', 90_000, 2000);
-    const sb = await rpc('sandbox.create', { name: `wake-${Math.random().toString(16).slice(2, 6)}`, network: 'egress', services: ['redis'] });
+    const sb = await rpc('sandbox.create', { name: `wake-${Math.random().toString(16).slice(2, 6)}`, network: 'egress', services: ['redis'], image: DB_IMAGE });
     try {
       expect(await status('redis')).toBe('running');
       const res = await sh(sb.id, 'redis-cli -u "$REDIS_URL" --no-auth-warning PING');

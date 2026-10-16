@@ -13,6 +13,8 @@ declare module 'vitest' {
 }
 
 const root = resolve(import.meta.dirname, '../..');
+/** Sandbox image with database clients (TOOLCHAIN=db), used by the shared-services test. */
+export const DB_IMAGE = 'cocoon/sandbox:it-db';
 let server: ChildProcess | undefined;
 let dataDir: string | undefined;
 
@@ -45,6 +47,17 @@ async function rpc(url: string, token: string, method: string, params: unknown =
   const body = (await res.json()) as { result?: unknown; error?: { message: string } };
   if (body.error) throw new Error(`${method}: ${body.error.message}`);
   return body.result as any;
+}
+
+/** Starts an image build / toolbox install and waits until it is done. */
+async function build(url: string, token: string, params: { kind: string; tools?: string[] }) {
+  const { buildId } = await rpc(url, token, 'image.build', params);
+  const started = Date.now();
+  await new Promise((r) => setTimeout(r, 1000));
+  while ((await rpc(url, token, 'image.status')).find((i: { kind: string }) => i.kind === params.kind)?.building) {
+    if (Date.now() - started > 900_000) throw new Error(`${params.kind} build ${buildId} timed out`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
 }
 
 async function waitForProxy(url: string, token: string) {
@@ -109,18 +122,16 @@ export default async function setup(project: TestProject) {
   if (Date.now() >= deadline) throw new Error(`server not ready: ${last} (log: ${log})`);
 
   // Always test the current proxy code: rebuild its image (small, cached layers) – the instance's proxy restarts with it.
-  const { buildId } = await rpc(url, token, 'image.build', { kind: 'proxy' });
-  await new Promise<void>((resolveBuild, reject) => {
-    const started = Date.now();
-    const poll = async () => {
-      const images = (await rpc(url, token, 'image.status')) as { kind: string; building?: boolean }[];
-      if (!images.find((i) => i.kind === 'proxy')?.building) return resolveBuild();
-      if (Date.now() - started > 600_000) return reject(new Error(`proxy build ${buildId} timed out`));
-      setTimeout(() => void poll().catch(reject), 1000);
-    };
-    setTimeout(() => void poll().catch(reject), 1000);
-  });
+  await build(url, token, { kind: 'proxy' });
   await waitForProxy(url, token);
+  // The slim image has no Node.js: agents (and the ports test's server) run with the toolbox's. Install every agent CLI,
+  // so the toolbox test can check that each of them starts.
+  await build(url, token, { kind: 'agents', tools: ['claude-code', 'codex', 'opencode', 'pi', 'qwen-code', 'gemini'] });
+  const toolbox = ((await rpc(url, token, 'image.status')) as { kind: string; exists: boolean }[]).find((i) => i.kind === 'agents');
+  if (!toolbox?.exists) throw new Error(`agent toolbox not installed (log: ${log})`);
+  // Database clients come with the "db" variant – the shared-services test uses it.
+  console.log(`[integration] building ${DB_IMAGE} …`);
+  execSync(`docker build --quiet --build-arg TOOLCHAIN=db -t ${DB_IMAGE} images/sandbox`, { cwd: root, stdio: 'inherit', timeout: 900_000 });
   project.provide('cocoon', { url, token, instance, log });
 
   return async () => {
