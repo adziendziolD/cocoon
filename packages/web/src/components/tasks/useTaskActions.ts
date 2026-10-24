@@ -29,7 +29,7 @@ export function useStoreTask() {
   );
 }
 
-/** Start / approve / reject / stop / update / delete with toasts. */
+/** Start / approve / reject / mark finished / stop / update / delete with toasts. */
 export function useTaskActions() {
   const t = useT();
   const store = useStoreTask();
@@ -46,6 +46,11 @@ export function useTaskActions() {
     error: t('taskAction.rejectFailed'),
     onSuccess: store,
   });
+  const markFinished = useAction((taskId: string) => rpc('task.mark_finished', { taskId }), {
+    success: t('taskAction.markedFinished'),
+    error: t('taskAction.markFinishedFailed'),
+    onSuccess: store,
+  });
   const stop = useAction((taskId: string) => rpc('task.stop', { taskId }), { success: t('taskAction.stopped'), error: t('taskAction.stopFailed'), onSuccess: store });
   const update = useAction((v: MethodParams<'task.update'>) => rpc('task.update', v), {
     error: t('common.saveFailed'),
@@ -58,7 +63,7 @@ export function useTaskActions() {
       qc.setQueryData<Task[]>(qk.tasks, (old) => old?.filter((x) => x.id !== taskId));
     },
   });
-  return { start, approve, reject, stop, update, remove };
+  return { start, approve, reject, markFinished, stop, update, remove };
 }
 
 /** Opens a task's detail drawer (it is mounted globally and reads `?task=`). */

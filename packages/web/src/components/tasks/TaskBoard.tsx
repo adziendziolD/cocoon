@@ -85,10 +85,12 @@ export function TaskBoard({
       if (kind === 'start') result = await rpc('task.start', { taskId: task.id });
       else if (kind === 'stop') result = await rpc('task.stop', { taskId: task.id });
       else if (kind === 'approve') result = await rpc('task.approve', { taskId: task.id });
+      else if (kind === 'markFinished') result = await rpc('task.mark_finished', { taskId: task.id });
       else result = await rpc('task.update', kind === 'reorder' ? { taskId: task.id, order } : { taskId: task.id, status: to.status, order });
       store(result);
       if (kind === 'start') toast.success(t('taskAction.started'));
       if (kind === 'stop') toast.success(t('taskAction.stopped'));
+      if (kind === 'markFinished') toast.success(t('taskAction.markedFinished'));
       if (kind === 'approve') toast.success(result.status === 'done' ? t('taskAction.approvedDone') : t('taskAction.approvedNext'));
     } catch (err) {
       if (snapshot) qc.setQueryData(qk.tasks, snapshot);

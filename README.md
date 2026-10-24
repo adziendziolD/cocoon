@@ -450,6 +450,9 @@ backlog ──▶ queued ──▶ running ──▶ review ──▶ done
   `attention`, a finished agent moves the task to `review` (you look at the result), errors to `failed` with a note.
 - `task.approve` continues with the next workflow stage or marks the task `done`; `task.reject` sends your feedback to the agent
   (or a new agent of the same stage) and the task runs again.
+- **Failed, but actually finished?** If the agent of a `failed` task becomes active again or finishes after all (e.g. it
+  was declared gone during a server restart, or you continued it in the cockpit or switched agents), the task follows it
+  again. `task.mark_finished` moves a `failed` task to `review` by hand, so you can approve it (or send it back).
 - `dependsOn` – a task only starts when all its dependencies are `done`.
 - **Auto-run**: in workspaces with `autoRun`, queued tasks are started automatically (high priority first) up to `maxParallel`.
 - Every stage run is recorded in `runs` (stage, agent, outcome). Running tasks are reconciled after a server restart.
@@ -696,7 +699,7 @@ pnpm cocoon ws create "Shop" --repo https://github.com/you/shop.git --auto-run -
 pnpm cocoon ws ls | rm <workspace-id> [--delete-sandboxes]
 pnpm cocoon task create <workspace-id> "Add dark mode" -d "Details for the agent" [--agent claude-code | --workflow build-review] [--after <task-id>] [--queue | --start]
 pnpm cocoon task ls [--workspace <id>]
-pnpm cocoon task start | approve | stop | rm <task-id>
+pnpm cocoon task start | approve | finished | stop | rm <task-id>
 pnpm cocoon task reject <task-id> "Please also add tests"
 pnpm cocoon schedule create <workspace-id> "Nightly checks" "0 3 * * *" --template checks --tz Europe/Berlin
 pnpm cocoon schedule create <workspace-id> "Weekly updates" "0 4 * * 1" --template dependencies [--agent codex] [--always] [--no-auto-close]

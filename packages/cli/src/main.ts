@@ -328,6 +328,7 @@ tasks.command('get <taskId>').action(async (taskId) => print(await client().call
 tasks.command('start <taskId>').action(async (taskId) => print(await client().call('task.start', { taskId })));
 tasks.command('approve <taskId>').action(async (taskId) => print(await client().call('task.approve', { taskId })));
 tasks.command('reject <taskId> <feedback>').action(async (taskId, feedback) => print(await client().call('task.reject', { taskId, feedback })));
+tasks.command('finished <taskId>').description('move a failed task whose agent did finish to review').action(async (taskId) => print(await client().call('task.mark_finished', { taskId })));
 tasks.command('stop <taskId>').action(async (taskId) => print(await client().call('task.stop', { taskId })));
 tasks.command('rm <taskId>').action(async (taskId) => print(await client().call('task.delete', { taskId })));
 
