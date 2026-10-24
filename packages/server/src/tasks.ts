@@ -424,6 +424,25 @@ export class TaskService {
     return localizeTask(task, currentLanguage());
   }
 
+  /**
+   * A failed task whose agent did finish its work after all (e.g. it exited with an error code at the very end, or the
+   * failure was a server restart): moves it to review, so it can be approved – or sent back with feedback.
+   */
+  markFinished(taskId: string): Task {
+    const task = this.record(taskId);
+    if (task.status !== 'failed') throw new CocoonError('conflict', t('error.taskNotFailed', { title: task.title }));
+    const run = task.runs.at(-1);
+    if (run?.outcome === 'failed') run.outcome = 'finished';
+    task.status = 'review';
+    task.attention = false;
+    task.reviewStep = undefined;
+    setNote(task, 'note.markedFinished');
+    task.order = this.nextOrder(task.workspaceId, 'review');
+    this.save(task);
+    void this.schedule();
+    return localizeTask(task, currentLanguage());
+  }
+
   stop(taskId: string): Task {
     const task = this.record(taskId);
     if (task.status === 'running') this.stopAgent(task);
@@ -441,7 +460,12 @@ export class TaskService {
   /** An agent was replaced (agent.switch): a running task follows the new agent. */
   adoptAgent(previousAgentId: string, next: Agent): void {
     const task = this.store.tasks().find((candidate) => candidate.agentId === previousAgentId && candidate.status === 'running');
-    if (!task) return;
+    if (!task) {
+      // A failed task continues with the agent that takes over its work.
+      const failed = this.store.tasks().find((candidate) => candidate.agentId === previousAgentId && candidate.status === 'failed');
+      if (failed) this.resume(failed, next.id, next.kind);
+      return;
+    }
     const run = task.runs.at(-1);
     if (run?.outcome === 'running') {
       run.outcome = 'stopped';
@@ -479,7 +503,7 @@ export class TaskService {
 
   /** Follows the current agent of a running task into the task lifecycle. */
   private async onAgentUpdated(agent: Agent): Promise<void> {
-    const task = this.store.tasks().find((candidate) => candidate.agentId === agent.id && candidate.status === 'running');
+    const task = this.store.tasks().find((candidate) => candidate.agentId === agent.id && candidate.status === 'running') ?? this.revive(agent);
     if (!task || task.runs.at(-1)?.outcome !== 'running') return;
 
     const attention = agent.status === 'blocked';
@@ -495,6 +519,37 @@ export class TaskService {
       if (agent.exitCode === null) this.fail(task, 'note.agentGone');
       else this.fail(task, 'note.exitCode', { code: agent.exitCode });
     }
+  }
+
+  /**
+   * The agent of a failed task is active again or finished after all (e.g. it was declared gone during a server restart,
+   * or someone continued it in the cockpit): the task follows it again instead of staying failed.
+   */
+  private revive(agent: Agent): Task | undefined {
+    const active = agent.status === 'working' || agent.status === 'blocked' || agent.status === 'done' || (agent.status === 'exited' && agent.exitCode === 0);
+    if (!active) return undefined;
+    const task = this.store.tasks().find((candidate) => candidate.agentId === agent.id && candidate.status === 'failed');
+    const run = task?.runs.at(-1);
+    if (!task || run?.agentId !== agent.id || run.outcome !== 'failed') return undefined;
+    run.outcome = 'running';
+    run.finishedAt = undefined;
+    task.status = 'running';
+    task.attention = false;
+    clearNote(task);
+    task.order = this.nextOrder(task.workspaceId, 'running');
+    this.save(task);
+    return task;
+  }
+
+  /** A failed task continues with another agent (agent.switch): running again, with a new run for that agent. */
+  private resume(task: Task, agentId: string, stageName: string): void {
+    task.agentId = agentId;
+    task.runs.push({ stage: task.stage, stageName, agentId, startedAt: new Date().toISOString(), outcome: 'running' });
+    task.status = 'running';
+    task.attention = false;
+    clearNote(task);
+    task.order = this.nextOrder(task.workspaceId, 'running');
+    this.save(task);
   }
 
   private finishStage(task: Task): void {

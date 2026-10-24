@@ -8,6 +8,7 @@ import {
   GitPullRequest,
   Bot,
   Check,
+  CheckCheck,
   CircleStop,
   ExternalLink,
   FileDiff,
@@ -128,7 +129,7 @@ function TaskDetail({ task, allTasks, onClose }: { task: Task; allTasks: Task[];
   const dialogs = useAppDialogs();
   const openTask = useOpenTask();
   const openInCockpit = useOpenInCockpit();
-  const { start, approve, stop, remove, update } = useTaskActions();
+  const { start, approve, markFinished, stop, remove, update } = useTaskActions();
   const reviewOnApprove = useWorkspaces().data?.find((w) => w.id === task.workspaceId)?.review?.enabled;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const agent = task.agentId ? agents.data?.find((a) => a.id === task.agentId) : undefined;
@@ -213,6 +214,11 @@ function TaskDetail({ task, allTasks, onClose }: { task: Task; allTasks: Task[];
           {(s === 'backlog' || s === 'queued' || s === 'failed') && (
             <Button variant="primary" size="sm" icon={s === 'failed' ? <RotateCcw className="size-3.5" /> : <Play className="size-3.5" />} loading={start.isPending} onClick={() => start.mutate(task.id)} disabled={open.length > 0 && s !== 'failed'}>
               {s === 'failed' ? t('taskCard.retry') : t('taskCard.start')}
+            </Button>
+          )}
+          {s === 'failed' && (
+            <Button size="sm" icon={<CheckCheck className="size-3.5" />} loading={markFinished.isPending} onClick={() => markFinished.mutate(task.id)} title={t('taskCard.markFinishedHint')}>
+              {t('taskCard.markFinished')}
             </Button>
           )}
           {s === 'backlog' && (

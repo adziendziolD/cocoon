@@ -695,6 +695,12 @@ export const methods = {
     params: TaskRef.extend({ feedback: z.string().min(1) }),
     result: Task,
   },
+  'task.mark_finished': {
+    description: 'Moves a failed task whose agent did finish its work after all to review, so it can be approved (or sent back with feedback).',
+    mcp: true,
+    params: TaskRef,
+    result: Task,
+  },
   'task.stop': { description: 'Stops the running agent of a task and moves it back to the backlog.', mcp: true, params: TaskRef, result: Task },
 
   // ── scheduled agents ──────────────────────────────────────────────────────

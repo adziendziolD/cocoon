@@ -1,5 +1,5 @@
 import type { Agent, Settings, Task } from '@cocoon/protocol';
-import { Bot, Check, CircleStop, Hand, Link2, MessageSquareReply, MonitorPlay, MoreHorizontal, Pencil, Play, RotateCcw, Trash2, Workflow as WorkflowIcon } from 'lucide-react';
+import { Bot, Check, CheckCheck, CircleStop, Hand, Link2, MessageSquareReply, MonitorPlay, MoreHorizontal, Pencil, Play, RotateCcw, Trash2, Workflow as WorkflowIcon } from 'lucide-react';
 import { useLanguage, useT } from '../../i18n';
 import { useSchedules, useWorkspaces } from '../../api/queries';
 import { cn } from '../../lib/cn';
@@ -34,7 +34,7 @@ export function TaskCard({ task, allTasks, agent, settings, compact, showWorkspa
   const openTask = useOpenTask();
   const openInCockpit = useOpenInCockpit();
   const dialogs = useAppDialogs();
-  const { start, approve, stop } = useTaskActions();
+  const { start, approve, markFinished, stop } = useTaskActions();
   const schedules = useSchedules();
   const scheduleName = task.scheduleId ? schedules.data?.find((x) => x.id === task.scheduleId)?.name : undefined;
   const reviewOnApprove = useWorkspaces().data?.find((w) => w.id === task.workspaceId)?.review?.enabled;
@@ -154,9 +154,14 @@ export function TaskCard({ task, allTasks, agent, settings, compact, showWorkspa
           </Button>
         )}
         {s === 'failed' && (
-          <Button size="sm" icon={<RotateCcw className="size-3.5" />} loading={busy(start)} onClick={() => start.mutate(task.id)}>
-            {t('taskCard.retry')}
-          </Button>
+          <>
+            <Button size="sm" icon={<RotateCcw className="size-3.5" />} loading={busy(start)} onClick={() => start.mutate(task.id)}>
+              {t('taskCard.retry')}
+            </Button>
+            <Button size="sm" variant="ghost" icon={<CheckCheck className="size-3.5" />} loading={busy(markFinished)} onClick={() => markFinished.mutate(task.id)} title={t('taskCard.markFinishedHint')}>
+              {t('taskCard.markFinished')}
+            </Button>
+          </>
         )}
         {s === 'review' && (
           <>

@@ -223,6 +223,7 @@ export function createRpc(ctx: RpcContext) {
     'task.start': async (p) => tasks.start(p.taskId),
     'task.approve': async (p) => tasks.approve(p.taskId),
     'task.reject': (p) => tasks.reject(p.taskId, p.feedback),
+    'task.mark_finished': async (p) => tasks.markFinished(p.taskId),
     'task.stop': async (p) => tasks.stop(p.taskId),
 
     'schedule.list': async (p) => schedules.list(p.workspaceId),

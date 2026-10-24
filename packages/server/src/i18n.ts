@@ -225,6 +225,7 @@ export const messages = {
   // tasks & workspaces
   'error.taskRunning': { de: 'Die Aufgabe „{title}“ läuft bereits', en: 'Task "{title}" is already running' },
   'error.taskNotInReview': { de: 'Die Aufgabe „{title}“ wartet gerade nicht auf ein Review', en: 'Task "{title}" is not waiting for a review' },
+  'error.taskNotFailed': { de: 'Die Aufgabe „{title}“ ist nicht fehlgeschlagen', en: 'Task "{title}" has not failed' },
   'error.taskDependencies': { de: 'Die Aufgabe wartet noch auf: {titles}', en: 'The task is still waiting for: {titles}' },
   'error.taskUseStart': { de: 'Zum Starten bitte „Starten“ verwenden', en: 'Use "Start" to run a task' },
   'error.unknownWorkflow': { de: 'Unbekannter Ablauf „{id}“', en: 'Unknown workflow "{id}"' },
@@ -234,6 +235,7 @@ export const messages = {
   'note.interrupted': { de: 'Start wurde durch einen Neustart des Servers unterbrochen', en: 'Start was interrupted by a server restart' },
   'note.exitCode': { de: 'Der Agent wurde mit Exit-Code {code} beendet', en: 'The agent exited with code {code}' },
   'note.agentGone': { de: 'Der Agent wurde beendet, bevor er fertig war', en: 'The agent ended before it finished' },
+  'note.markedFinished': { de: 'Von dir als fertig markiert – prüfe das Ergebnis und gib es frei.', en: 'Marked as finished by you – check the result and approve it.' },
   'note.published': { de: 'Übernommen: Branch „{branch}“ hochgeladen ({repos}), Sandbox entfernt', en: 'Accepted: pushed branch "{branch}" ({repos}), sandbox removed' },
   'note.publishedNothing': { de: 'Übernommen: keine Änderungen, Sandbox entfernt', en: 'Accepted: no changes, sandbox removed' },
   'note.reviewing': { de: 'Code-Review läuft ({step}/{total}) …', en: 'Code review running ({step}/{total}) …' },
