@@ -850,7 +850,7 @@ packages/server       cocoond
   src/agents/             agent manager, status detection, hooks, tmux helpers
 packages/web          Management UI (React 19, Vite, Tailwind CSS v4, TanStack Query, xterm.js; i18n in src/i18n)
 packages/cli          `cocoon` CLI + typed API client
-site/                 Project website (GitHub Pages, branch gh-pages)
+site/                 Project website (GitHub Pages, deployed by .github/workflows/pages.yml)
 images/sandbox        Sandbox base image (Debian slim: git, tmux, ripgrep; variants "db" + database clients, "full" + compilers, Python)
 images/egress-proxy   Allowlist + credential proxy
 images/port-gateway   TCP forwarder for previews and shared ports (runs in the egress-proxy image)
