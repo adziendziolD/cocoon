@@ -20,6 +20,7 @@ export function githubAuthEnv(url: string, token: string | undefined): Record<st
 }
 
 export function parseGithubRepo(url: string): { owner: string; repo: string } | undefined {
-  const match = /github\.com[/:]([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(url);
+  // github.com must be the host: https://github.com/o/r, ssh://git@github.com/o/r, git@github.com:o/r – not a path or a subdomain.
+  const match = /^(?:(?:https?|ssh|git):\/\/(?:[^@/]+@)?|[^@/\s]+@)github\.com[/:]([^/]+)\/([^/]+?)(?:\.git)?\/?$/i.exec(url);
   return match?.[1] && match[2] ? { owner: match[1], repo: match[2] } : undefined;
 }

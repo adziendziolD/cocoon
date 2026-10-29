@@ -1,3 +1,5 @@
+import { trimTrailing } from './strings.ts';
+
 /** A skill source on GitHub, e.g. "owner/repo", "owner/repo/skills/name@v1" or a github.com URL. */
 export interface SkillSource {
   /** Clone URL (https). */
@@ -19,7 +21,7 @@ export function parseSkillSource(input: string): SkillSource | undefined {
   if (!text) return undefined;
   let ref: string | undefined;
   let treeRef: string | undefined;
-  text = text.replace(/^https?:\/\/(www\.)?github\.com\//, '').replace(/^github\.com\//, '').replace(/\/+$/, '');
+  text = trimTrailing(text.replace(/^https?:\/\/(www\.)?github\.com\//, '').replace(/^github\.com\//, ''), '/');
   const at = text.lastIndexOf('@');
   if (at > 0) {
     ref = text.slice(at + 1);

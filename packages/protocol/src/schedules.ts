@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { cronError, isValidTimeZone } from './cron.ts';
+import { stripCodeFence } from './strings.ts';
 import type { LocalizedText } from './models.ts';
 import { TaskPriority, type TaskReport } from './orchestration.ts';
 
@@ -126,7 +127,7 @@ export function reportInstructions(file: string): string {
 /** Report JSON of a scheduled run; anything unreadable counts as "missing". */
 export function parseReport(raw: string, at = new Date().toISOString()): TaskReport {
   try {
-    const json = JSON.parse(raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, '')) as { status?: unknown; summary?: unknown; report?: unknown };
+    const json = JSON.parse(stripCodeFence(raw)) as { status?: unknown; summary?: unknown; report?: unknown };
     const status = json.status === 'ok' || json.status === 'action_needed' ? json.status : 'missing';
     const summary = typeof json.summary === 'string' && json.summary.trim() ? json.summary.trim().slice(0, 4000) : undefined;
     const details = typeof json.report === 'string' && json.report.trim() ? json.report.trim().slice(0, 50_000) : undefined;

@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { posix } from 'node:path';
 import type { Readable } from 'node:stream';
-import type { FileEntry, MethodParams, MethodResult, SandboxRepo } from '@cocoon/protocol';
+import { trimTrailing, type FileEntry, type MethodParams, type MethodResult, type SandboxRepo } from '@cocoon/protocol';
 import { CocoonError } from '../errors.ts';
 import type { SecretsService } from '../secrets.ts';
 import type { SandboxDriver } from './driver.ts';
@@ -107,7 +107,7 @@ export class WorkspaceService {
     const repos = reposOf(record);
     const dirOf = (repo?: SandboxRepo) => (repo?.path ? posix.join(record.workdir, repo.path) : record.workdir);
     if (path !== undefined) {
-      const wanted = path.replace(/^\.\/?|\/+$/g, '');
+      const wanted = trimTrailing(path.replace(/^\.\/?/, ''), '/');
       const repo = repos.find((r) => r.path === wanted);
       if (repo) return { repo, dir: dirOf(repo) };
       // The workspace folder itself (sandboxes without a repository have an empty baseline repository there).
@@ -218,7 +218,7 @@ export class WorkspaceService {
     const { remoteUrl } = await this.gitStatus(sandboxId, path);
     if (!remoteUrl) throw new CocoonError('bad_request', t('error.noRemote'));
     const token = this.secrets.githubToken(this.sandboxes.record(sandboxId));
-    if (!token && remoteUrl.includes('github.com')) {
+    if (!token && parseGithubRepo(remoteUrl)) {
       throw new CocoonError('bad_request', t('error.pushNeedsToken'));
     }
     await this.git(sandboxId, dir, 'git push --quiet origin "HEAD:refs/heads/$BRANCH"', { BRANCH: branch, ...githubAuthEnv(remoteUrl, token) }, 300_000);

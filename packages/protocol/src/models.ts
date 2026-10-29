@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { cutAtAny, trimTrailing } from './strings.ts';
 
 export const Language = z.enum(['de', 'en']);
 export type Language = z.infer<typeof Language>;
@@ -67,7 +68,7 @@ export type SandboxRepo = z.infer<typeof SandboxRepo>;
 
 /** Folder name for a repository URL: last path segment without ".git". */
 export function repoFolderName(url: string): string {
-  const last = url.replace(/[?#].*$/, '').replace(/\/+$/, '').split(/[/:]/).pop() ?? '';
+  const last = trimTrailing(cutAtAny(url, '?#'), '/').split(/[/:]/).pop() ?? '';
   return last.replace(/\.git$/, '').replace(/[^a-zA-Z0-9_.-]/g, '-').replace(/^[.-]+/, '') || 'repo';
 }
 

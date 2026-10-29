@@ -139,11 +139,21 @@ async function withMysql<T>(admin: AdminConn, fn: (c: mysql.Connection) => Promi
   }
 }
 
+/** Backtick-quoted identifier (a backtick in the name is doubled). */
+export const mysqlIdent = (name: string) => `\`${name.replace(/`/g, '``')}\``;
+
+/** Sandbox names end up in SQL as identifiers and user names: only the characters of sandboxDbName are allowed. */
+function safeName(name: string): string {
+  if (!/^[a-z0-9_]+$/.test(name)) throw new Error(`unsafe name "${name}"`);
+  return name;
+}
+
 async function mysqlDropDatabases(c: mysql.Connection, name: string): Promise<void> {
   const [rows] = await c.query<mysql.RowDataPacket[]>('SHOW DATABASES');
   for (const row of rows) {
     const db = String(Object.values(row)[0]);
-    if (db === name || db.startsWith(`${name}_`)) await c.query(`DROP DATABASE IF EXISTS \`${db}\``);
+    // The sandbox may create databases below its prefix, with any name – including backticks.
+    if (db === name || db.startsWith(`${name}_`)) await c.query(`DROP DATABASE IF EXISTS ${mysqlIdent(db)}`);
   }
 }
 
@@ -159,20 +169,24 @@ const mysqlEngine: Engine = {
       const version = String(rows[0]?.v ?? '');
       return `${/mariadb/i.test(version) ? 'MariaDB' : 'MySQL'} ${version.split('-')[0]}`;
     }),
-  provision: (admin, name, password) =>
-    withMysql(admin, async (c) => {
-      await c.query(`CREATE DATABASE IF NOT EXISTS \`${name}\``);
+  provision: async (admin, name, password) => {
+    safeName(name);
+    await withMysql(admin, async (c) => {
+      await c.query(`CREATE DATABASE IF NOT EXISTS ${mysqlIdent(name)}`);
       await c.query(`CREATE USER IF NOT EXISTS '${name}'@'%' IDENTIFIED BY ?`, [password]);
       await c.query(`ALTER USER '${name}'@'%' IDENTIFIED BY ?`, [password]);
-      await c.query(`GRANT ALL PRIVILEGES ON \`${name}\`.* TO '${name}'@'%'`);
-      // Extra databases for tests: anything prefixed with the sandbox name.
-      await c.query(`GRANT ALL PRIVILEGES ON \`${name.replace(/_/g, '\\_')}\\_%\`.* TO '${name}'@'%'`);
-    }),
-  deprovision: (admin, name) =>
-    withMysql(admin, async (c) => {
+      await c.query(`GRANT ALL PRIVILEGES ON ${mysqlIdent(name)}.* TO '${name}'@'%'`);
+      // Extra databases for tests: anything prefixed with the sandbox name (_ and % are wildcards in GRANT, escaped here).
+      await c.query(`GRANT ALL PRIVILEGES ON \`${name.replace(/[\\_%]/g, '\\$&')}\\_%\`.* TO '${name}'@'%'`);
+    });
+  },
+  deprovision: async (admin, name) => {
+    safeName(name);
+    await withMysql(admin, async (c) => {
       await mysqlDropDatabases(c, name);
       await c.query(`DROP USER IF EXISTS '${name}'@'%'`);
-    }),
+    });
+  },
   reset: async (admin, name, password) => {
     await withMysql(admin, (c) => mysqlDropDatabases(c, name));
     await mysqlEngine.provision(admin, name, password);
