@@ -1,6 +1,6 @@
 import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Agent, CockpitLayout, EnvTarget, Sandbox, Schedule, Settings, SharedService, Task, Workspace } from '@cocoon/protocol';
+import type { Agent, CockpitLayout, EnvTarget, Sandbox, Schedule, Settings, ServiceKind, SharedService, Task, Workspace } from '@cocoon/protocol';
 
 export interface SandboxRecord extends Sandbox {
   /** Driver-specific handle, e.g. Docker container id. */
@@ -28,6 +28,14 @@ export interface OpenPort {
   hostPort: number;
   name?: string;
   openedAt: string;
+}
+
+/** A managed service that was removed with its data volume kept: the admin password the volume was initialised with. */
+export interface RetainedService {
+  id: string;
+  kind: ServiceKind;
+  adminPassword: string;
+  removedAt: string;
 }
 
 export interface SandboxServiceDb {
@@ -94,6 +102,8 @@ interface State {
   toolbox?: { tools: string[]; installedAt: string; versions?: Record<string, string>; /** Node.js version in the toolbox. */ runtime?: string };
   /** Shared services (databases, mocks). */
   services: Record<string, ServiceRecord>;
+  /** Removed managed services whose data volume was kept, by service id. */
+  retainedServices?: Record<string, RetainedService>;
   /** Environment variables (.env injection) by level. */
   envScopes: Record<string, EnvScopeRecord>;
 }
@@ -273,6 +283,18 @@ export class Store {
 
   deleteService(id: string): void {
     delete this.state.services[id];
+    this.flush();
+  }
+  retainedService(id: string): RetainedService | undefined {
+    return this.state.retainedServices?.[id];
+  }
+  putRetainedService(record: RetainedService): void {
+    this.state.retainedServices = { ...this.state.retainedServices, [record.id]: record };
+    this.flush();
+  }
+  deleteRetainedService(id: string): void {
+    if (!this.state.retainedServices?.[id]) return;
+    delete this.state.retainedServices[id];
     this.flush();
   }
 

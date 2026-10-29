@@ -48,6 +48,8 @@ export interface Engine {
   connection(conn: SandboxConn): { url: string; database?: string; user?: string; env: Record<string, string> };
   /** One markdown line for the agent instructions. */
   instructions(conn: SandboxConn, envName: string): string;
+  /** The sandbox users do not survive a restart of the service (they are not persisted), so they are provisioned again. */
+  volatileUsers?: boolean;
 }
 
 const enc = encodeURIComponent;
@@ -261,6 +263,8 @@ async function redisDeleteKeys(client: ReturnType<typeof createClient>, prefix: 
 }
 
 const redis: Engine = {
+  // ACL users are created at runtime and are not part of the AOF: after a restart only the default user exists.
+  volatileUsers: true,
   container: (password) => ({ env: {}, cmd: ['redis-server', '--requirepass', password, '--appendonly', 'yes'], dataPath: '/data', ports: [6379] }),
   test: (admin) =>
     withRedis(admin, async (c) => {

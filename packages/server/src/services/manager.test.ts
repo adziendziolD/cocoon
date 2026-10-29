@@ -1,10 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ServiceKind } from '@cocoon/protocol';
 import type { EgressManager } from '../egress.ts';
 import type { EventBus } from '../events.ts';
 import type { SandboxDriver } from '../sandbox/driver.ts';
 import type { SandboxManager } from '../sandbox/manager.ts';
 import type { SandboxRecord, SandboxServiceDb, ServiceRecord, Store } from '../store.ts';
+import { DockerDriver } from '../sandbox/docker.ts';
+import { ENGINES } from './engines.ts';
 import { sandboxDbName, ServiceManager, SERVICES_ENV_FILE } from './manager.ts';
 
 describe('sandboxDbName', () => {
@@ -190,5 +192,107 @@ describe('ServiceManager env assembly', () => {
     expect(notes).toContain('`$DATABASE_URL`'); // first postgres: standard name
     expect(notes).toContain('`$COCOON_PG_2_URL`'); // second: its own var
     expect(notes).not.toContain("it's"); // no credentials in the instructions
+  });
+});
+
+describe('ServiceManager: Redis users after a restart', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  /** A running managed service (as far as the manager knows) with a published port. */
+  function withRuntime(manager: ServiceManager, serviceId: string, port: number) {
+    (manager as unknown as { runtime: Map<string, unknown> }).runtime.set(serviceId, { status: 'running', hostPorts: { '6379': port, '5432': port } });
+  }
+
+  it('provisions the sandbox user of a Redis service again when an agent starts', async () => {
+    const provision = vi.spyOn(ENGINES.redis, 'provision').mockResolvedValue(undefined);
+    const { manager } = setup([service('cache', 'redis')], { id: 'sb-1', services: ['cache'], serviceDbs: { cache: db('sb_1', 'secret') } });
+    withRuntime(manager, 'cache', 40_000);
+    await manager.agentEnv('sb-1');
+    expect(provision).toHaveBeenCalledTimes(1);
+    expect(provision).toHaveBeenCalledWith(expect.objectContaining({ host: '127.0.0.1', port: 40_000, password: 'admin' }), 'sb_1', 'secret');
+  });
+
+  it('leaves databases whose users are persisted alone', async () => {
+    const redisProvision = vi.spyOn(ENGINES.redis, 'provision').mockResolvedValue(undefined);
+    const pgProvision = vi.spyOn(ENGINES.postgres, 'provision').mockResolvedValue(undefined);
+    const { manager } = setup([service('cache', 'redis'), service('postgres', 'postgres')], {
+      id: 'sb-1',
+      services: ['cache', 'postgres'],
+      serviceDbs: { cache: db('sb_1', 'x'), postgres: db('sb_1', 'y') },
+    });
+    withRuntime(manager, 'cache', 40_000);
+    withRuntime(manager, 'postgres', 40_001);
+    await manager.agentEnv('sb-1');
+    expect(redisProvision).toHaveBeenCalledTimes(1);
+    expect(pgProvision).not.toHaveBeenCalled();
+  });
+
+  it('skips sandboxes whose provisioning failed earlier (attach retries those)', async () => {
+    const provision = vi.spyOn(ENGINES.redis, 'provision').mockResolvedValue(undefined);
+    const record = service('cache', 'redis');
+    const { manager } = setup([record], { id: 'sb-1', services: ['cache'], serviceDbs: { cache: db('sb_1', 'x', 'earlier failure') } });
+    withRuntime(manager, 'cache', 40_000);
+    await (manager as unknown as { restoreUsers(r: ServiceRecord): Promise<void> }).restoreUsers(record);
+    expect(provision).not.toHaveBeenCalled();
+  });
+
+  it('logs a failing restore and carries on', async () => {
+    vi.spyOn(ENGINES.redis, 'provision').mockRejectedValue(new Error('WRONGPASS'));
+    const { manager, log } = setup([service('cache', 'redis')], { id: 'sb-1', services: ['cache'], serviceDbs: { cache: db('sb_1') } });
+    withRuntime(manager, 'cache', 40_000);
+    await expect(manager.agentEnv('sb-1')).resolves.toBeDefined();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('restoring the user'), expect.any(Error));
+  });
+});
+
+describe('ServiceManager: removing a service but keeping its data', () => {
+  /** Manager with a Docker driver that does nothing and a store that keeps services and retained volumes in memory. */
+  function managed() {
+    const services = new Map<string, ServiceRecord>();
+    const retained = new Map<string, { id: string; kind: ServiceKind; adminPassword: string; removedAt: string }>();
+    const store = {
+      services: () => [...services.values()],
+      service: (id: string) => services.get(id),
+      putService: (record: ServiceRecord) => services.set(record.id, record),
+      deleteService: (id: string) => services.delete(id),
+      retainedService: (id: string) => retained.get(id),
+      putRetainedService: (record: { id: string; kind: ServiceKind; adminPassword: string; removedAt: string }) => retained.set(record.id, record),
+      deleteRetainedService: (id: string) => retained.delete(id),
+      sandboxes: () => [],
+    } as unknown as Store;
+    const driver = Object.assign(Object.create(DockerDriver.prototype) as DockerDriver, {
+      docker: { getContainer: () => ({ remove: async () => undefined }), getVolume: () => ({ remove: async () => undefined }) },
+    });
+    const sandboxManager = { addHooks: vi.fn() } as unknown as SandboxManager;
+    const egress = { setRelaySource: vi.fn(), writePolicy: vi.fn() } as unknown as EgressManager;
+    const manager = new ServiceManager(driver, store, { publish: vi.fn() } as unknown as EventBus, sandboxManager, egress, vi.fn());
+    return { manager, services, retained };
+  }
+
+  it('reuses the admin password when the same service is added again, so the kept volume still works', async () => {
+    const { manager, services, retained } = managed();
+    await manager.add({ kind: 'postgres', mode: 'managed', attachExisting: false } as never);
+    const first = services.get('postgres')!;
+    await manager.remove('postgres', false);
+    expect(services.has('postgres')).toBe(false);
+    expect(retained.get('postgres')).toMatchObject({ kind: 'postgres', adminPassword: first.adminPassword });
+
+    await manager.add({ kind: 'postgres', mode: 'managed', attachExisting: false } as never);
+    expect(services.get('postgres')!.adminPassword).toBe(first.adminPassword);
+    expect(retained.has('postgres')).toBe(false);
+  });
+
+  it('forgets the password together with the data, and does not reuse it for another kind', async () => {
+    const { manager, services, retained } = managed();
+    await manager.add({ kind: 'postgres', mode: 'managed', attachExisting: false } as never);
+    const first = services.get('postgres')!.adminPassword;
+    await manager.remove('postgres', true);
+    expect(retained.size).toBe(0);
+    await manager.add({ kind: 'postgres', mode: 'managed', attachExisting: false } as never);
+    expect(services.get('postgres')!.adminPassword).not.toBe(first);
+
+    await manager.remove('postgres', false);
+    await manager.add({ kind: 'mysql', mode: 'managed', id: 'postgres', attachExisting: false } as never);
+    expect(services.get('postgres')!.adminPassword).not.toBe(retained.get('postgres')!.adminPassword);
   });
 });

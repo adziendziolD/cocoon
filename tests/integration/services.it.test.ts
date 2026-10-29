@@ -72,6 +72,30 @@ describe.runIf(available)('shared services', () => {
     expect(res.stdout.trim().split('\n')).toEqual(['0', '0']);
   });
 
+  it('Redis: the sandbox user still works after the service was restarted', async () => {
+    // ACL users are not persisted by Redis; CoCoon creates them again when it starts the service.
+    await rpc('services.stop', { serviceId: 'redis' });
+    await rpc('services.start', { serviceId: 'redis' });
+    await waitFor('redis running again', async () => (await status('redis')) === 'running', 120_000, 2000);
+    const res = await sh(sandboxId, 'redis-cli -u "$REDIS_URL" --no-auth-warning PING 2>&1');
+    expect(res.stdout.trim()).toBe('PONG');
+  });
+
+  it('a service removed with its data kept can be added again with the same data', async () => {
+    await rpc('services.add', { kind: 'postgres', id: 'pg-keep' });
+    await waitFor('pg-keep running', async () => (await status('pg-keep')) === 'running', 600_000, 2000);
+    docker('exec', svcContainer('pg-keep'), 'psql', '-U', 'postgres', '-qAt', '-c', 'CREATE TABLE kept(i int); INSERT INTO kept VALUES (42)');
+    await rpc('services.remove', { serviceId: 'pg-keep', deleteData: false });
+    try {
+      // Same id, same volume: the old admin password is still the one the data directory accepts.
+      await rpc('services.add', { kind: 'postgres', id: 'pg-keep' });
+      await waitFor('pg-keep running again', async () => (await status('pg-keep')) === 'running', 120_000, 2000);
+      expect(docker('exec', svcContainer('pg-keep'), 'psql', '-U', 'postgres', '-qAt', '-c', 'SELECT i FROM kept').trim()).toBe('42');
+    } finally {
+      await rpc('services.remove', { serviceId: 'pg-keep', deleteData: true }).catch(() => undefined);
+    }
+  });
+
   it('deleting the sandbox drops its role, databases and stubs', async () => {
     await rpc('sandbox.delete', { sandboxId });
     const roles = docker('exec', svcContainer('postgres'), 'psql', '-U', 'postgres', '-qAt', '-c', `SELECT count(*) FROM pg_roles WHERE rolname='${dbName}'`);
