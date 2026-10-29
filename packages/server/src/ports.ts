@@ -109,6 +109,8 @@ export class PortService {
   private readonly sessions = new Map<string, { host: string; expires: number }>();
   private timer?: NodeJS.Timeout;
   private polling = false;
+  /** Tail of the queue of writeMapping() runs. */
+  private mappingWrites: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly config: Config,
@@ -334,7 +336,14 @@ export class PortService {
   }
 
   /** Writes host port → sandbox address for every opened port of a running sandbox (read by the gateway). */
-  async writeMapping(without?: string): Promise<void> {
+  writeMapping(without?: string): Promise<void> {
+    // One at a time, in the order requested: a slow earlier run must not finish last and overwrite a newer mapping.
+    const run = this.mappingWrites.then(() => this.buildMapping(without));
+    this.mappingWrites = run.catch(() => undefined);
+    return run;
+  }
+
+  private async buildMapping(without?: string): Promise<void> {
     if (!this.enabled) return;
     const mapping: Record<string, { host: string; port: number }> = {};
     for (const record of this.store.sandboxes()) {

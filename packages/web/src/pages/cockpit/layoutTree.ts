@@ -134,8 +134,11 @@ export function setSizes(root: LayoutNode, path: number[], sizes: number[]): Lay
   if (root.type === 'pane') return root;
   if (path.length === 0) return { ...root, sizes };
   const [head, ...rest] = path;
+  const child = root.children[head!];
+  // The pane at that path may be gone (closed while a resize was pending).
+  if (!child) return root;
   const children = root.children.slice();
-  children[head!] = setSizes(children[head!]!, rest, sizes);
+  children[head!] = setSizes(child, rest, sizes);
   return { ...root, children };
 }
 

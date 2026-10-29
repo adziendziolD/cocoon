@@ -49,6 +49,7 @@ export class TaskService {
     bus.subscribe((event) => {
       if (event.type === 'agent.updated') this.background(this.onAgentUpdated(event.agent), `following agent ${event.agent.id}`);
       if (event.type === 'workspace.updated') void this.schedule();
+      if (event.type === 'agent.removed') this.stopping.delete(event.agentId);
     });
   }
 
@@ -536,6 +537,8 @@ export class TaskService {
 
   /** Follows the current agent of a running task into the task lifecycle. */
   private async onAgentUpdated(agent: Agent): Promise<void> {
+    // Whoever stopped the agent expects it to exit: forget that for good once it has, whatever the task does meanwhile.
+    const wasStopped = agent.status === 'exited' && this.stopping.delete(agent.id);
     const task = this.store.tasks().find((candidate) => candidate.agentId === agent.id && candidate.status === 'running') ?? this.revive(agent);
     if (!task || task.runs.at(-1)?.outcome !== 'running') return;
 
@@ -548,7 +551,7 @@ export class TaskService {
     if (agent.status === 'done' || (agent.status === 'exited' && agent.exitCode === 0)) {
       this.finishStage(task);
     } else if (agent.status === 'exited') {
-      if (this.stopping.delete(agent.id)) return;
+      if (wasStopped) return;
       if (agent.exitCode === null) this.fail(task, 'note.agentGone');
       else this.fail(task, 'note.exitCode', { code: agent.exitCode });
     }
@@ -824,6 +827,7 @@ export class TaskService {
 
   /** Starts queued tasks whose dependencies are done, up to each auto-run workspace's maxParallel. */
   private async schedule(): Promise<void> {
+    // Not only for concurrent runs: fail() below asks for a new run, which must not start the tasks of this loop twice.
     if (this.scheduling) return;
     this.scheduling = true;
     try {

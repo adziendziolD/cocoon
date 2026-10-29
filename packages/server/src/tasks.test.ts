@@ -248,6 +248,17 @@ describe('TaskService: races', () => {
     expect(restarted.killed).toEqual([c.agentId]);
   });
 
+  it('forgets an agent it stopped as soon as the agent has exited, even if the task moved on', async () => {
+    const e = engine();
+    const task = await running(e);
+    const stopping = (e.tasks as unknown as { stopping: Set<string> }).stopping;
+    e.tasks.stop(task.id);
+    expect(stopping.has(task.agentId!)).toBe(true);
+    // The task is in the backlog by now, so nothing else looks at this agent any more.
+    e.report(task.agentId!, 'exited', 143);
+    expect(stopping.size).toBe(0);
+  });
+
   it('publishes only once when a task is approved twice at the same time', async () => {
     const e = engine();
     const task = await running(e);

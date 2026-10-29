@@ -69,7 +69,10 @@ export async function buildHttpServer({ config, rpc, bus, tokens, agents, worksp
   /** Request/response API: POST /v1/rpc/sandbox.create  {params} */
   app.post<{ Params: { method: string } }>('/v1/rpc/:method', async (req, reply) => {
     try {
-      return { result: await withLanguage(requestLanguage(req), () => rpc(req.params.method, req.body ?? {})) };
+      // A client that hangs up (e.g. during a long agent.wait) aborts the call.
+      const gone = new AbortController();
+      reply.raw.once('close', () => gone.abort());
+      return { result: await withLanguage(requestLanguage(req), () => rpc(req.params.method, req.body ?? {}, gone.signal)) };
     } catch (err) {
       const error = toWireError(err);
       if (error.code === 'internal') req.log.error(err);
@@ -103,6 +106,7 @@ export async function buildHttpServer({ config, rpc, bus, tokens, agents, worksp
   /** Multiplexed control socket: RPC calls + event subscriptions. */
   app.get('/v1/ws', { websocket: true }, (socket: WebSocket, req) => {
     const subscriptions = new Map<string, () => void>();
+    const gone = new AbortController();
     const lang = requestLanguage(req);
     const send = (msg: WireResponse | { subscription: string; event: unknown }) => {
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg));
@@ -143,7 +147,7 @@ export async function buildHttpServer({ config, rpc, bus, tokens, agents, worksp
           subscriptions.delete(subscription);
           return send({ id, result: { ok: true } });
         }
-        send({ id, result: await withLanguage(lang, () => rpc(method, params)) });
+        send({ id, result: await withLanguage(lang, () => rpc(method, params, gone.signal)) });
       } catch (err) {
         const error = toWireError(err);
         if (error.code === 'internal') req.log.error(err);
@@ -151,6 +155,7 @@ export async function buildHttpServer({ config, rpc, bus, tokens, agents, worksp
       }
     });
     socket.on('close', () => {
+      gone.abort();
       for (const unsubscribe of subscriptions.values()) unsubscribe();
     });
   });

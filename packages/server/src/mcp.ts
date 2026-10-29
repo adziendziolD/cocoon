@@ -29,11 +29,11 @@ function buildServer(rpc: Rpc): Server {
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
   }));
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const tool = tools.find((t) => t.name === request.params.name);
     if (!tool) return { isError: true, content: [{ type: 'text', text: `unknown tool ${request.params.name}` }] };
     try {
-      const result = await rpc(tool.method, request.params.arguments ?? {});
+      const result = await rpc(tool.method, request.params.arguments ?? {}, extra.signal);
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     } catch (err) {
       return { isError: true, content: [{ type: 'text', text: (err as Error).message }] };

@@ -39,12 +39,27 @@ export class CocoonClient {
   subscribe(filter: EventFilter, onEvent: (event: CocoonEvent) => void, onClose?: (reason: string) => void): () => void {
     const ws = this.socket('/v1/ws');
     ws.on('open', () => ws.send(JSON.stringify({ id: 'events', method: 'events.subscribe', params: filter })));
+    // Errors end the stream through onClose: thrown inside a socket handler they would be uncaught exceptions.
+    let closed = false;
+    const finish = (reason: string) => {
+      if (closed) return;
+      closed = true;
+      onClose?.(reason);
+    };
     ws.on('message', (data) => {
-      const msg = JSON.parse(data.toString()) as { event?: CocoonEvent; error?: WireError };
-      if (msg.error) throw new CocoonApiError(msg.error);
-      if (msg.event) onEvent(msg.event);
+      let msg: { event?: CocoonEvent; error?: WireError };
+      try {
+        msg = JSON.parse(data.toString()) as typeof msg;
+      } catch {
+        return; // not a frame of ours
+      }
+      if (msg.error) {
+        finish(new CocoonApiError(msg.error).message);
+        ws.close();
+      } else if (msg.event) onEvent(msg.event);
     });
-    ws.on('close', (_code, reason) => onClose?.(reason.toString()));
+    ws.on('error', (err) => finish(err.message));
+    ws.on('close', (_code, reason) => finish(reason.toString()));
     return () => ws.close();
   }
 

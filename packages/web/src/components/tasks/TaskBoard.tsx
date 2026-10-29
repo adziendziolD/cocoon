@@ -7,7 +7,7 @@ import { useAgents, useSettings } from '../../api/queries';
 import { describeError, rpc } from '../../api/rpc';
 import { rich, useT } from '../../i18n';
 import { cn } from '../../lib/cn';
-import { moveKind, orderAt, sortByOrder, TASK_COLUMNS, taskStatusMeta } from '../../lib/tasks';
+import { hasRoomAt, moveKind, orderAt, renumbered, sortByOrder, TASK_COLUMNS, taskStatusMeta } from '../../lib/tasks';
 import { useAppDialogs } from '../AppDialogs';
 import { StatusDot } from '../Badge';
 import { ConfirmDialog } from '../Dialog';
@@ -73,9 +73,21 @@ export function TaskBoard({
       toast.info(t('board.cannotMove'), t(`board.cannotMove.${to.status === 'review' ? 'review' : 'running'}`));
       return;
     }
-    const column = columns[to.status].filter((x) => x.id !== task.id);
-    const order = orderAt(column, to.index);
+    let column = columns[to.status].filter((x) => x.id !== task.id);
     const snapshot = qc.getQueryData<Task[]>(qk.tasks);
+    if (!hasRoomAt(column, to.index)) {
+      // Repeated drops at one place used up the gap between the neighbours: space the whole column out again first.
+      column = renumbered(column);
+      qc.setQueryData<Task[]>(qk.tasks, (old) => old?.map((x) => column.find((c) => c.id === x.id) ?? x));
+      try {
+        await Promise.all(column.map((x) => rpc('task.update', { taskId: x.id, order: x.order })));
+      } catch (err) {
+        if (snapshot) qc.setQueryData(qk.tasks, snapshot);
+        toast.error(t('board.moveFailed'), describeError(err));
+        return;
+      }
+    }
+    const order = orderAt(column, to.index);
     // Optimistic: show the card at its new place right away.
     if (kind === 'reorder' || kind === 'update') {
       qc.setQueryData<Task[]>(qk.tasks, (old) => old?.map((x) => (x.id === task.id ? { ...x, status: to.status, order } : x)));
