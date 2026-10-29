@@ -7,6 +7,7 @@ type Section = keyof Settings;
 /** Runtime-editable server settings (persisted in the store, seeded from the optional config file). */
 export class SettingsService {
   private current: Settings;
+  private readonly guards: ((next: Settings) => void)[] = [];
 
   constructor(
     private readonly store: Store,
@@ -54,7 +55,13 @@ export class SettingsService {
     return this.replace({ ...this.current, [section]: defaults[section] });
   }
 
+  /** Registers a check that may veto new settings by throwing (e.g. dropping a workflow that is still in use). */
+  addGuard(guard: (next: Settings) => void): void {
+    this.guards.push(guard);
+  }
+
   private replace(settings: Settings): Settings {
+    for (const guard of this.guards) guard(settings);
     this.current = settings;
     this.store.putSettings(settings);
     this.bus.publish({ type: 'settings.updated', settings });

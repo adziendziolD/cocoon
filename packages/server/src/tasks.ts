@@ -1,5 +1,5 @@
 import { GIT_CREDENTIAL_HELPER_SCRIPT } from './sandbox/git-auth.ts';
-import { DEFAULT_REVIEW_PROMPT, localize, parseReport, reportInstructions, type Agent, type Language, type MethodParams, type ReviewResult, type Task, type TaskStatus, type WorkflowStage, type Workspace } from '@cocoon/protocol';
+import { DEFAULT_REVIEW_PROMPT, localize, parseReport, reportInstructions, type Agent, type Language, type MethodParams, type ReviewResult, type Settings, type Task, type TaskStatus, type WorkflowStage, type Workspace } from '@cocoon/protocol';
 import type { AgentManager } from './agents/manager.ts';
 import { CocoonError, notFound } from './errors.ts';
 import type { EventBus } from './events.ts';
@@ -41,7 +41,7 @@ export class TaskService {
     private readonly secrets?: SecretsService,
   ) {
     bus.subscribe((event) => {
-      if (event.type === 'agent.updated') void this.onAgentUpdated(event.agent);
+      if (event.type === 'agent.updated') this.background(this.onAgentUpdated(event.agent), `following agent ${event.agent.id}`);
       if (event.type === 'workspace.updated') void this.schedule();
     });
   }
@@ -313,7 +313,9 @@ export class TaskService {
     if (result.verdict !== 'approved') {
       // Back to the user: "Request changes" sends it to the working agent, "Approve" reviews again.
       task.reviewStep = undefined;
-      task.stage = this.stages(task).length - 1;
+      const stages = this.stagesOrFail(task);
+      if (!stages) return;
+      task.stage = stages.length - 1;
       task.status = 'review';
       task.attention = false;
       setNote(task, result.verdict === 'missing' ? 'note.reviewNoResult' : 'note.reviewChanges', { summary: result.summary ?? '' });
@@ -339,7 +341,9 @@ export class TaskService {
       this.notifier.notify('task.done', 'notify.taskDone', { title: task.title }, `/tasks?task=${task.id}`);
       void this.schedule();
     } catch (err) {
-      task.stage = this.stages(task).length - 1;
+      const stages = this.stagesOrFail(task);
+      if (!stages) return;
+      task.stage = stages.length - 1;
       task.status = 'review';
       setNote(task, 'note.reviewPublishFailed', { error: (err as Error).message });
       task.order = this.nextOrder(task.workspaceId, 'review');
@@ -491,7 +495,7 @@ export class TaskService {
       const agent = task.agentId ? this.store.agent(task.agentId) : undefined;
       const runActive = task.runs.at(-1)?.agentId === task.agentId && task.runs.at(-1)?.outcome === 'running';
       if (!agent || !runActive) this.fail(task, 'note.interrupted');
-      else void this.onAgentUpdated(agent);
+      else this.background(this.onAgentUpdated(agent), `following agent ${agent.id}`);
     }
     this.timer = setInterval(() => void this.schedule(), SCHEDULE_INTERVAL_MS);
     void this.schedule();
@@ -558,8 +562,9 @@ export class TaskService {
       run.outcome = 'finished';
       run.finishedAt = new Date().toISOString();
     }
-    if (task.reviewStep !== undefined) return void this.finishReview(task);
-    const stages = this.stages(task);
+    if (task.reviewStep !== undefined) return this.background(this.finishReview(task), `finishing the review of task ${task.id}`);
+    const stages = this.stagesOrFail(task);
+    if (!stages) return;
     const stage = stages[task.stage];
     const last = task.stage >= stages.length - 1;
     if (!last && stage && !stage.approval) {
@@ -567,7 +572,7 @@ export class TaskService {
       this.launch(task);
       return;
     }
-    if (task.scheduleId && last) return void this.finishScheduledRun(task);
+    if (task.scheduleId && last) return this.background(this.finishScheduledRun(task), `finishing scheduled task ${task.id}`);
     task.status = 'review';
     task.attention = false;
     clearNote(task);
@@ -802,6 +807,34 @@ export class TaskService {
   }
 
   // ── helpers ────────────────────────────────────────────────────────────────
+
+  /** The stages of a task's workflow; a task whose workflow was removed meanwhile fails (lifecycle paths must not throw). */
+  private stagesOrFail(task: Task): WorkflowStage[] | undefined {
+    try {
+      return this.stages(task);
+    } catch (err) {
+      if (!(err instanceof CocoonError)) throw err;
+      this.fail(task, 'note.workflowGone', { id: task.workflowId ?? '' });
+      return undefined;
+    }
+  }
+
+  /** Runs a lifecycle step nobody awaits: an error is logged instead of becoming an unhandled rejection that ends the process. */
+  private background(work: Promise<void>, what: string): void {
+    work.catch((err) => this.log(`${what} failed`, err));
+  }
+
+  /** Refuses settings that drop a workflow queued, running or review tasks, or schedules, still use. */
+  assertWorkflowsUnused(workflows: Settings['workflows']): void {
+    const users = new Map<string, string[]>();
+    const use = (workflowId: string | undefined, label: string) => {
+      if (workflowId && !workflows[workflowId]) users.set(workflowId, [...(users.get(workflowId) ?? []), label]);
+    };
+    for (const task of this.store.tasks()) if (task.status === 'queued' || task.status === 'running' || task.status === 'review') use(task.workflowId, task.title);
+    for (const schedule of this.store.schedules()) use(schedule.workflowId, schedule.name);
+    const [first] = users;
+    if (first) throw new CocoonError('conflict', t('error.workflowInUse', { id: first[0], users: first[1].join(', ') }));
+  }
 
   private stages(task: Task): WorkflowStage[] {
     if (task.workflowId) {

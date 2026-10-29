@@ -57,7 +57,7 @@ function engine() {
     bus.publish({ type: 'agent.updated', agent });
   };
   const status = (taskId: string) => store.task(taskId)?.status;
-  return { store, tasks, ws, report, status };
+  return { store, tasks, settings, ws, report, status };
 }
 
 /** Starts a task and waits until its agent is spawned. */
@@ -148,5 +148,43 @@ describe('TaskService: failed tasks whose agent finished after all', () => {
 
     e.report('ag_next', 'done');
     expect(e.status(task.id)).toBe('review');
+  });
+});
+
+describe('TaskService: removed workflows', () => {
+  const workflow = { label: 'Build', stages: [{ name: 'Build', agentKind: 'shell', prompt: '{{task}}', approval: false }] };
+
+  /** A running task of workflow "build". */
+  async function withWorkflow(e: ReturnType<typeof engine>) {
+    e.settings.update({ workflows: { build: workflow } });
+    const task = e.tasks.create({ workspaceId: e.ws.id, title: 'Add dark mode', workflowId: 'build' });
+    e.tasks.start(task.id);
+    await vi.waitFor(() => expect(e.store.task(task.id)?.agentId).toBeDefined());
+    return e.store.task(task.id)!;
+  }
+
+  it('fails the task instead of throwing when its workflow is gone as the agent finishes', async () => {
+    const e = engine();
+    const task = await withWorkflow(e);
+    e.settings.update({ workflows: {} });
+    expect(() => e.report(task.agentId!, 'done')).not.toThrow();
+    expect(e.store.task(task.id)).toMatchObject({ status: 'failed', noteKey: 'note.workflowGone' });
+  });
+
+  it('refuses settings that drop a workflow of an unfinished task', async () => {
+    const e = engine();
+    const task = await withWorkflow(e);
+    expect(() => e.tasks.assertWorkflowsUnused({})).toThrow(/build/);
+    expect(() => e.tasks.assertWorkflowsUnused({ build: workflow })).not.toThrow();
+    e.report(task.agentId!, 'exited', 1);
+    expect(() => e.tasks.assertWorkflowsUnused({})).not.toThrow();
+  });
+
+  it('keeps the settings unchanged when a guard vetoes them', async () => {
+    const e = engine();
+    await withWorkflow(e);
+    e.settings.addGuard((next) => e.tasks.assertWorkflowsUnused(next.workflows));
+    expect(() => e.settings.update({ workflows: {} })).toThrow(/build/);
+    expect(e.settings.get().workflows).toHaveProperty('build');
   });
 });
