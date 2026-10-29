@@ -145,7 +145,7 @@ export async function checkCocoon(dir: string, version: string, opts: { fetch: b
 /** Newest version of an npm package (its "latest" dist-tag, which is what "npm install" picks). */
 export async function latestNpmVersion(pkg: string): Promise<string> {
   const registry = (process.env.npm_config_registry || 'https://registry.npmjs.org/').replace(/\/?$/, '/');
-  const res = await fetch(`${registry}${pkg.replace('/', '%2f')}/latest`, { signal: AbortSignal.timeout(15_000), headers: { accept: 'application/json' } });
+  const res = await fetch(`${registry}${pkg.replaceAll('/', '%2f')}/latest`, { signal: AbortSignal.timeout(15_000), headers: { accept: 'application/json' } });
   if (!res.ok) throw new Error(`npm registry: HTTP ${res.status}`);
   const { version } = (await res.json()) as { version?: string };
   if (!version) throw new Error('npm registry: no version');

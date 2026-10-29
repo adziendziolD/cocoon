@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { cutAtAny, stripInlineComment, trimTrailing } from './strings.ts';
 
 /**
  * Environment injection: variables defined per workspace, repository and sandbox, merged in that order
@@ -120,12 +121,12 @@ export type ResolvedEnv = z.infer<typeof ResolvedEnv>;
  * reach the same repository on different ports); path case is kept.
  */
 export function normalizeRepoUrl(url: string): string {
-  let rest = url.trim().replace(/[?#].*$/, '');
+  let rest = cutAtAny(url.trim(), '?#');
   rest = rest.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');
   rest = rest.replace(/^[^@/]*@/, '');
   rest = rest.replace(/^([^/:]+):(?!\d+\/)/, '$1/');
   rest = rest.replace(/^([^/:]+):\d+\//, '$1/');
-  rest = rest.replace(/\/+$/, '').replace(/\.git$/i, '').replace(/\/+$/, '');
+  rest = trimTrailing(trimTrailing(rest, '/').replace(/\.git$/i, ''), '/');
   const [host = '', ...path] = rest.split('/');
   return [host.toLowerCase(), ...path].join('/');
 }
@@ -135,7 +136,7 @@ export function normalizeRepoUrl(url: string): string {
  * Returns "api.stripe.com", "api.internal:8443" or "http://localhost:9000"; undefined if it is not a host.
  */
 export function normalizeProxyHost(host: string): string | undefined {
-  const match = PROXY_HOST.exec(host.trim().toLowerCase().replace(/\/+$/, ''));
+  const match = PROXY_HOST.exec(trimTrailing(host.trim().toLowerCase(), '/'));
   if (!match) return undefined;
   const [, scheme, name = '', , , , port = ''] = match;
   if (port && Number(port.slice(1)) > 65_535) return undefined;
@@ -215,7 +216,7 @@ export function parseDotenv(content: string): DotenvResult {
       }
       if (!errors.some((e) => e.line === startLine + 1)) vars.set(name, value);
     } else {
-      vars.set(name, rest.replace(/\s+#.*$/, '').trim());
+      vars.set(name, stripInlineComment(rest).trim());
     }
   }
   return { vars: [...vars].map(([name, value]) => ({ name, value })), errors };

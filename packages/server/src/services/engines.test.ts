@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SERVICE_KINDS, ServiceKind } from '@cocoon/protocol';
-import { ENGINES, type SandboxConn } from './engines.ts';
+import { ENGINES, mysqlIdent, type SandboxConn } from './engines.ts';
 
 const conn = (overrides: Partial<SandboxConn> = {}): SandboxConn => ({ host: 'postgres', port: 5432, name: 'sb_abc123', password: 's3cret', ...overrides });
 
@@ -184,5 +184,18 @@ describe('mailpit', () => {
     expect(spec.ports).toEqual([1025, 8025]);
     expect(spec.dataPath).toBe('/data');
     expect(spec.env.MP_DATABASE).toBe('/data/mailpit.db');
+  });
+});
+
+describe('MySQL identifiers', () => {
+  it('doubles backticks, so a database name cannot end the identifier', () => {
+    expect(mysqlIdent('sb_1')).toBe('`sb_1`');
+    expect(mysqlIdent('sb_1_a`; DROP DATABASE mysql; --')).toBe('`sb_1_a``; DROP DATABASE mysql; --`');
+  });
+
+  it.each(["sb'1", 'sb 1', 'sb`1', 'sb\\1', 'SB_1', ''])('refuses the sandbox name %j before it connects', async (name) => {
+    const admin = { host: '127.0.0.1', port: 1, password: 'x' };
+    await expect(ENGINES.mysql.provision(admin, name, 'pw')).rejects.toThrow(/unsafe name/);
+    await expect(ENGINES.mysql.deprovision(admin, name)).rejects.toThrow(/unsafe name/);
   });
 });
