@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Agent, CockpitLayout, EnvTarget, Sandbox, Schedule, Settings, SharedService, Task, Workspace } from '@cocoon/protocol';
 
@@ -109,11 +109,24 @@ export class Store {
   constructor(readonly dataDir: string) {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     this.file = join(dataDir, 'state.json');
-    try {
-      this.state = { ...this.state, ...(JSON.parse(readFileSync(this.file, 'utf8')) as Partial<State>) };
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    this.state = { ...this.state, ...this.load() };
+  }
+
+  /** Reads state.json; if it is unreadable (e.g. truncated by a power loss), falls back to the previous version, state.json.bak. */
+  private load(): Partial<State> {
+    let failure: unknown;
+    for (const file of [this.file, `${this.file}.bak`]) {
+      try {
+        const state = JSON.parse(readFileSync(file, 'utf8')) as Partial<State>;
+        if (file !== this.file) console.error(`cocoon: ${this.file} is ${failure ? `unreadable (${(failure as Error).message})` : 'missing'}, restored ${file}; changes since the last good write are lost`);
+        return state;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        failure ??= err;
+      }
     }
+    if (failure) throw failure;
+    return {};
   }
 
   sandboxes(): SandboxRecord[] {
@@ -284,9 +297,36 @@ export class Store {
 
   flush(): void {
     const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, JSON.stringify(this.state, null, 2), { mode: 0o600 });
+    // Data reaches the disk before the rename can, so a power loss leaves the old or the new file, never an empty one.
+    const fd = openSync(tmp, 'w', 0o600);
+    try {
+      writeFileSync(fd, JSON.stringify(this.state, null, 2));
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
     chmodSync(tmp, 0o600);
+    try {
+      renameSync(this.file, `${this.file}.bak`);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
     renameSync(tmp, this.file);
+    syncDir(this.dataDir);
+  }
+}
+
+/** Persists directory entries (the rename); not possible on every platform. */
+function syncDir(dir: string): void {
+  try {
+    const fd = openSync(dir, 'r');
+    try {
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    // best effort
   }
 }
 

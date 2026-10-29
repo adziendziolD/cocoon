@@ -86,7 +86,7 @@ export class ServiceManager {
       if (record.mode === 'external') void this.check(record.id);
       // Paused services stay paused until a sandbox needs them.
       else if (record.desired !== 'stopped' && (!this.autoStops(record) || this.inUse(record.id))) void this.ensureRunning(record.id).catch(() => undefined);
-      else void this.refreshContainerState(record);
+      else void this.refreshContainerState(record).catch((err) => this.log('services: refresh failed', err));
     }
     this.idleTimer = setInterval(() => void this.checkIdle().catch((err) => this.log('services: idle check failed', err)), IDLE_CHECK_MS);
     this.idleTimer.unref();

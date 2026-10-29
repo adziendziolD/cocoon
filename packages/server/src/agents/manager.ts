@@ -178,7 +178,14 @@ export class AgentManager {
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         unsubscribe();
-        resolve({ agent: this.get(agentId), timedOut: true });
+        // The sandbox may be gone meanwhile (the store removes its agents): report the last known state.
+        let agent: Agent;
+        try {
+          agent = this.get(agentId);
+        } catch {
+          agent = { ...current, status: 'exited' };
+        }
+        resolve({ agent, timedOut: true });
       }, timeoutMs ?? 300_000);
       const unsubscribe = this.bus.subscribe((event) => {
         const agent =

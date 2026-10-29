@@ -39,6 +39,8 @@ try {
 // Logger is created with the HTTP server; route early logs through console until then.
 let log: (msg: string, err?: unknown) => void = (msg, err) => console.error(msg, err ?? '');
 const logProxy = (msg: string, err?: unknown) => log(msg, err);
+// Last line of defense: a forgotten promise must not take the whole control plane (and every running task) down.
+process.on('unhandledRejection', (err) => log('unhandled rejection', err));
 
 const store = new Store(config.dataDir);
 const bus = new EventBus();
@@ -65,6 +67,7 @@ const ports = new PortService(config, driver, store, sandboxes, bus, activity, l
 const notifier = new Notifier(settings, store, bus, config.publicUrl, logProxy);
 const workspaces = new WorkspacesService(store, bus, activity);
 const tasks = new TaskService(store, bus, settings, workspaces, sandboxes, workspace, agents, notifier, logProxy, secrets);
+settings.addGuard((next) => tasks.assertWorkflowsUnused(next.workflows));
 const issues = new IssueService(workspaces, tasks, secrets);
 const schedules = new ScheduleService(store, bus, settings, workspaces, tasks, activity, logProxy);
 

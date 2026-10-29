@@ -232,6 +232,8 @@ export const messages = {
   'error.unknownDependency': { de: 'Abhängigkeit {id} gehört nicht zu diesem Workspace', en: 'Dependency {id} does not belong to this workspace' },
   'note.preparingSandbox': { de: 'Sandbox wird vorbereitet …', en: 'Preparing sandbox …' },
   'note.startingStage': { de: 'Starte „{stage}“ …', en: 'Starting "{stage}" …' },
+  'error.workflowInUse': { de: 'Der Ablauf „{id}“ wird noch verwendet (Aufgaben oder Zeitpläne: {users})', en: 'Workflow "{id}" is still in use (tasks or schedules: {users})' },
+  'note.workflowGone': { de: 'Der Ablauf „{id}“ existiert nicht mehr', en: 'Workflow "{id}" no longer exists' },
   'note.interrupted': { de: 'Start wurde durch einen Neustart des Servers unterbrochen', en: 'Start was interrupted by a server restart' },
   'note.exitCode': { de: 'Der Agent wurde mit Exit-Code {code} beendet', en: 'The agent exited with code {code}' },
   'note.agentGone': { de: 'Der Agent wurde beendet, bevor er fertig war', en: 'The agent ended before it finished' },
