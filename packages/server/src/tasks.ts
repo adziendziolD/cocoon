@@ -26,6 +26,12 @@ export class TaskService {
   private timer?: NodeJS.Timeout;
   /** Agents stopped on purpose – their exit must not mark the task as failed. */
   private readonly stopping = new Set<string>();
+  /** Per task: counts starts and stops. A background start that finds a newer number after an await is outdated and gives up. */
+  private readonly generations = new Map<string, number>();
+  /** Per task: the background start in progress; a second start waits for it, so both end up with the same sandbox. */
+  private readonly starting = new Map<string, Promise<void>>();
+  /** Tasks being approved right now: publishing is slow, and a second approve must not push and delete the sandbox again. */
+  private readonly approving = new Set<string>();
   private scheduling = false;
 
   constructor(
@@ -123,7 +129,7 @@ export class TaskService {
 
     if (status && status !== task.status) {
       if (status === 'running' || status === 'review') throw new CocoonError('bad_request', t('error.taskUseStart'));
-      if (task.status === 'running') this.stopAgent(task);
+      this.stopAgent(task);
       task.status = status;
       task.attention = false;
       if (status === 'backlog' || status === 'queued') {
@@ -141,10 +147,11 @@ export class TaskService {
   /** `removeSandbox`: also delete the sandbox that was created for this task alone. */
   async delete(taskId: string, { removeSandbox = false } = {}): Promise<void> {
     const task = this.record(taskId);
-    if (task.status === 'running') this.stopAgent(task);
+    this.stopAgent(task);
     const own = task.sandboxId ? this.store.sandbox(task.sandboxId) : undefined;
     if (removeSandbox && own?.taskId === task.id) await this.sandboxes.delete(own.id).catch((err) => this.log(`removing sandbox ${own.id} failed`, err));
     this.store.deleteTask(taskId);
+    this.generations.delete(taskId);
     for (const other of this.store.tasks()) {
       if (other.dependsOn.includes(taskId)) {
         other.dependsOn = other.dependsOn.filter((id) => id !== taskId);
@@ -160,6 +167,8 @@ export class TaskService {
     const open = task.dependsOn.map((id) => this.store.task(id)).filter((dep): dep is Task => !!dep && dep.status !== 'done');
     if (open.length) throw new CocoonError('conflict', t('error.taskDependencies', { titles: open.map((d) => `„${d.title}“`).join(', ') }));
     if (task.status === 'done' || task.status === 'failed') task.stage = 0;
+    // A task in review or failed may still have a live agent: do not leave it running next to the new one.
+    this.stopAgent(task);
     this.launch(task);
     return localizeTask(task, currentLanguage());
   }
@@ -167,6 +176,7 @@ export class TaskService {
   async approve(taskId: string): Promise<Task> {
     const task = this.record(taskId);
     if (task.status !== 'review') throw new CocoonError('conflict', t('error.taskNotInReview', { title: task.title }));
+    if (this.approving.has(task.id)) throw new CocoonError('conflict', t('error.taskBusy', { title: task.title }));
     const stages = this.stages(task);
     if (task.stage < stages.length - 1) {
       task.stage += 1;
@@ -178,7 +188,20 @@ export class TaskService {
       this.launchReview(task);
     } else {
       // Fails (task stays in review) if the work cannot be pushed, e.g. without a GitHub token.
-      const published = await this.publishOwnSandbox(task);
+      this.approving.add(task.id);
+      let published: Awaited<ReturnType<typeof this.publishOwnSandbox>>;
+      try {
+        published = await this.publishOwnSandbox(task);
+      } finally {
+        this.approving.delete(task.id);
+      }
+      // Deleted or moved while publishing: keep what the publishing changed, but do not undo the other change.
+      const current = this.store.task(task.id);
+      if (!current) return localizeTask(task, currentLanguage());
+      if (current.status !== 'review') {
+        this.save(current);
+        return localizeTask(current, currentLanguage());
+      }
       this.stopTaskAgents(task);
       task.status = 'done';
       task.attention = false;
@@ -243,6 +266,7 @@ export class TaskService {
     setNote(task, 'note.reviewing', { step: step + 1, total: review.agentKinds.length });
     task.order = this.nextOrder(task.workspaceId, 'running');
     this.save(task);
+    const generation = this.invalidate(task.id);
 
     void (async () => {
       try {
@@ -281,7 +305,7 @@ export class TaskService {
           env: token ? { GITHUB_TOKEN: token, GH_TOKEN: token } : { GITHUB_TOKEN: '', GH_TOKEN: '' },
         });
         const current = this.store.task(task.id);
-        if (!current || current.status !== 'running' || current.reviewStep !== step) {
+        if (!current || current.status !== 'running' || current.reviewStep !== step || this.generations.get(task.id) !== generation) {
           this.stopping.add(agent.id);
           await this.agents.kill(agent.id).catch(() => undefined);
           return;
@@ -300,13 +324,16 @@ export class TaskService {
   }
 
   /** A review agent is done: read its verdict, continue with the next reviewer, or publish. */
-  private async finishReview(task: Task): Promise<void> {
-    const review = this.reviewConfig(task);
-    const step = task.reviewStep ?? 0;
-    const agentId = task.agentId ?? '';
-    const raw = task.sandboxId
-      ? await this.sandboxes.sh(task.sandboxId, 'cat "$FILE" 2>/dev/null || true', { FILE: this.reviewFile(task, step) }).catch(() => '')
+  private async finishReview(snapshot: Task): Promise<void> {
+    const review = this.reviewConfig(snapshot);
+    const step = snapshot.reviewStep ?? 0;
+    const agentId = snapshot.agentId ?? '';
+    const raw = snapshot.sandboxId
+      ? await this.sandboxes.sh(snapshot.sandboxId, 'cat "$FILE" 2>/dev/null || true', { FILE: this.reviewFile(snapshot, step) }).catch(() => '')
       : '';
+    // Stopped, rejected or deleted while the verdict was read: do not write over that (a deleted task would come back).
+    const task = this.store.task(snapshot.id);
+    if (!task || task.status !== 'running' || task.reviewStep !== step) return;
     const result = parseVerdict(raw, agentId, review?.agentKinds[step] ?? '');
     const { pullRequest: _pr, ...stored } = result;
     task.reviews = [...(task.reviews ?? []).filter((r) => r.agentId !== agentId), stored];
@@ -333,6 +360,7 @@ export class TaskService {
     task.reviewStep = undefined;
     try {
       const published = await this.publishReviewed(task, result.pullRequest);
+      if (this.store.task(task.id) !== task || task.status !== 'running') return;
       task.status = 'done';
       task.attention = false;
       setNote(task, published.key, published.params);
@@ -341,6 +369,7 @@ export class TaskService {
       this.notifier.notify('task.done', 'notify.taskDone', { title: task.title }, `/tasks?task=${task.id}`);
       void this.schedule();
     } catch (err) {
+      if (this.store.task(task.id) !== task || task.status !== 'running') return;
       const stages = this.stagesOrFail(task);
       if (!stages) return;
       task.stage = stages.length - 1;
@@ -449,7 +478,7 @@ export class TaskService {
 
   stop(taskId: string): Task {
     const task = this.record(taskId);
-    if (task.status === 'running') this.stopAgent(task);
+    this.stopAgent(task);
     task.reviewStep = undefined;
     task.status = 'backlog';
     task.stage = 0;
@@ -483,7 +512,7 @@ export class TaskService {
 
   /** Workspace deletion: stop all agents of its tasks (the store removes the tasks). */
   stopWorkspace(workspaceId: string): void {
-    for (const task of this.records(workspaceId)) if (task.status === 'running') this.stopAgent(task);
+    for (const task of this.records(workspaceId)) this.stopAgent(task);
   }
 
   // ── engine ─────────────────────────────────────────────────────────────────
@@ -535,6 +564,10 @@ export class TaskService {
     const task = this.store.tasks().find((candidate) => candidate.agentId === agent.id && candidate.status === 'failed');
     const run = task?.runs.at(-1);
     if (!task || run?.agentId !== agent.id || run.outcome !== 'failed') return undefined;
+    // Running again counts against the workspace's limit like any other start; at the limit the task stays failed.
+    const workspace = this.store.workspace(task.workspaceId);
+    const running = this.store.tasks().filter((other) => other.workspaceId === task.workspaceId && other.status === 'running').length;
+    if (workspace?.autoRun && running >= workspace.maxParallel) return undefined;
     run.outcome = 'running';
     run.finishedAt = undefined;
     task.status = 'running';
@@ -653,10 +686,18 @@ export class TaskService {
     task.order = this.nextOrder(task.workspaceId, 'running');
     this.save(task);
 
-    void (async () => {
+    // A stop (or another start) while this one is in progress makes it outdated: after every await it checks that it is
+    // still the latest. A start that follows a stop waits for the earlier one, so they share one sandbox instead of two.
+    const generation = this.invalidate(task.id);
+    const outdated = () => this.generations.get(task.id) !== generation;
+    const earlier = this.starting.get(task.id);
+    const run = (async () => {
+      await earlier;
+      if (outdated()) return;
       try {
         const previousAgentId = task.runs.at(-1)?.agentId;
         const sandboxId = await this.ensureSandbox(task);
+        if (outdated()) return;
         let prompt = await this.renderPrompt(stage, task, sandboxId, previousAgentId, feedback);
         let env: Record<string, string> | undefined;
         if (task.scheduleId && task.stage === this.stages(task).length - 1) {
@@ -664,6 +705,7 @@ export class TaskService {
           // as a command, so they only get the path – a command can write the report itself.
           const file = this.reportFile({ ...task, sandboxId });
           await this.sandboxes.sh(sandboxId, FRESH_RESULT_FILE_SCRIPT, { FILE: file, WORKDIR: this.store.sandbox(sandboxId)?.workdir ?? '/workspace' });
+          if (outdated()) return;
           env = { COCOON_REPORT_FILE: file };
           if (!this.shellLike(stage.agentKind)) prompt += `\n${reportInstructions(file)}`;
         }
@@ -676,8 +718,8 @@ export class TaskService {
           env,
         });
         const current = this.store.task(task.id);
-        if (!current || current.status !== 'running') {
-          // Stopped or deleted while starting.
+        if (!current || current.status !== 'running' || outdated()) {
+          // Stopped, deleted or started again while starting.
           this.stopping.add(agent.id);
           await this.agents.kill(agent.id).catch(() => undefined);
           return;
@@ -694,9 +736,13 @@ export class TaskService {
         this.save(current);
       } catch (err) {
         const current = this.store.task(task.id);
-        if (current?.status === 'running') this.fail(current, 'note.failed', { error: (err as Error).message });
+        if (current?.status === 'running' && !outdated()) this.fail(current, 'note.failed', { error: (err as Error).message });
       }
     })();
+    this.starting.set(task.id, run);
+    void run.finally(() => {
+      if (this.starting.get(task.id) === run) this.starting.delete(task.id);
+    });
   }
 
   /** Sandbox for the task: its own, the workspace's shared one, or a fresh one (repo/network from the workspace). */
@@ -865,9 +911,21 @@ export class TaskService {
         throw new CocoonError('bad_request', t('error.unknownDependency', { id }));
       }
     }
+    // A cycle (A waits for B, B waits for A, …) would keep all its tasks queued forever.
+    if (params.taskId) {
+      const seen = new Set<string>();
+      const pending = [...(params.dependsOn ?? [])];
+      for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
+        if (id === params.taskId) throw new CocoonError('bad_request', t('error.taskDependencyCycle'));
+        if (seen.has(id)) continue;
+        seen.add(id);
+        pending.push(...(this.store.task(id)?.dependsOn ?? []));
+      }
+    }
   }
 
   private stopAgent(task: Task): void {
+    this.invalidate(task.id);
     const run = task.runs.at(-1);
     if (run?.outcome === 'running') {
       run.outcome = 'stopped';
@@ -878,6 +936,13 @@ export class TaskService {
       this.stopping.add(agent.id);
       void this.agents.kill(agent.id).catch((err) => this.log(`stopping agent ${agent.id} failed`, err));
     }
+  }
+
+  /** Outdates the background starts of the task that are still in progress; returns the new generation. */
+  private invalidate(taskId: string): number {
+    const next = (this.generations.get(taskId) ?? 0) + 1;
+    this.generations.set(taskId, next);
+    return next;
   }
 
   /** The task is finished and confirmed: no agent of any of its stages keeps running. */

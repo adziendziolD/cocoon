@@ -195,6 +195,8 @@ export class UpdateService {
   private last?: UpdateStatus;
   private checking?: Promise<UpdateStatus>;
   private running = false;
+  /** `apply` is choosing what to update (see there). */
+  private choosing = false;
   private restartRequired = false;
   private restarting = false;
   private notified = '';
@@ -249,8 +251,15 @@ export class UpdateService {
 
   /** Starts updating the given targets (default: everything outdated) in the background. */
   async apply(targets?: UpdateTarget[]): Promise<UpdateTarget[]> {
-    if (this.running) throw new CocoonError('conflict', t('error.updateRunning'));
-    const chosen = targets?.length ? targets : (await this.status()).available;
+    if (this.running || this.choosing) throw new CocoonError('conflict', t('error.updateRunning'));
+    // Choosing can take a while (the first status runs a full check): a second call must not slip in meanwhile.
+    this.choosing = true;
+    let chosen: UpdateTarget[];
+    try {
+      chosen = targets?.length ? targets : (await this.status()).available;
+    } finally {
+      this.choosing = false;
+    }
     if (!chosen.length) return [];
     this.running = true;
     this.publish();

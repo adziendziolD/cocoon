@@ -154,6 +154,11 @@ function wallClock(instant: number, timeZone: string | undefined): number {
 function toInstant(wall: number, timeZone: string | undefined): number {
   let instant = wall - (wallClock(wall, timeZone) - wall);
   instant = wall - (wallClock(instant, timeZone) - instant);
+  // The fixed point above lands on the second occurrence when the clock was set back: look for an earlier one
+  // (the clock jumps back by an hour, rarely by half an hour).
+  for (const shift of [3_600_000, 1_800_000]) {
+    if (wallClock(instant - shift, timeZone) === wall) return instant - shift;
+  }
   return instant;
 }
 

@@ -55,6 +55,14 @@ describe('nextCronRun', () => {
     expect(runs.map((d) => d.toISOString().slice(0, 10))).toEqual(['2026-10-25', '2026-10-26']);
   });
 
+  it('runs sub-hourly schedules in the first repeated hour when the clock is set back', () => {
+    // Berlin 2026-10-25: 03:00 CEST → 02:00 CET. The first 02:00–02:59 is 00:00Z–00:59Z, the repeated one 01:00Z–01:59Z.
+    const runs = nextCronRuns('*/15 * * * *', new Date('2026-10-24T23:30:00Z'), 6, 'Europe/Berlin').map((d) => d.toISOString());
+    expect(runs).toEqual(['2026-10-24T23:45:00.000Z', '2026-10-25T00:00:00.000Z', '2026-10-25T00:15:00.000Z', '2026-10-25T00:30:00.000Z', '2026-10-25T00:45:00.000Z', '2026-10-25T02:00:00.000Z']);
+    // The fixed-time job runs once, at the first 02:30.
+    expect(iso(nextCronRun('30 2 * * *', new Date('2026-10-24T12:00:00Z'), 'Europe/Berlin'))).toBe('2026-10-25T00:30:00.000Z');
+  });
+
   it('matches day of month OR day of week when both are restricted', () => {
     // 2026-11-01 is a Sunday; the 13th is a Friday.
     const runs = nextCronRuns('0 12 13 * 5', new Date('2026-11-01T00:00:00Z'), 3, 'UTC');

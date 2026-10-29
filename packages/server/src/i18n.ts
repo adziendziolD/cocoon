@@ -223,6 +223,9 @@ export const messages = {
   'provider.missingKey': { de: 'Kein API-Key hinterlegt ({secret})', en: 'No API key stored ({secret})' },
 
   // tasks & workspaces
+  'error.taskBusy': { de: 'Die Aufgabe „{title}“ wird gerade abgeschlossen', en: 'Task "{title}" is being finished right now' },
+  'error.taskDependencyCycle': { de: 'Die Abhängigkeiten würden einen Kreis bilden: die Aufgaben würden gegenseitig aufeinander warten', en: 'These dependencies would form a cycle: the tasks would wait for each other forever' },
+  'error.cronNeverFires': { de: 'Der Zeitplan „{cron}“ löst nie aus (zum Beispiel 31. Februar)', en: 'The schedule "{cron}" never fires (for example February 31)' },
   'error.taskRunning': { de: 'Die Aufgabe „{title}“ läuft bereits', en: 'Task "{title}" is already running' },
   'error.taskNotInReview': { de: 'Die Aufgabe „{title}“ wartet gerade nicht auf ein Review', en: 'Task "{title}" is not waiting for a review' },
   'error.taskNotFailed': { de: 'Die Aufgabe „{title}“ ist nicht fehlgeschlagen', en: 'Task "{title}" has not failed' },
