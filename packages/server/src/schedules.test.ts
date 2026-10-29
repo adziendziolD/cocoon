@@ -123,6 +123,33 @@ describe('ScheduleService', () => {
     expect(forced.schedule.nextRunAt).toBe('2026-10-19T03:00:00.000Z');
   });
 
+  it('treats a failed run whose agent is still alive as open (it can be revived)', async () => {
+    const { service, ws, store, setNow, setStatus } = setup();
+    const s = service.create({ workspaceId: ws.id, ...daily() });
+    setNow('2026-10-17T03:00:00Z');
+    await service.tick();
+    const first = store.tasks()[0]!;
+    store.putAgent({ id: 'ag_1', sandboxId: 'sb_1', kind: 'shell', status: 'working' } as Agent);
+    store.putTask({ ...first, agentId: 'ag_1', status: 'failed' });
+
+    setNow('2026-10-18T03:00:00Z');
+    await service.tick();
+    expect(store.tasks()).toHaveLength(1);
+    expect(service.get(s.id)).toMatchObject({ lastResult: 'skipped' });
+
+    // Once the agent is gone, the failed run no longer blocks the next one.
+    store.putAgent({ id: 'ag_1', sandboxId: 'sb_1', kind: 'shell', status: 'exited' } as Agent);
+    setStatus(first.id, 'failed');
+    setNow('2026-10-19T03:00:00Z');
+    await service.tick();
+    expect(store.tasks()).toHaveLength(2);
+  });
+
+  it('rejects expressions that never fire', () => {
+    const { service, ws } = setup();
+    expect(() => service.create({ workspaceId: ws.id, ...daily({ cron: '0 0 31 2 *' }) })).toThrow(/never fires/);
+  });
+
   it('starts another run with overlap "always"', async () => {
     const { service, ws, store } = setup();
     const s = service.create({ workspaceId: ws.id, ...daily({ overlap: 'always' }) });

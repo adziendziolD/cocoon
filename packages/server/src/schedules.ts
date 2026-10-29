@@ -154,7 +154,7 @@ export class ScheduleService {
       nextRunAt: manual ? schedule.nextRunAt : this.computeNext(schedule, now),
     };
     let task: Task | undefined;
-    const open = this.runs(schedule.id).find((x) => OPEN_STATUSES.includes(x.status));
+    const open = this.runs(schedule.id).find((x) => this.isOpen(x));
     if (open && schedule.overlap === 'skip' && !force) {
       next.lastResult = 'skipped';
       next.lastNote = t('schedule.previousOpen', { handle: open.handle ?? open.title });
@@ -210,12 +210,19 @@ export class ScheduleService {
   /** Keeps the newest `keepRuns` finished runs; older ones are deleted with the sandbox created for them. */
   private async prune(schedule: Schedule): Promise<void> {
     const finished = this.runs(schedule.id)
-      .filter((x) => x.status === 'done' || x.status === 'failed')
+      .filter((x) => (x.status === 'done' || x.status === 'failed') && !this.isOpen(x))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     for (const old of finished.slice(schedule.keepRuns)) await this.tasks.delete(old.id, { removeSandbox: true });
   }
 
   // ── helpers ────────────────────────────────────────────────────────────────
+
+  /** Queued, running or in review – or failed with an agent that is still alive (it can be revived). */
+  private isOpen(task: Task): boolean {
+    if (OPEN_STATUSES.includes(task.status)) return true;
+    const agent = task.status === 'failed' && task.agentId ? this.store.agent(task.agentId) : undefined;
+    return !!agent && agent.status !== 'exited';
+  }
 
   private runs(scheduleId: string): Task[] {
     return this.store.tasks().filter((x) => x.scheduleId === scheduleId);
@@ -230,6 +237,7 @@ export class ScheduleService {
     const error = cronError(schedule.cron);
     if (error) throw new CocoonError('bad_request', t('error.invalidCron', { cron: schedule.cron, error }));
     if (schedule.timezone && !isValidTimeZone(schedule.timezone)) throw new CocoonError('bad_request', t('error.invalidTimezone', { timezone: schedule.timezone }));
+    if (!nextCronRun(schedule.cron, this.now(), schedule.timezone || serverTimeZone())) throw new CocoonError('bad_request', t('error.cronNeverFires', { cron: schedule.cron }));
     const { agents, workflows } = this.settings.get();
     if (schedule.workflowId && !workflows[schedule.workflowId]) throw new CocoonError('bad_request', t('error.unknownWorkflow', { id: schedule.workflowId }));
     if (!schedule.workflowId && schedule.agentKind && !agents[schedule.agentKind]) {

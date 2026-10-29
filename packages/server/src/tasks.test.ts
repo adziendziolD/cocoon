@@ -29,24 +29,42 @@ function engine() {
   const workspaces = new WorkspaceService(store, bus, activity);
   const ws = workspaces.create({ name: 'Shop' });
   let agentNo = 0;
+  let sandboxNo = 0;
+  const killed: string[] = [];
+  // Tests can hold back spawning an agent and reading a result file to provoke the races of slow starts.
+  let spawnGate: Promise<void> = Promise.resolve();
+  let shGate: Promise<void> = Promise.resolve();
+  const hold = (which: 'spawn' | 'sh') => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    if (which === 'spawn') spawnGate = gate;
+    else shGate = gate;
+    return release;
+  };
   const sandboxes = {
     create: async (_p: unknown, opts: { taskId?: string }) => {
-      const record = { id: 'sb_1', name: 'x', status: 'running', workdir: '/workspace', taskId: opts.taskId, workspaceId: ws.id, createdAt: 'x', proxyToken: 't' } as unknown as SandboxRecord;
+      const record = { id: `sb_${++sandboxNo}`, name: 'x', status: 'running', workdir: '/workspace', taskId: opts.taskId, workspaceId: ws.id, createdAt: 'x', proxyToken: 't' } as unknown as SandboxRecord;
       store.putSandbox(record);
       return record;
     },
     start: async () => undefined,
     delete: async (id: string) => store.deleteSandbox(id),
-    sh: async () => '',
+    sh: async () => {
+      await shGate;
+      return '';
+    },
   } as unknown as SandboxManager;
   const files = { checkoutBranch: async () => undefined, diff: async () => ({ files: [] }) } as unknown as FilesService;
   const agents = {
     spawn: async (p: { sandboxId: string; kind: string }) => {
+      await spawnGate;
       const agent = { id: `ag_${++agentNo}`, sandboxId: p.sandboxId, kind: p.kind, status: 'working' } as Agent;
       store.putAgent(agent);
       return agent;
     },
-    kill: async () => undefined,
+    kill: async (id: string) => {
+      killed.push(id);
+    },
     read: async () => '',
   } as unknown as AgentManager;
   const notifier = { notify: () => undefined } as unknown as Notifier;
@@ -57,7 +75,7 @@ function engine() {
     bus.publish({ type: 'agent.updated', agent });
   };
   const status = (taskId: string) => store.task(taskId)?.status;
-  return { store, tasks, settings, ws, report, status };
+  return { store, tasks, settings, workspaces, ws, report, status, killed, hold };
 }
 
 /** Starts a task and waits until its agent is spawned. */
@@ -186,5 +204,90 @@ describe('TaskService: removed workflows', () => {
     e.settings.addGuard((next) => e.tasks.assertWorkflowsUnused(next.workflows));
     expect(() => e.settings.update({ workflows: {} })).toThrow(/build/);
     expect(e.settings.get().workflows).toHaveProperty('build');
+  });
+});
+
+describe('TaskService: races', () => {
+  it('does not start a second agent or sandbox when a task is stopped and started while it is still starting', async () => {
+    const e = engine();
+    const release = e.hold('spawn');
+    const task = e.tasks.create({ workspaceId: e.ws.id, title: 'Add dark mode' });
+    e.tasks.start(task.id);
+    await vi.waitFor(() => expect(e.store.sandboxes()).toHaveLength(1));
+    e.tasks.stop(task.id);
+    e.tasks.start(task.id);
+    release();
+
+    await vi.waitFor(() => expect(e.store.task(task.id)?.agentId).toBeDefined());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(e.store.sandboxes()).toHaveLength(1);
+    expect(e.store.task(task.id)).toMatchObject({ status: 'running', agentId: 'ag_2' });
+    expect(e.store.task(task.id)?.runs).toHaveLength(1);
+    // The agent of the outdated start was stopped instead of running untracked.
+    expect(e.killed).toEqual(['ag_1']);
+  });
+
+  it('stops the agent of a task in review when it is stopped, deleted or started again', async () => {
+    const stopped = engine();
+    const a = await running(stopped);
+    stopped.report(a.agentId!, 'done');
+    expect(stopped.status(a.id)).toBe('review');
+    stopped.tasks.stop(a.id);
+    expect(stopped.killed).toEqual([a.agentId]);
+
+    const deleted = engine();
+    const b = await running(deleted);
+    deleted.report(b.agentId!, 'done');
+    await deleted.tasks.delete(b.id);
+    expect(deleted.killed).toEqual([b.agentId]);
+
+    const restarted = engine();
+    const c = await running(restarted);
+    restarted.report(c.agentId!, 'done');
+    restarted.tasks.start(c.id);
+    expect(restarted.killed).toEqual([c.agentId]);
+  });
+
+  it('publishes only once when a task is approved twice at the same time', async () => {
+    const e = engine();
+    const task = await running(e);
+    e.report(task.agentId!, 'done');
+    const first = e.tasks.approve(task.id);
+    await expect(e.tasks.approve(task.id)).rejects.toThrow(/being finished/);
+    await first;
+    expect(e.status(task.id)).toBe('done');
+    // Afterwards the usual "not in review" applies.
+    await expect(e.tasks.approve(task.id)).rejects.toThrow(/review/);
+  });
+
+  it('does not bring back a task that was deleted while its review result was read', async () => {
+    const e = engine();
+    e.workspaces.update({ workspaceId: e.ws.id, review: { enabled: true, agentKinds: ['shell'], agentPushes: false } });
+    const task = await running(e);
+    e.report(task.agentId!, 'done');
+    await e.tasks.approve(task.id);
+    await vi.waitFor(() => expect(e.store.task(task.id)).toMatchObject({ status: 'running', reviewStep: 0 }));
+    await vi.waitFor(() => expect(e.store.task(task.id)?.runs).toHaveLength(2));
+
+    const release = e.hold('sh');
+    e.report(e.store.task(task.id)!.agentId!, 'done');
+    await e.tasks.delete(task.id);
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(e.store.task(task.id)).toBeUndefined();
+  });
+});
+
+describe('TaskService: dependencies', () => {
+  it('rejects dependency cycles', () => {
+    const e = engine();
+    const a = e.tasks.create({ workspaceId: e.ws.id, title: 'A' });
+    const b = e.tasks.create({ workspaceId: e.ws.id, title: 'B', dependsOn: [a.id] });
+    const c = e.tasks.create({ workspaceId: e.ws.id, title: 'C', dependsOn: [b.id] });
+    expect(() => e.tasks.update({ taskId: a.id, dependsOn: [b.id] })).toThrow(/cycle/);
+    expect(() => e.tasks.update({ taskId: a.id, dependsOn: [c.id] })).toThrow(/cycle/);
+    expect(e.store.task(a.id)?.dependsOn).toEqual([]);
+    // Other shapes stay allowed: diamonds and chains.
+    expect(() => e.tasks.update({ taskId: c.id, dependsOn: [a.id, b.id] })).not.toThrow();
   });
 });
