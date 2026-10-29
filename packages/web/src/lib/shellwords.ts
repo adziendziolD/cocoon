@@ -8,7 +8,8 @@ export function splitCommand(input: string): string[] {
     const ch = input[i]!;
     if (quote) {
       if (ch === quote) quote = null;
-      else if (ch === '\\' && quote === '"' && i + 1 < input.length) cur += input[++i];
+      // In double quotes a backslash only escapes $ ` " \ and newline (POSIX); before anything else it stays.
+      else if (ch === '\\' && quote === '"' && i + 1 < input.length && '$`"\\\n'.includes(input[i + 1]!)) cur += input[++i];
       else cur += ch;
       continue;
     }

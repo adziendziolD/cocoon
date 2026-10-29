@@ -516,6 +516,8 @@ ports
 
 // ── updates ──────────────────────────────────────────────────────────────────
 const UPDATE_TARGETS: UpdateTarget[] = ['cocoon', 'tools', 'images'];
+/** `update apply --wait` gives up after this long (the server may never come back after its restart). */
+const UPDATE_WAIT_MS = 15 * 60_000;
 const updateTable = (s: UpdateStatus) => {
   const c = s.cocoon;
   const cocoonNote = c.blocked ? `blocked: ${c.blocked}` : c.error ?? (c.behind ? `${c.behind} new commit(s)` : '');
@@ -549,7 +551,9 @@ update
     if (!o.wait) return print(started, () => console.log(`Updating ${started.targets.join(', ')} …`));
     if (!asJson()) console.log(`Updating ${started.targets.join(', ')} … (this can take a few minutes)`);
     // Poll until done; during a restart the server is briefly unreachable.
+    const deadline = Date.now() + UPDATE_WAIT_MS;
     for (;;) {
+      if (Date.now() > deadline) throw new Error(`the update did not finish within ${UPDATE_WAIT_MS / 60_000} minutes (is the server back up? check "cocoon update status")`);
       await new Promise((r) => setTimeout(r, 3000));
       const status = await c.call('update.status', {}).catch(() => undefined);
       if (status && !status.running && !status.restarting) return print(status, () => updateTable(status));
@@ -631,7 +635,10 @@ program
         client().subscribe(
           { sandboxId: o.sandbox, agentId: o.agent },
           (event) => console.log(JSON.stringify(event)),
-          () => resolve(),
+          (reason) => {
+            if (reason) console.error(reason);
+            resolve();
+          },
         );
       }),
   );

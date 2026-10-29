@@ -26,7 +26,8 @@ import { currentLanguage, t } from './i18n.ts';
 import { STARTED_AT, VERSION } from './version.ts';
 
 type Handlers = {
-  [M in MethodName]: (params: z.output<Methods[M]['params']>) => Promise<MethodResult<M>>;
+  /** `signal` aborts when the caller disconnected (long waits can stop then). */
+  [M in MethodName]: (params: z.output<Methods[M]['params']>, signal?: AbortSignal) => Promise<MethodResult<M>>;
 };
 
 export interface RpcContext {
@@ -195,7 +196,7 @@ export function createRpc(ctx: RpcContext) {
     'agent.send_input': async (p) => (await agents.sendInput(p), ok),
     'agent.send_keys': async (p) => (await agents.sendKeys(p.agentId, p.keys), ok),
     'agent.read': async (p) => ({ text: await agents.read(p.agentId, p.lines) }),
-    'agent.wait': (p) => agents.wait(p),
+    'agent.wait': (p, signal) => agents.wait(p, signal),
     'agent.kill': async (p) => (await agents.kill(p.agentId), ok),
     'agent.switch': (p) => agents.switchAgent(p, (previous, next) => tasks.adoptAgent(previous.id, next)),
 
@@ -258,13 +259,13 @@ export function createRpc(ctx: RpcContext) {
     'layout.save': async (p) => (store.putLayout(p.workspaceId ?? '_global', { ...p.layout, updatedAt: new Date().toISOString() }), ok),
   };
 
-  return async function call(method: string, rawParams: unknown): Promise<unknown> {
+  return async function call(method: string, rawParams: unknown, signal?: AbortSignal): Promise<unknown> {
     if (!isMethodName(method)) throw new CocoonError('not_found', t('error.unknownMethod', { method }));
     const schema: z.ZodType = methods[method].params;
     const parsed = schema.safeParse(rawParams ?? {});
     if (!parsed.success) throw new CocoonError('bad_request', t('error.invalidParams', { details: z.prettifyError(parsed.error) }), z.treeifyError(parsed.error));
-    const handler = handlers[method] as (params: unknown) => Promise<unknown>;
-    return handler(parsed.data);
+    const handler = handlers[method] as (params: unknown, signal?: AbortSignal) => Promise<unknown>;
+    return handler(parsed.data, signal);
   };
 }
 

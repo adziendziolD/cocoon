@@ -60,6 +60,21 @@ export function orderAt(column: Task[], index: number): number {
   return (before.order + after.order) / 2;
 }
 
+/** Smallest gap between two orders that still leaves room for a card (midpoints halve it with every insert). */
+const MIN_ORDER_GAP = 1e-3;
+
+/** Whether `orderAt(column, index)` still finds a value strictly between the neighbours. */
+export function hasRoomAt(column: Task[], index: number): boolean {
+  const before = column[index - 1];
+  const after = column[index];
+  return !before || !after || after.order - before.order > MIN_ORDER_GAP;
+}
+
+/** The column with evenly spaced orders (1000, 2000, …), for when repeated inserts used up the gaps. */
+export function renumbered(column: Task[]): Task[] {
+  return column.map((task, i) => ({ ...task, order: (i + 1) * 1000 }));
+}
+
 /** What dropping a task of status `from` onto column `to` does. */
 export type MoveKind = 'reorder' | 'update' | 'start' | 'stop' | 'approve' | 'markFinished' | 'forbidden';
 

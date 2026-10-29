@@ -170,15 +170,21 @@ export class AgentManager {
     return this.tmuxOrThrow(handle, tmux.capture(agentId, lines));
   }
 
-  async wait({ agentId, until, timeoutMs }: MethodParams<'agent.wait'>): Promise<MethodResult<'agent.wait'>> {
+  async wait({ agentId, until, timeoutMs }: MethodParams<'agent.wait'>, signal?: AbortSignal): Promise<MethodResult<'agent.wait'>> {
     const targets = new Set<AgentStatus>(until ?? ['done', 'blocked', 'exited']);
     const current = this.get(agentId);
     if (targets.has(current.status)) return { agent: current, timedOut: false };
 
     return new Promise((resolve) => {
-      const timer = setTimeout(() => {
+      const cleanup = () => {
+        clearTimeout(timer);
         unsubscribe();
-        // The sandbox may be gone meanwhile (the store removes its agents): report the last known state.
+        signal?.removeEventListener('abort', giveUp);
+      };
+      // Timeout, or the client went away (signal): report the last known state; nobody may be left to read it.
+      const giveUp = () => {
+        cleanup();
+        // The sandbox may be gone meanwhile (the store removes its agents).
         let agent: Agent;
         try {
           agent = this.get(agentId);
@@ -186,18 +192,20 @@ export class AgentManager {
           agent = { ...current, status: 'exited' };
         }
         resolve({ agent, timedOut: true });
-      }, timeoutMs ?? 300_000);
+      };
+      const timer = setTimeout(giveUp, timeoutMs ?? 300_000);
       const unsubscribe = this.bus.subscribe((event) => {
         const agent =
           event.type === 'agent.updated' && event.agent.id === agentId ? event.agent
           : event.type === 'sandbox.deleted' && event.sandboxId === current.sandboxId ? { ...current, status: 'exited' as const }
           : undefined;
         if (agent && targets.has(agent.status)) {
-          clearTimeout(timer);
-          unsubscribe();
+          cleanup();
           resolve({ agent, timedOut: false });
         }
       });
+      if (signal?.aborted) giveUp();
+      else signal?.addEventListener('abort', giveUp, { once: true });
     });
   }
 

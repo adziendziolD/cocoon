@@ -82,9 +82,15 @@ export class ActivityLog {
         if (msg) this.add(msg[0], msg[1], { name: sandbox.name, error: sandbox.error ?? '' }, { sandboxId: sandbox.id });
         return;
       }
+      case 'agent.removed':
+        this.lastAgentStatus.delete(event.agentId);
+        return;
       case 'sandbox.deleted':
         this.lastSandboxStatus.delete(event.sandboxId);
         this.add('info', 'activity.sandboxDeleted', { id: event.sandboxId }, { sandboxId: event.sandboxId });
+        return;
+      case 'task.deleted':
+        this.lastTaskStatus.delete(event.taskId);
         return;
       case 'task.updated': {
         const { task } = event;
