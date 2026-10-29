@@ -1,0 +1,29 @@
+version: 2
+
+# Keeps the SHA-pinned actions, the pnpm workspace and the Docker base images current.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+
+  # pnpm workspace (packages/*) – one lockfile at the root.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      dev-dependencies:
+        dependency-type: development
+      production-dependencies:
+        dependency-type: production
+
+  - package-ecosystem: docker
+    directories:
+      - /images/sandbox
+      - /images/egress-proxy
+    schedule:
+      interval: weekly
