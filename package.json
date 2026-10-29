@@ -1,7 +1,7 @@
 {
   "name": "cocoon",
   "private": true,
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "Self-hosted control plane for running coding agents in isolated sandboxes",
   "license": "MIT",
   "author": "Alexander Dziendziol-Dickopf",
