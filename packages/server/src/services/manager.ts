@@ -154,6 +154,9 @@ export class ServiceManager {
     if (params.image && !kind.images.some((i) => i.ref === params.image) && !/^[\w./:@-]+$/.test(params.image)) {
       throw new CocoonError('bad_request', t('error.invalidImage', { image: params.image }));
     }
+    // A kept data volume was initialised with the old admin password and only accepts that one.
+    const retained = params.mode === 'managed' ? this.store.retainedService(id) : undefined;
+    const adminPassword = retained?.kind === params.kind ? retained.adminPassword : randomBytes(18).toString('hex');
     const record: ServiceRecord = {
       id,
       kind: params.kind,
@@ -163,7 +166,7 @@ export class ServiceManager {
       autoStop: params.mode === 'managed' ? (params.autoStop ?? true) : undefined,
       createdAt: new Date().toISOString(),
       ...(params.mode === 'managed'
-        ? { image: params.image ?? kind.images[0]!.ref, memoryMb: params.memoryMb, adminPassword: randomBytes(18).toString('hex'), desired: 'running' as const }
+        ? { image: params.image ?? kind.images[0]!.ref, memoryMb: params.memoryMb, adminPassword, desired: 'running' as const }
         : {
             host: params.host,
             port: params.port ?? kind.port,
@@ -174,6 +177,7 @@ export class ServiceManager {
           }),
     };
     this.store.putService(record);
+    if (retained?.kind === params.kind) this.store.deleteRetainedService(id);
     this.egress.writePolicy();
     this.publish(record);
 
@@ -227,6 +231,11 @@ export class ServiceManager {
     if (record.mode === 'managed' && this.docker) {
       await ignoreStatus(404, () => this.docker!.docker.getContainer(this.containerName(serviceId)).remove({ force: true }));
       if (deleteData) await ignoreStatus(404, () => this.docker!.docker.getVolume(this.volumeName(serviceId)).remove());
+    }
+    if (record.mode === 'managed') {
+      // Keeping the data only makes sense if the password it was created with is kept as well (see add()).
+      if (deleteData || !record.adminPassword) this.store.deleteRetainedService(serviceId);
+      else this.store.putRetainedService({ id: serviceId, kind: record.kind, adminPassword: record.adminPassword, removedAt: new Date().toISOString() });
     }
     this.store.deleteService(serviceId);
     this.runtime.delete(serviceId);
@@ -358,8 +367,11 @@ export class ServiceManager {
       if (!this.store.service(serviceId)) continue;
       const db = sandbox.serviceDbs?.[serviceId];
       // Paused services are started before the agent so it finds them ready.
-      if (db && !db.error) await this.ensureRunning(serviceId).catch((err) => this.log(`service ${serviceId}: start failed`, err));
-      else await this.attach(sandboxId, serviceId).catch((err) => this.log(`services: attach ${serviceId} to ${sandboxId} failed`, err));
+      if (db && !db.error) {
+        const started = await this.ensureRunning(serviceId).then(() => true, (err) => (this.log(`service ${serviceId}: start failed`, err), false));
+        // A service that restarted by itself (Docker restart policy) is still "running" for us but lost its users.
+        if (started) await this.restoreUsers(this.store.service(serviceId)!, sandboxId);
+      } else await this.attach(sandboxId, serviceId).catch((err) => this.log(`services: attach ${serviceId} to ${sandboxId} failed`, err));
     }
     await this.writeSandboxFiles(sandboxId).catch((err) => this.log(`services: writing env into ${sandboxId} failed`, err));
     return this.envFor(this.sandboxes.record(sandboxId));
@@ -475,6 +487,7 @@ export class ServiceManager {
           // Docker may report the published ports only a moment after the start.
           if (!this.runtime.get(record.id)?.hostPorts[SERVICE_KINDS[record.kind].port]) await this.refreshContainerState(record);
           const version = await engine.test(this.adminConn(record));
+          await this.restoreUsers(record);
           this.setRuntime(record, { status: 'running', version, error: undefined });
           return;
         } catch (err) {
@@ -486,6 +499,22 @@ export class ServiceManager {
     } catch (err) {
       this.setRuntime(record, { status: 'error', error: (err as Error).message });
       throw err;
+    }
+  }
+
+  /**
+   * Services whose sandbox users do not survive a restart (Redis): creates them again for the sandboxes the service is
+   * attached to (or just one). Provisioning is idempotent; a failure is logged and retried when an agent starts.
+   */
+  private async restoreUsers(record: ServiceRecord, onlySandboxId?: string): Promise<void> {
+    const engine = ENGINES[record.kind];
+    if (!engine.volatileUsers) return;
+    for (const sandbox of this.attachedSandboxes(record.id)) {
+      const db = sandbox.serviceDbs?.[record.id];
+      if (!db || db.error || (onlySandboxId && sandbox.id !== onlySandboxId)) continue;
+      await Promise.resolve()
+        .then(() => engine.provision(this.adminConn(record), db.name, db.password))
+        .catch((err) => this.log(`service ${record.id}: restoring the user of ${sandbox.id} failed`, err));
     }
   }
 
