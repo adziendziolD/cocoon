@@ -15,17 +15,17 @@
   },
   "dependencies": {
     "@cocoon/protocol": "workspace:*",
-    "@fastify/static": "^10.1.6",
+    "@fastify/static": "^10.1.7",
     "@fastify/websocket": "^11.0.0",
-    "@lydell/node-pty": "1.2.0-beta.15",
-    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@lydell/node-pty": "1.2.0-beta.18",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "dockerode": "^5.0.1",
-    "fastify": "^5.0.0",
+    "fastify": "^5.12.7",
     "mongodb": "^7.7.0",
-    "mysql2": "^3.24.5",
+    "mysql2": "^3.24.6",
     "pg": "^8.23.1",
     "redis": "^6.3.0",
-    "zod": "^4.1.0"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/dockerode": "^4.0.2",
