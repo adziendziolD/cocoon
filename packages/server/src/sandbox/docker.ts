@@ -22,6 +22,11 @@ import {
 } from './driver.ts';
 
 export const INTERNAL_NETWORK = scoped('cocoon-internal');
+/**
+ * Podman only: the egress proxy's way out. Podman's default network has no DNS, and the DNS server of the internal
+ * network does not forward external names – the proxy needs a non-internal network with DNS to resolve upstream hosts.
+ */
+export const EGRESS_NETWORK = scoped('cocoon-egress');
 export const TOOLBOX_VOLUME = scoped('cocoon-agents');
 const MAX_OUTPUT_BYTES = 20 * 1024 * 1024;
 

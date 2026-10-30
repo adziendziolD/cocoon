@@ -5,7 +5,7 @@ import { defaultMaxOutput, type DeniedConnection, type NetworkMode } from '@coco
 import type { EventBus } from './events.ts';
 import { PROXY_IMAGE, type ImageService } from './images.ts';
 import { authHeaderFor, providerRoute, providerUrls, translatedRoute, type ProviderService } from './providers.ts';
-import { DockerDriver, ignoreStatus, INTERNAL_NETWORK, statusOf } from './sandbox/docker.ts';
+import { DockerDriver, EGRESS_NETWORK, ignoreStatus, INTERNAL_NETWORK, statusOf } from './sandbox/docker.ts';
 import type { SandboxDriver } from './sandbox/driver.ts';
 import type { SecretsService } from './secrets.ts';
 import type { SettingsService } from './settings.ts';
@@ -73,13 +73,8 @@ class ContainerProxyRunner implements ProxyRunner {
   ) {}
 
   async ensure(): Promise<void> {
-    const docker = this.driver.docker;
-    try {
-      await docker.getNetwork(INTERNAL_NETWORK).inspect();
-    } catch (err) {
-      if (statusOf(err) !== 404) throw err;
-      await docker.createNetwork({ Name: INTERNAL_NETWORK, Internal: true, Labels: { 'cocoon.managed': 'true' } });
-    }
+    await this.ensureNetwork(INTERNAL_NETWORK, true);
+    if (this.driver.kind === 'podman') await this.ensureNetwork(EGRESS_NETWORK, false);
     if (!(await this.images.exists(PROXY_IMAGE))) {
       const ok = await this.images.build('proxy').done;
       if (!ok) throw new Error('egress proxy image build failed');
@@ -110,10 +105,21 @@ class ContainerProxyRunner implements ProxyRunner {
     };
   }
 
+  private async ensureNetwork(name: string, internal: boolean): Promise<void> {
+    const docker = this.driver.docker;
+    try {
+      await docker.getNetwork(name).inspect();
+    } catch (err) {
+      if (statusOf(err) !== 404) throw err;
+      await docker.createNetwork({ Name: name, Internal: internal, Labels: { 'cocoon.managed': 'true' } });
+    }
+  }
+
   private async refreshBridgeIp(): Promise<void> {
     try {
       const networks = (await this.driver.docker.getContainer(PROXY_CONTAINER).inspect()).NetworkSettings.Networks;
-      this.bridgeIp = Object.entries(networks).find(([name]) => name !== INTERNAL_NETWORK)?.[1]?.IPAddress || undefined;
+      this.bridgeIp =
+        Object.entries(networks).find(([name]) => name !== INTERNAL_NETWORK && name !== EGRESS_NETWORK)?.[1]?.IPAddress || undefined;
       this.internalIp = networks[INTERNAL_NETWORK]?.IPAddress || undefined;
     } catch {
       this.bridgeIp = undefined;
@@ -132,15 +138,20 @@ class ContainerProxyRunner implements ProxyRunner {
   private async start(): Promise<void> {
     const docker = this.driver.docker;
     const container = docker.getContainer(PROXY_CONTAINER);
+    const podman = this.driver.kind === 'podman';
     try {
       const info = await container.inspect();
-      if (!info.State.Running) await container.start();
-      await this.refreshBridgeIp();
-      return;
+      // Proxies created before the egress network existed cannot resolve upstream hosts under Podman.
+      if (podman && !info.NetworkSettings.Networks[EGRESS_NETWORK]) {
+        await container.remove({ force: true });
+      } else {
+        if (!info.State.Running) await container.start();
+        await this.refreshBridgeIp();
+        return;
+      }
     } catch (err) {
       if (statusOf(err) !== 404) throw err;
     }
-    const podman = this.driver.kind === 'podman';
     const created = await docker.createContainer({
       name: PROXY_CONTAINER,
       Image: PROXY_IMAGE,
@@ -149,7 +160,8 @@ class ContainerProxyRunner implements ProxyRunner {
       User: podman ? '0:0' : `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`,
       Labels: { 'cocoon.managed': 'true' },
       HostConfig: {
-        NetworkMode: 'bridge',
+        // Podman: the egress network comes first, so its DNS server (which forwards external names) is used.
+        NetworkMode: podman ? EGRESS_NETWORK : 'bridge',
         Binds: [`${this.dir}:/policy`],
         // Providers on the server itself (e.g. Ollama on localhost) are reached via the host alias.
         ExtraHosts: podman ? undefined : ['host.docker.internal:host-gateway'],
@@ -160,6 +172,8 @@ class ContainerProxyRunner implements ProxyRunner {
         RestartPolicy: { Name: 'unless-stopped' },
       },
     });
+    // Sandboxes with full internet sit on the default bridge and reach the credential proxy there.
+    if (podman) await docker.getNetwork('bridge').connect({ Container: created.id });
     await docker.getNetwork(INTERNAL_NETWORK).connect({ Container: created.id, EndpointConfig: { Aliases: [PROXY_HOST] } });
     await created.start();
     await this.refreshBridgeIp();
