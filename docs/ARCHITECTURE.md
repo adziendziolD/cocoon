@@ -167,7 +167,7 @@ Der Server spricht Sandboxes nur über `SandboxDriver` an. Implementiert sind:
 | Driver | Umsetzung | Fähigkeiten |
 |---|---|---|
 | `docker` | Docker Engine API | Images, Ressourcenlimits, erzwungener Egress, Runtimes (gVisor, Kata) |
-| `podman` | Podman über die Docker-kompatible API (rootless, ohne Daemon); Host-Alias `host.containers.internal`, Proxy-Container als Container-root (= Benutzer) | wie Docker, zusätzlich z. B. `krun` |
+| `podman` | Podman über die Docker-kompatible API (rootless, ohne Daemon); Host-Alias `host.containers.internal`, Proxy-Container als Container-root (= Benutzer); der Proxy hängt zusätzlich im Netz `cocoon-egress` (nicht intern, mit DNS), weil Podmans DNS im internen Netz keine externen Namen auflöst, Sandboxes hängen dort nie | wie Docker, zusätzlich z. B. `krun` |
 | `bwrap` | bubblewrap: Sandbox = Ordner unter `.data/sandboxes/<id>`, Host-System schreibgeschützt, eigene User/PID/IPC/UTS-(Netz-)Namespaces, keine Capabilities, tmux-„Keeper“ pro Sandbox, Egress-Proxy als lokaler Prozess, PTY über node-pty, Optionen per `--args FD` (nicht in `ps` sichtbar) | keine Images, keine Ressourcenlimits, Egress nur konfiguriert (nicht erzwungen) |
 
 Auswahl über `COCOON_DRIVER` (`auto`: Podman-Socket → Docker → bubblewrap). `system.info` liefert `driverKind` und `capabilities`,

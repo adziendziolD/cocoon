@@ -165,7 +165,8 @@ Force one with `COCOON_DRIVER=docker|podman|bwrap`. The UI shows the active back
 
 - **Podman:** enable the API socket – rootless `systemctl --user enable --now podman.socket` (socket under
   `$XDG_RUNTIME_DIR/podman/podman.sock`) or rootful `systemctl enable --now podman.socket`. On macOS, `podman machine` works too.
-  Containers reach the host as `host.containers.internal`.
+  Containers reach the host as `host.containers.internal`. The egress proxy also joins the network `cocoon-egress`
+  (not internal, DNS enabled), because Podman's DNS on an internal network does not resolve external names; sandboxes are never attached to it.
 - **bubblewrap:** `apt install bubblewrap tmux git` (or `dnf install …`); unprivileged user namespaces must be allowed (default on
   most distributions). Each sandbox is a directory under `.data/sandboxes/<id>` (workspace, home, tmp); the host system is mounted
   read-only, a long-running *keeper* (tmux server) per sandbox keeps agents alive across cocoond restarts, and the egress proxy runs
