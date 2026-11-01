@@ -89,7 +89,8 @@ const adminToken = tokens.ensureAdminToken();
 console.log(`\n  ${t('console.running')}: ${baseUrl}`);
 console.log(`  ${t('console.driver')}: ${driver.name}`);
 if (adminToken) {
-  console.log(`  ${t('console.login')}: ${baseUrl}/?token=${adminToken}`);
+  // Only on a terminal: with output redirected to a file or a service log the token would be stored there.
+  if (process.stdout.isTTY) console.log(`  ${t('console.login')}: ${baseUrl}/?token=${adminToken}`);
   console.log(`  (${t('console.tokenFile', { file: `${config.dataDir}/admin-token.txt` })})\n`);
 } else console.log(`  ${t('console.envToken')}\n`);
 
