@@ -12,15 +12,18 @@ interface Spawned {
   /** bwrap options handed over on fd 3. */
   options: string[];
   stdin: Buffer[];
+  child: any;
 }
 const spawned: Spawned[] = [];
+/** How the next spawned commands end: exit code and what they print on stderr/stdout. */
+let outcome: (entry: Spawned) => { code?: number; stderr?: string; stdout?: string } = () => ({});
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return {
     ...actual,
     spawn: (cmd: string, argv: string[]) => {
-      const entry: Spawned = { cmd, argv, options: [], stdin: [] };
+      const entry: Spawned = { cmd, argv, options: [], stdin: [], child: undefined };
       spawned.push(entry);
       const fd3 = new PassThrough();
       const chunks: Buffer[] = [];
@@ -33,9 +36,16 @@ vi.mock('node:child_process', async (importOriginal) => {
         stdout: new PassThrough(),
         stderr: new PassThrough(),
         stdio: [stdin, null, null, fd3],
+        kill: vi.fn(),
       });
+      entry.child = child;
       // Finish like a successful command once the options and the input have been handed over.
-      setImmediate(() => child.emit('close', 0));
+      setImmediate(() => {
+        const { code = 0, stderr, stdout } = outcome(entry);
+        if (stdout) child.stdout.write(stdout);
+        if (stderr) child.stderr.write(stderr);
+        child.emit('close', code);
+      });
       return child;
     },
   };
@@ -47,6 +57,7 @@ let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'cocoon-bwrap-'));
   spawned.length = 0;
+  outcome = () => ({});
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -93,6 +104,48 @@ describe('bwrap network modes (egress is not enforced, the sandbox would share t
     await expect(d.start('sb_abc123')).rejects.toThrow(/COCOON_BWRAP_HOST_NETWORK/);
     await expect(d.exec('sb_abc123', ['true'])).rejects.toThrow(/COCOON_BWRAP_HOST_NETWORK/);
     expect(spawned).toEqual([]);
+  });
+});
+
+describe('bwrap file transfers need no host network', () => {
+  it('upload and download work for sandboxes with network without the opt-in, and run without a network', async () => {
+    await new BwrapDriver(dir, { allowHostNetwork: true }).create(spec('egress'));
+    const d = new BwrapDriver(dir); // the opt-in is gone (or was never set on this server)
+    await d.putArchive('sb_abc123', '/workspace', Buffer.from('tar-bytes'));
+    const download = await d.getArchive('sb_abc123', 'src');
+    await new Promise((r) => download.on('end', r).resume());
+    expect(spawned).toHaveLength(3); // tar -x, test -e, tar -c
+    for (const call of spawned) expect(call.options).toContain('--unshare-net');
+    // Running commands still needs the opt-in.
+    await expect(d.exec('sb_abc123', ['true'])).rejects.toThrow(/COCOON_BWRAP_HOST_NETWORK/);
+  });
+});
+
+describe('bwrap download stream', () => {
+  it('reads stderr so that a chatty tar cannot block on a full pipe', async () => {
+    const d = await driver();
+    await d.getArchive('sb_abc123', 'src');
+    const tar = spawned.find((s) => s.argv.includes('tar'))!;
+    expect(tar.child.stderr.readableFlowing).toBe(true);
+  });
+
+  it('delivers the archive and ends normally when tar succeeds', async () => {
+    outcome = (e) => (e.argv.includes('tar') ? { stdout: 'archive-bytes' } : {});
+    const d = await driver();
+    const stream = await d.getArchive('sb_abc123', 'src');
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(chunk as Buffer);
+    expect(Buffer.concat(chunks).toString()).toBe('archive-bytes');
+  });
+
+  it('ends with an error instead of a silently truncated archive when tar fails', async () => {
+    outcome = (e) => (e.argv.includes('tar') ? { code: 2, stdout: 'partial', stderr: 'tar: src/x: Cannot open: Permission denied' } : {});
+    const d = await driver();
+    const stream = await d.getArchive('sb_abc123', 'src');
+    const read = async () => {
+      for await (const _ of stream);
+    };
+    await expect(read()).rejects.toThrow(/tar: .*Permission denied/);
   });
 });
 

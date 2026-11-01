@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, posix } from 'node:path';
-import { Duplex, type Readable } from 'node:stream';
+import { Duplex, PassThrough, type Readable } from 'node:stream';
 import { promisify } from 'node:util';
 import type { DriverCapabilities, NetworkMode } from '@cocoon/protocol';
 import { COCOON_DIR, TMUX_CONF, TMUX_CONF_PATH } from '../agents/tmux.ts';
@@ -139,6 +139,10 @@ export class BwrapDriver implements SandboxDriver {
   }
 
   async exec(handle: string, command: string[], opts: ExecOptions = {}): Promise<ExecResult> {
+    return this.run(handle, command, opts);
+  }
+
+  private async run(handle: string, command: string[], opts: ExecOptions & { archive?: boolean } = {}): Promise<ExecResult> {
     const child = this.spawnIn(handle, command, opts);
     const stdout = collect(child.stdout!);
     const stderr = collect(child.stderr!);
@@ -195,7 +199,7 @@ export class BwrapDriver implements SandboxDriver {
    */
   async putArchive(handle: string, dir: string, tar: Buffer): Promise<void> {
     const target = this.sandboxPath(handle, dir);
-    const child = this.spawnIn(handle, ['sh', '-c', 'mkdir -p -- "$1" && exec tar -x -C "$1" --no-same-owner', 'sh', target], { stdin: true });
+    const child = this.spawnIn(handle, ['sh', '-c', 'mkdir -p -- "$1" && exec tar -x -C "$1" --no-same-owner', 'sh', target], { stdin: true, archive: true });
     const stderr = collect(child.stderr!);
     child.stdin!.on('error', () => undefined); // tar may exit before reading everything; the exit code reports it
     child.stdin!.end(tar);
@@ -206,11 +210,25 @@ export class BwrapDriver implements SandboxDriver {
     if (code !== 0) throw new Error(`tar: ${stderr().trim()}`);
   }
 
+  /**
+   * The stream ends with an error if tar fails (instead of looking like a complete, truncated archive). stderr is
+   * always read: an unread pipe would block tar once it holds more than the pipe buffer.
+   */
   async getArchive(handle: string, path: string): Promise<Readable> {
     const source = this.sandboxPath(handle, path);
-    const probe = await this.exec(handle, ['test', '-e', source], { timeoutMs: 10_000 });
+    const probe = await this.run(handle, ['test', '-e', source], { timeoutMs: 10_000, archive: true });
     if (probe.exitCode !== 0) throw new CocoonError('not_found', t('error.pathNotFound', { path }));
-    return this.spawnIn(handle, ['tar', '-c', '-C', posix.dirname(source), posix.basename(source)]).stdout!;
+    const child = this.spawnIn(handle, ['tar', '-c', '-C', posix.dirname(source), posix.basename(source)], { archive: true });
+    const stderr = collect(child.stderr!);
+    const out = new PassThrough();
+    child.stdout!.pipe(out, { end: false });
+    child.on('error', (err) => out.destroy(err));
+    child.on('close', (code) => {
+      if (code === 0) out.end();
+      else out.destroy(new Error(`tar: ${stderr().trim() || `exit code ${code}`}`));
+    });
+    out.on('close', () => child.kill('SIGKILL')); // the reader gave up: no tar left behind (no-op once it has exited)
+    return out;
   }
 
   /** Installs the host's Node.js and the agent CLIs into <dataDir>/agents (mounted read-only into sandboxes). */
@@ -283,8 +301,11 @@ export class BwrapDriver implements SandboxDriver {
     return JSON.parse(readFileSync(join(this.dir(handle), 'meta.json'), 'utf8')) as Meta;
   }
 
-  /** Runs a command in a fresh bwrap of the sandbox; stderr is piped, stdin only if asked for. */
-  private spawnIn(handle: string, command: string[], opts: ExecOptions & { stdin?: boolean } = {}) {
+  /**
+   * Runs a command in a fresh bwrap of the sandbox; stderr is piped, stdin only if asked for. `archive` marks the file
+   * transfer: it needs no network, so it runs without one (also for sandboxes that may not run with the host network).
+   */
+  private spawnIn(handle: string, command: string[], opts: ExecOptions & { stdin?: boolean; archive?: boolean } = {}) {
     const payload = argsPayload(this.args(handle, opts)); // before spawning: refuses sandboxes that may not run
     const child = spawn('bwrap', ['--args', '3', '--', ...command], { stdio: [opts.stdin ? 'pipe' : 'ignore', 'pipe', 'pipe', 'pipe'] });
     (child.stdio[3] as NodeJS.WritableStream).end(payload);
@@ -310,14 +331,16 @@ export class BwrapDriver implements SandboxDriver {
     }
   }
 
-  private args(handle: string, opts: ExecOptions & { tty?: boolean; keeper?: boolean } = {}): string[] {
+  private args(handle: string, opts: ExecOptions & { tty?: boolean; keeper?: boolean; archive?: boolean } = {}): string[] {
     const dir = this.dir(handle);
     const meta = this.meta(handle);
-    this.requireNetworkAllowed(meta.network);
+    // Only commands that may use the network need the opt-in; file transfers run in a network namespace of their own.
+    if (!opts.archive) this.requireNetworkAllowed(meta.network);
+    const noNetwork = meta.network === 'none' || opts.archive;
     const root = opts.user === 'root' || opts.user === '0' || opts.user === '0:0';
     const args = [
       '--unshare-user', '--unshare-pid', '--unshare-ipc', '--unshare-uts', '--unshare-cgroup-try',
-      ...(meta.network === 'none' ? ['--unshare-net'] : []),
+      ...(noNetwork ? ['--unshare-net'] : []),
       '--uid', root ? '0' : SANDBOX_UID, '--gid', root ? '0' : SANDBOX_UID,
       '--hostname', meta.name.slice(0, 63),
       '--cap-drop', 'ALL',
