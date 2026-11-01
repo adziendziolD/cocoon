@@ -206,16 +206,25 @@ export class SandboxManager {
     return res.stdout;
   }
 
-  /** Syncs stored state with what actually exists in the driver (after a restart). */
-  async reconcile(): Promise<void> {
+  /**
+   * Syncs stored state with what actually exists in the driver (after a restart). A sandbox the driver cannot be
+   * asked about (e.g. the Docker daemon is still starting) keeps its stored state; the others are still reconciled.
+   */
+  async reconcile(log: (msg: string, err: unknown) => void = () => undefined): Promise<void> {
     for (const record of this.store.sandboxes()) {
-      if (!record.handle) {
-        record.status = 'error';
-        record.error ??= t('error.creationInterrupted');
-      } else {
-        const state = await this.driver.state(record.handle);
-        record.status = state;
-        if (state === 'running' && record.network === 'egress') record.ip = await this.driver.address(record.handle);
+      try {
+        if (!record.handle) {
+          record.status = 'error';
+          record.error ??= t('error.creationInterrupted');
+        } else {
+          const state = await this.driver.state(record.handle);
+          const ip = state === 'running' && record.network === 'egress' ? await this.driver.address(record.handle) : record.ip;
+          record.status = state;
+          record.ip = ip;
+        }
+      } catch (err) {
+        log(`sandbox ${record.id}: reconcile failed`, err);
+        continue;
       }
       this.save(record);
     }

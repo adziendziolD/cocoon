@@ -370,7 +370,9 @@ export class ServiceManager {
       if (db && !db.error) {
         const started = await this.ensureRunning(serviceId).then(() => true, (err) => (this.log(`service ${serviceId}: start failed`, err), false));
         // A service that restarted by itself (Docker restart policy) is still "running" for us but lost its users.
-        if (started) await this.restoreUsers(this.store.service(serviceId)!, sandboxId);
+        // Starting can take minutes, so the service may have been removed meanwhile: read the record again.
+        const current = this.store.service(serviceId);
+        if (started && current) await this.restoreUsers(current, sandboxId);
       } else await this.attach(sandboxId, serviceId).catch((err) => this.log(`services: attach ${serviceId} to ${sandboxId} failed`, err));
     }
     await this.writeSandboxFiles(sandboxId).catch((err) => this.log(`services: writing env into ${sandboxId} failed`, err));
