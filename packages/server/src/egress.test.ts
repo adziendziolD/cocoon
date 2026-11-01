@@ -82,6 +82,32 @@ describe('policy for the egress proxy checks', () => {
   });
 });
 
+describe('local providers (Ollama on the CoCoon host)', () => {
+  const ollama = { kind: 'openai', baseUrl: 'http://localhost:11434/v1', label: 'Ollama', auth: 'none' };
+  const readPolicy = () => JSON.parse(readFileSync(join(dir, 'egress', 'policy.json'), 'utf8')) as { allowlist: string[]; targets: { host: string; port: number }[] };
+
+  it.each([
+    ['docker', 'host.docker.internal'],
+    ['podman', 'host.containers.internal'],
+  ] as const)('allows only the provider port on the %s host alias, not the host on 80/443', (kind, alias) => {
+    const { driver } = fakeDocker(kind);
+    proxyManager(driver, { ollama }).writePolicy();
+    const policy = readPolicy();
+    expect(policy.allowlist).not.toContain(alias);
+    expect(policy.allowlist).not.toContain('localhost');
+    expect(policy.targets).toEqual([{ host: alias, port: 11434 }]);
+  });
+
+  it('keeps the configured allowlist untouched by providers', () => {
+    const { driver } = fakeDocker('docker');
+    proxyManager(driver, { ollama, cloud: { ...ollama, baseUrl: 'https://api.example.com/v1' } }).writePolicy();
+    const policy = readPolicy();
+    expect(policy.allowlist).toEqual(expect.arrayContaining(['api.anthropic.com', 'github.com']));
+    expect(policy.allowlist).not.toContain('api.example.com');
+    expect(policy.targets).toEqual([{ host: 'host.docker.internal', port: 11434 }, { host: 'api.example.com', port: 443 }]);
+  });
+});
+
 describe('providerTargets', () => {
   it('defaults the port by scheme, lower-cases hosts and strips IPv6 brackets', () => {
     expect(providerTargets(['http://Host.Docker.Internal/v1', 'https://x.dev', 'http://[::1]:8080/v1'])).toEqual([
@@ -135,11 +161,11 @@ function fakeDocker(kind: 'docker' | 'podman', proxyNetworks?: string[]) {
   return { driver, calls };
 }
 
-function proxyManager(driver: SandboxDriver) {
+function proxyManager(driver: SandboxDriver, providers: Record<string, unknown> = {}) {
   const store = new Store(dir);
   const bus = new EventBus();
   return new EgressManager(
-    driver, store, new SettingsService(store, bus, {}), new SecretsService(store), { all: () => ({}) } as unknown as ProviderService,
+    driver, store, new SettingsService(store, bus, {}), new SecretsService(store), { all: () => providers, key: () => undefined } as unknown as ProviderService,
     { onFinished() {}, exists: async () => true } as unknown as ImageService, bus, { proxyScript: 'x', processPort: 0 }, () => undefined,
   );
 }

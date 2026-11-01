@@ -425,17 +425,16 @@ export class EgressManager {
         }
       }
     }
-    // Provider hosts are always reachable (needed when the credential proxy is off).
-    const providerHosts = Object.values(this.providers.all()).map((p) => new URL(this.runner.reachableUrl(p.baseUrl)).hostname);
-    const allowlist = [...new Set([...settings.egress.allowlist, ...providerHosts])];
-    // The proxy refuses hosts that resolve to internal addresses. Provider endpoints are configured by an administrator
-    // (e.g. Ollama on the CoCoon host), so exactly their host and port may do so.
+    // Provider endpoints are always reachable (needed when the credential proxy is off), but only on their own host and
+    // port. Adding the bare host to the allowlist would open ports 80/443 on it, and for a local provider (Ollama on the
+    // CoCoon host, reached as host.docker.internal) that means every web service of the host. The proxy also accepts
+    // internal addresses for these targets, since an administrator configured them.
     const targets = providerTargets(Object.values(this.providers.all()).map((p) => this.runner.reachableUrl(p.baseUrl)));
     const file = join(this.dir, 'policy.json');
     this.version++;
     writeFileSync(
       `${file}.tmp`,
-      JSON.stringify({ version: this.version, allowlist, allowPrivate: settings.egress.allowPrivate, targets, sandboxes, tokens, routes, relays: this.relays(), relayBind: this.runner.relayBind() }),
+      JSON.stringify({ version: this.version, allowlist: settings.egress.allowlist, allowPrivate: settings.egress.allowPrivate, targets, sandboxes, tokens, routes, relays: this.relays(), relayBind: this.runner.relayBind() }),
       { mode: 0o600 },
     );
     renameSync(`${file}.tmp`, file);

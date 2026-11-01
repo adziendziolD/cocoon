@@ -201,7 +201,9 @@ Agent-Typen (`providers`, `model`) oder einzelne Starts (`agent.spawn { provider
 Im egress-Modus zeigt die Base-URL auf den Credential-Proxy (`http://cocoon-proxy:8080/p-<id>`); der Proxy **setzt den Auth-Header
 selbst** und tauscht Platzhalter – der echte Key bleibt auf dem Server. Eine Sandbox darf eine Route erst nutzen, wenn darin ein Agent
 mit diesem Anbieter gestartet wurde (Grants pro Sandbox). `localhost` in der Base-URL wird automatisch zu `host.docker.internal`, sodass
-Dienste auf dem Server selbst (z. B. Ollama) erreichbar sind. Anbieter-Hosts werden automatisch zur Allowlist hinzugefügt.
+Dienste auf dem Server selbst (z. B. Ollama) erreichbar sind. Anbieter sind über den Egress-Proxy automatisch erreichbar, aber nur auf ihrem Host und Port (`targets` in der Policy), nicht über
+den Host auf 80/443: Ein lokaler Anbieter wie Ollama (`localhost:11434`) öffnet nur `host.docker.internal:11434`, andere Dienste
+des Servers bleiben unerreichbar. Anbieter-Hosts landen nicht in der Allowlist.
 `providers.test` prüft Erreichbarkeit, Anmeldung und liest die Modellliste – direkt vom Server, auch vor dem Speichern.
 
 ### Mehrsprachigkeit

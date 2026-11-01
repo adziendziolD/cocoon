@@ -273,7 +273,9 @@ How it is wired:
 - In `egress` mode the base URL points to the credential proxy (`http://cocoon-proxy:8080/p-<id>`), which adds the real key.
   In `open` mode the agent talks to the provider directly.
 - `localhost` in a base URL is rewritten to `host.docker.internal`, so services on the server itself (e.g. Ollama) work.
-- Provider hosts are added to the egress allowlist automatically.
+- Providers are reachable through the egress proxy automatically, but only on their own host and port (the policy lists them as
+  `targets`), not on ports 80/443 of the host. A local provider such as Ollama on `localhost:11434` therefore opens
+  `host.docker.internal:11434` only; other services on the CoCoon host stay unreachable. Provider hosts are not added to the allowlist.
 - If a profile uses an `anthropic` provider, the default `ANTHROPIC_API_KEY` is not injected (same for `openai` / `OPENAI_API_KEY`).
 - Assign providers per agent type (`providers`, `model`) or per start (`agent.spawn { providers, model }`).
 
