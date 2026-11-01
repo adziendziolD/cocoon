@@ -57,9 +57,12 @@ describe('postJson', () => {
     expect(hits).toEqual(['/hook', '/redirect']);
   });
 
-  it('gives up on a receiver that keeps the response open', async () => {
-    const { port } = await receiver((_req, res) => void res.writeHead(200, { 'content-length': '10' }).write('x'));
-    await expect(postJson(`http://127.0.0.1:${port}/hook`, {}, { allowPrivate: true, timeoutMs: 100 })).rejects.toThrow();
+  it('rejects when the receiver drops the connection in the middle of the response', async () => {
+    const { port } = await receiver((_req, res) => {
+      res.writeHead(200, { 'content-length': '10' });
+      res.write('x', () => res.socket?.destroy());
+    });
+    await expect(postJson(`http://127.0.0.1:${port}/hook`, {}, { allowPrivate: true })).rejects.toThrow();
   });
 
   it('honours COCOON_ALLOW_PRIVATE_WEBHOOKS', async () => {
