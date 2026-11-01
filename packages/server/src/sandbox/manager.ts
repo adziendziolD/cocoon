@@ -11,7 +11,7 @@ import type { SecretsService } from '../secrets.ts';
 import type { SettingsService } from '../settings.ts';
 import { publicSandbox, type SandboxRecord, type Store } from '../store.ts';
 import type { ExecOptions, ExecResult, SandboxDriver } from './driver.ts';
-import { githubAuthEnv } from './git-auth.ts';
+import { GIT_HARDENED_SH, githubAuthEnv } from './git-auth.ts';
 import { t } from '../i18n.ts';
 
 export const BASELINE_TAG = 'cocoon-baseline';
@@ -28,6 +28,8 @@ export interface SandboxHooks {
   created?(record: SandboxRecord, requestedServices: string[] | undefined): Promise<void>;
   /** After a stopped sandbox was started again. Must not throw. */
   started?(record: SandboxRecord): Promise<void>;
+  /** After a sandbox was moved to another workspace (or out of its workspace). Must not throw. */
+  moved?(record: SandboxRecord): Promise<void>;
   /** Before the sandbox is removed. Must not throw. */
   deleting?(record: SandboxRecord): Promise<void>;
 }
@@ -67,19 +69,22 @@ export class SandboxManager {
   }
 
   /** Public rename / move to another workspace. */
-  rename(params: MethodParams<'sandbox.update'>): Sandbox {
+  async rename(params: MethodParams<'sandbox.update'>): Promise<Sandbox> {
     const record = this.record(params.sandboxId);
     if (params.name && params.name !== record.name) {
       if (this.store.sandboxes().some((s) => s.name === params.name)) throw new CocoonError('conflict', t('error.sandboxNameTaken', { name: params.name }));
       record.name = params.name;
     }
+    let moved = false;
     if (params.workspaceId !== undefined) {
       if (params.workspaceId && !this.store.workspace(params.workspaceId)) throw notFound('Workspace', params.workspaceId);
+      moved = (params.workspaceId ?? undefined) !== record.workspaceId;
       record.workspaceId = params.workspaceId ?? undefined;
     }
     if (params.githubToken !== undefined) record.githubToken = params.githubToken ?? undefined;
     this.save(record);
-    return publicSandbox(record);
+    if (moved) for (const hooks of this.hooks) await hooks.moved?.(record);
+    return publicSandbox(this.record(params.sandboxId));
   }
 
   /** Returns the driver handle of a running sandbox, or throws. */
@@ -271,8 +276,9 @@ export class SandboxManager {
       [
         'sh',
         '-c',
-        `{ [ ! -e "$DIR" ] || [ -z "$(ls -A "$DIR" 2>/dev/null)" ]; } || { echo "$EXISTS" >&2; exit 1; }
-         mkdir -p "$(dirname "$DIR")" && git clone --quiet -- "$REPO_URL" "$DIR" && cd "$DIR" && { [ -z "$REPO_REF" ] || git checkout --quiet "$REPO_REF"; } && git tag -f ${BASELINE_TAG} HEAD >/dev/null || exit $?
+        `${GIT_HARDENED_SH}
+         { [ ! -e "$DIR" ] || [ -z "$(ls -A "$DIR" 2>/dev/null)" ]; } || { echo "$EXISTS" >&2; exit 1; }
+         mkdir -p "$(dirname "$DIR")" && cgit clone --quiet -- "$REPO_URL" "$DIR" && cd "$DIR" && { [ -z "$REPO_REF" ] || cgit checkout --quiet "$REPO_REF"; } && git tag -f ${BASELINE_TAG} HEAD >/dev/null || exit $?
          # Keep nested repositories out of a repository in the workspace folder itself.
          if [ -n "$REL" ] && [ -d "$WORKDIR/.git" ]; then grep -qxF "/$REL/" "$WORKDIR/.git/info/exclude" 2>/dev/null || echo "/$REL/" >> "$WORKDIR/.git/info/exclude"; fi`,
       ],

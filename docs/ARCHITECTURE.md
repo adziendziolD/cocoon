@@ -131,6 +131,32 @@ Agenten bedienen, aber keine Keys auslesen oder Sicherheitseinstellungen ändern
 Der Proxy tauscht den Platzhalter gegen den echten Key und leitet per TLS weiter. **Der echte Key gelangt nie in die Sandbox**
 (getestet: weder in Env, Dateien noch `/proc`). Andere Secrets (z. B. `CLAUDE_CODE_OAUTH_TOKEN`, `GITHUB_TOKEN`) werden direkt injiziert.
 
+**Isolation der Dienste:** Jeder verwaltete Dienst (`cocoon-svc-<id>`) hängt in einem eigenen internen Netz `cocoon-svc-<id>-net`
+(Alias = Dienst-ID), dem nur Sandboxes beitreten, die den Dienst haben (`attach`/`detach`/`started`, Start des Dienstes). Alte
+Dienst-Container wechseln beim nächsten Start vom gemeinsamen `cocoon-internal` ins eigene Netz (erst Dienst und Sandboxes verbinden,
+dann das alte Netz verlassen). Mock-Dienste (WireMock, Mailpit) werden nur dann an einen Workspace gebunden, wenn `services.add` eine `workspaceId` bekommt
+(`ServiceRecord.workspaceId`; nur per API/CLI, `cocoon services add wiremock --workspace <id>`, die Einstellungsseite sendet keine).
+Es gibt keine implizite Bindung. Ein gebundener Dienst lässt nur Sandboxes dieses Workspaces zu (`attach` lehnt andere ab, `attach: 'all'`
+überspringt sie, `link` verbindet sie nie mit dem Dienst-Netz); `ServiceInfo.workspaceId` zeigt die Bindung. Eine Bindung an einen nicht mehr
+vorhandenen Workspace gilt als ungebunden, und eine Sandbox, die per `sandbox.update` in einen anderen Workspace wechselt, verliert die
+Dienste des alten Workspaces (Hook `moved`). Ungebundene Mock-Dienste verhalten sich wie vorher: Sie bedienen jede Sandbox, die sie angehängt
+hat, auch workspaceübergreifend. Workspace-Trennung für Mock-Dienste ist damit Opt-in: je Workspace ein gebundener Dienst, ungebundene auf
+`manual` stellen oder entfernen. Datenbanken werden nicht gebunden (eigene Zugänge je Sandbox).
+Offen: Alle Sandboxes teilen weiter `cocoon-internal` (Egress-Proxy, Port-Gateway). Sandboxes erreichen dort die Ports anderer Sandboxes
+und die TCP-Relays externer Dienste. Ein Netz je Sandbox oder Workspace würde Proxy, Gateway, Relay-Bind und alle Dienste dynamisch an
+jedes Netz hängen und wurde ohne echte Docker-Tests nicht umgesetzt.
+
+**GitHub-Token bei Push/Clone (gehärtet):** `git push`, Klonen und Skill-Installation laufen per `exec` als Agent-User, der Token steht
+dabei im Env des Kommandos. `githubAuthEnv()` (`sandbox/git-auth.ts`) schaltet dafür einen gehärteten Modus ein: `GIT_CONFIG_GLOBAL=/dev/null`,
+`GIT_CONFIG_NOSYSTEM=1`, `GIT_ASKPASS=/bin/false` und die Shell-Funktion `cgit` mit `-c core.hooksPath=/dev/null`, `core.fsmonitor=false`,
+`core.sshCommand=false`, leerem `credential.helper`/`core.askPass`, `http.sslVerify=true`, geleertem `http.curloptResolve` und fest auf den
+`HTTPS_PROXY` der Sandbox gesetztem `http.proxy`. Der Push läuft mit `--no-verify` direkt gegen die URL (nicht über `remote.origin`, dessen
+`pushurl`/`proxy` der Agent ändern kann). Bewusste Einschränkung: Pre-Push-Hooks (z. B. husky) laufen dabei nicht, globale Filter und `safe.directory` greifen nicht, und git-lfs-Objekte werden nicht hochgeladen; solche Repositories pusht man selbst aus der Sandbox. Ein Push vom Host aus einem Bundle wurde erwogen und verworfen: Prerequisites und Größe der Bundles,
+Remotes außerhalb von GitHub und fehlende Testbarkeit gegen GitHub. Restrisiko: Ein im selben Container bereits laufender Agent kann den Token
+während des Push (Sekunden) über `/proc/<pid>/environ` lesen. Das gilt bei gleicher UID, und eine andere UID hilft mit bwrap nicht, weil dort
+alle UIDs auf denselben Host-User abgebildet werden. Repo-lokale Einstellungen wie `http.sslCAInfo` lassen sich nicht überschreiben.
+Gegenmaßnahme: feingranularer Token nur für die nötigen Repos.
+
 Der Proxy läuft als eigener Container (`images/egress-proxy`, ohne Abhängigkeiten), read-only, ohne Capabilities, mit der UID von cocoond.
 cocoond schreibt `.data/egress/policy.json`; der Proxy lädt Änderungen sofort und bestätigt die Version (`ack`) – das Klonen eines Repos
 beginnt erst, wenn der Proxy die neue Sandbox kennt.
@@ -170,9 +196,9 @@ Der Server spricht Sandboxes nur über `SandboxDriver` an. Implementiert sind:
 |---|---|---|
 | `docker` | Docker Engine API | Images, Ressourcenlimits, erzwungener Egress, Runtimes (gVisor, Kata) |
 | `podman` | Podman über die Docker-kompatible API (rootless, ohne Daemon); Host-Alias `host.containers.internal`, Proxy-Container als Container-root (= Benutzer); der Proxy hängt zusätzlich im Netz `cocoon-egress` (nicht intern, mit DNS), weil Podmans DNS im internen Netz keine externen Namen auflöst, Sandboxes hängen dort nie | wie Docker, zusätzlich z. B. `krun` |
-| `bwrap` | bubblewrap: Sandbox = Ordner unter `.data/sandboxes/<id>`, Host-System schreibgeschützt, eigene User/PID/IPC/UTS-(Netz-)Namespaces, keine Capabilities, tmux-„Keeper“ pro Sandbox, Egress-Proxy als lokaler Prozess, PTY über node-pty, Optionen per `--args FD` (nicht in `ps` sichtbar) | keine Images, keine Ressourcenlimits, Egress nur konfiguriert (nicht erzwungen) |
+| `bwrap` | bubblewrap: Sandbox = Ordner unter `.data/sandboxes/<id>`, Host-System schreibgeschützt, eigene User/PID/IPC/UTS-(Netz-)Namespaces, keine Capabilities, tmux-„Keeper“ pro Sandbox, Egress-Proxy als lokaler Prozess, PTY über node-pty, Optionen per `--args FD` (nicht in `ps` sichtbar), Datei-Transfers (`putArchive`/`getArchive`) laufen mit `tar` **innerhalb** von bwrap (Symlinks des Agenten führen nicht auf Host-Dateien) | keine Images, keine Ressourcenlimits, Egress nicht erzwingbar: nur `none` hat ein eigenes Netz-Namespace; `egress`/`open` teilen das Host-Netz und werden ohne `COCOON_BWRAP_HOST_NETWORK=1` abgelehnt |
 
-Auswahl über `COCOON_DRIVER` (`auto`: Podman-Socket → Docker → bubblewrap). `system.info` liefert `driverKind` und `capabilities`,
+Auswahl über `COCOON_DRIVER` (`auto`: Podman-Socket → Docker; bubblewrap nur explizit mit `COCOON_DRIVER=bwrap` oder mit `COCOON_BWRAP_HOST_NETWORK=1`). `system.info` liefert `driverKind` und `capabilities`,
 die UI blendet nicht verfügbare Optionen aus bzw. weist auf Einschränkungen hin.
 
 **Werkzeugkiste:** Agent-CLIs (Claude Code, Codex, …) samt Node.js-Laufzeit werden einmal in ein Volume (`cocoon-agents`) bzw.

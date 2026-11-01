@@ -1,8 +1,8 @@
 import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, posix, resolve } from 'node:path';
-import { Duplex, type Readable } from 'node:stream';
+import { basename, dirname, join, posix } from 'node:path';
+import { Duplex, PassThrough, type Readable } from 'node:stream';
 import { promisify } from 'node:util';
 import type { DriverCapabilities, NetworkMode } from '@cocoon/protocol';
 import { COCOON_DIR, TMUX_CONF, TMUX_CONF_PATH } from '../agents/tmux.ts';
@@ -49,8 +49,10 @@ interface Meta {
  * Each sandbox is a directory (workspace, home, tmp, /opt/cocoon) on the host; the host system is mounted read-only and
  * processes run in their own user/pid/ipc/uts (and, for "none", network) namespaces without capabilities.
  * A long-running "keeper" (tmux server) per sandbox keeps agents alive across control-plane restarts.
- * Trade-offs: shares the host kernel and installed tools, no resource limits, and the "restricted" network mode only
- * configures the egress proxy (it is not enforced).
+ * Trade-offs: shares the host kernel and installed tools, no resource limits, and no enforced egress: only the "none"
+ * network mode gets its own network namespace. Sandboxes with network ("egress", "open") share the host's network
+ * (localhost services, CoCoon itself, cloud metadata) and merely get the egress proxy configured, so they are refused
+ * unless the operator opted in (`allowHostNetwork`, COCOON_BWRAP_HOST_NETWORK=1).
  */
 export class BwrapDriver implements SandboxDriver {
   readonly kind = 'bwrap' as const;
@@ -59,7 +61,10 @@ export class BwrapDriver implements SandboxDriver {
   private readonly root: string;
   readonly toolboxDir: string;
 
-  constructor(dataDir: string) {
+  constructor(
+    dataDir: string,
+    private readonly opts: { allowHostNetwork?: boolean } = {},
+  ) {
     this.root = join(dataDir, 'sandboxes');
     this.toolboxDir = join(dataDir, 'agents');
     mkdirSync(this.root, { recursive: true, mode: 0o700 });
@@ -78,6 +83,7 @@ export class BwrapDriver implements SandboxDriver {
   }
 
   async create(spec: SandboxSpec): Promise<{ handle: string }> {
+    this.requireNetworkAllowed(spec.network);
     const dir = join(this.root, spec.sandboxId);
     for (const sub of ['workspace', 'home', 'cocoon', 'tmp', 'etc']) mkdirSync(join(dir, sub), { recursive: true, mode: 0o755 });
     writeFileSync(join(dir, 'etc/passwd'), `root:x:0:0:root:/root:/bin/sh\nagent:x:${SANDBOX_UID}:${SANDBOX_UID}:agent:${HOME}:/bin/bash\n`);
@@ -92,11 +98,12 @@ export class BwrapDriver implements SandboxDriver {
   async start(handle: string): Promise<void> {
     if ((await this.state(handle)) === 'running') return;
     const dir = this.dir(handle);
+    const payload = argsPayload(this.args(handle, { keeper: true })); // before spawning: refuses sandboxes that may not run
     const keeper = spawn('bwrap', ['--args', '3', '--', 'tmux', '-L', 'cocoon', '-f', TMUX_CONF_PATH, '-D'], {
       detached: true,
       stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
     });
-    (keeper.stdio[3] as NodeJS.WritableStream).end(argsPayload(this.args(handle, { keeper: true })));
+    (keeper.stdio[3] as NodeJS.WritableStream).end(payload);
     keeper.unref();
     if (!keeper.pid) throw new Error('could not start sandbox keeper');
     writeFileSync(join(dir, 'keeper.pid'), String(keeper.pid));
@@ -132,8 +139,11 @@ export class BwrapDriver implements SandboxDriver {
   }
 
   async exec(handle: string, command: string[], opts: ExecOptions = {}): Promise<ExecResult> {
-    const child = spawn('bwrap', ['--args', '3', '--', ...command], { stdio: ['ignore', 'pipe', 'pipe', 'pipe'] });
-    (child.stdio[3] as NodeJS.WritableStream).end(argsPayload(this.args(handle, opts)));
+    return this.run(handle, command, opts);
+  }
+
+  private async run(handle: string, command: string[], opts: ExecOptions & { archive?: boolean } = {}): Promise<ExecResult> {
+    const child = this.spawnIn(handle, command, opts);
     const stdout = collect(child.stdout!);
     const stderr = collect(child.stderr!);
     const exitCode = await new Promise<number>((resolvePromise, reject) => {
@@ -181,20 +191,44 @@ export class BwrapDriver implements SandboxDriver {
     };
   }
 
+  /**
+   * Both archive operations run `tar` inside the sandbox (same mounts, user and namespaces as the agent), never on the
+   * host: the agent owns the writable mounts and can plant symlinks there, which a host-side tar would follow out of the
+   * sandbox (to write or read arbitrary host files with cocoond's privileges). Inside, symlinks can only lead to the
+   * sandbox's own files.
+   */
   async putArchive(handle: string, dir: string, tar: Buffer): Promise<void> {
-    const target = this.hostPath(handle, dir);
-    mkdirSync(target, { recursive: true });
-    const child = spawn('tar', ['-x', '-C', target, '--no-same-owner'], { stdio: ['pipe', 'ignore', 'pipe'] });
-    const stderr = collect(child.stderr);
-    child.stdin.end(tar);
-    const code = await new Promise<number>((r) => child.on('close', (c) => r(c ?? -1)));
+    const target = this.sandboxPath(handle, dir);
+    const child = this.spawnIn(handle, ['sh', '-c', 'mkdir -p -- "$1" && exec tar -x -C "$1" --no-same-owner', 'sh', target], { stdin: true, archive: true });
+    const stderr = collect(child.stderr!);
+    child.stdin!.on('error', () => undefined); // tar may exit before reading everything; the exit code reports it
+    child.stdin!.end(tar);
+    const code = await new Promise<number>((resolvePromise, reject) => {
+      child.on('error', reject);
+      child.on('close', (c) => resolvePromise(c ?? -1));
+    });
     if (code !== 0) throw new Error(`tar: ${stderr().trim()}`);
   }
 
+  /**
+   * The stream ends with an error if tar fails (instead of looking like a complete, truncated archive). stderr is
+   * always read: an unread pipe would block tar once it holds more than the pipe buffer.
+   */
   async getArchive(handle: string, path: string): Promise<Readable> {
-    const source = this.hostPath(handle, path);
-    if (!existsSync(source)) throw new CocoonError('not_found', t('error.pathNotFound', { path }));
-    return spawn('tar', ['-c', '-C', dirname(source), basename(source)], { stdio: ['ignore', 'pipe', 'ignore'] }).stdout;
+    const source = this.sandboxPath(handle, path);
+    const probe = await this.run(handle, ['test', '-e', source], { timeoutMs: 10_000, archive: true });
+    if (probe.exitCode !== 0) throw new CocoonError('not_found', t('error.pathNotFound', { path }));
+    const child = this.spawnIn(handle, ['tar', '-c', '-C', posix.dirname(source), posix.basename(source)], { archive: true });
+    const stderr = collect(child.stderr!);
+    const out = new PassThrough();
+    child.stdout!.pipe(out, { end: false });
+    child.on('error', (err) => out.destroy(err));
+    child.on('close', (code) => {
+      if (code === 0) out.end();
+      else out.destroy(new Error(`tar: ${stderr().trim() || `exit code ${code}`}`));
+    });
+    out.on('close', () => child.kill('SIGKILL')); // the reader gave up: no tar left behind (no-op once it has exited)
+    return out;
   }
 
   /** Installs the host's Node.js and the agent CLIs into <dataDir>/agents (mounted read-only into sandboxes). */
@@ -258,27 +292,31 @@ export class BwrapDriver implements SandboxDriver {
     return dir;
   }
 
+  /** Egress cannot be enforced without a network namespace of its own: refuse network modes that share the host's. */
+  private requireNetworkAllowed(network: NetworkMode): void {
+    if (network !== 'none' && !this.opts.allowHostNetwork) throw new CocoonError('bad_request', t('error.bwrapHostNetwork'));
+  }
+
   private meta(handle: string): Meta {
     return JSON.parse(readFileSync(join(this.dir(handle), 'meta.json'), 'utf8')) as Meta;
   }
 
-  /** Sandbox path → host path (only the writable sandbox mounts are reachable). */
-  private hostPath(handle: string, insidePath: string): string {
-    const dir = this.dir(handle);
+  /**
+   * Runs a command in a fresh bwrap of the sandbox; stderr is piped, stdin only if asked for. `archive` marks the file
+   * transfer: it needs no network, so it runs without one (also for sandboxes that may not run with the host network).
+   */
+  private spawnIn(handle: string, command: string[], opts: ExecOptions & { stdin?: boolean; archive?: boolean } = {}) {
+    const payload = argsPayload(this.args(handle, opts)); // before spawning: refuses sandboxes that may not run
+    const child = spawn('bwrap', ['--args', '3', '--', ...command], { stdio: [opts.stdin ? 'pipe' : 'ignore', 'pipe', 'pipe', 'pipe'] });
+    (child.stdio[3] as NodeJS.WritableStream).end(payload);
+    return child;
+  }
+
+  /** Normalised absolute sandbox path; only the writable sandbox mounts are reachable. */
+  private sandboxPath(handle: string, insidePath: string): string {
     const { workdir } = this.meta(handle);
     const normalized = posix.normalize(insidePath.startsWith('/') ? insidePath : posix.join(workdir, insidePath));
-    const mounts: [string, string][] = [
-      [workdir, join(dir, 'workspace')],
-      [HOME, join(dir, 'home')],
-      [COCOON_DIR, join(dir, 'cocoon')],
-      ['/tmp', join(dir, 'tmp')],
-    ];
-    for (const [inside, host] of mounts) {
-      if (normalized === inside || normalized.startsWith(`${inside}/`)) {
-        const target = resolve(host, `.${normalized.slice(inside.length)}`);
-        if (target === host || target.startsWith(`${host}/`)) return target;
-      }
-    }
+    if ([workdir, HOME, COCOON_DIR, '/tmp'].some((mount) => normalized === mount || normalized.startsWith(`${mount}/`))) return normalized;
     throw new CocoonError('bad_request', t('error.pathNotFound', { path: insidePath }));
   }
 
@@ -293,13 +331,16 @@ export class BwrapDriver implements SandboxDriver {
     }
   }
 
-  private args(handle: string, opts: ExecOptions & { tty?: boolean; keeper?: boolean } = {}): string[] {
+  private args(handle: string, opts: ExecOptions & { tty?: boolean; keeper?: boolean; archive?: boolean } = {}): string[] {
     const dir = this.dir(handle);
     const meta = this.meta(handle);
+    // Only commands that may use the network need the opt-in; file transfers run in a network namespace of their own.
+    if (!opts.archive) this.requireNetworkAllowed(meta.network);
+    const noNetwork = meta.network === 'none' || opts.archive;
     const root = opts.user === 'root' || opts.user === '0' || opts.user === '0:0';
     const args = [
       '--unshare-user', '--unshare-pid', '--unshare-ipc', '--unshare-uts', '--unshare-cgroup-try',
-      ...(meta.network === 'none' ? ['--unshare-net'] : []),
+      ...(noNetwork ? ['--unshare-net'] : []),
       '--uid', root ? '0' : SANDBOX_UID, '--gid', root ? '0' : SANDBOX_UID,
       '--hostname', meta.name.slice(0, 63),
       '--cap-drop', 'ALL',

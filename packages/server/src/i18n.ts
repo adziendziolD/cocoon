@@ -102,8 +102,20 @@ export const messages = {
   },
   'error.unknownProvider': { de: 'Unbekannter API-Anbieter „{id}“', en: 'Unknown API provider "{id}"' },
   'error.serviceNeedsContainers': { de: 'Von CoCoon verwaltete Dienste brauchen Docker oder Podman. Mit bubblewrap kannst du einen eigenen Server verbinden.', en: 'Services managed by CoCoon need Docker or Podman. With bubblewrap you can connect your own server.' },
+  'error.bwrapHostNetwork': {
+    de: 'bubblewrap kann den Netzwerkzugriff nicht begrenzen: Sandboxes mit Netzwerk teilen das Netzwerk des Servers (Localhost-Dienste, CoCoon selbst, Metadaten-Endpunkte). Wähle „Kein Netzwerk“, nutze Docker oder Podman, oder setze auf dem Server bewusst COCOON_BWRAP_HOST_NETWORK=1.',
+    en: 'bubblewrap cannot restrict network access: sandboxes with network share the server\'s network (localhost services, CoCoon itself, metadata endpoints). Choose "No network", use Docker or Podman, or deliberately set COCOON_BWRAP_HOST_NETWORK=1 on the server.',
+  },
   'error.serviceMockManagedOnly': { de: 'Mock-Dienste startet CoCoon selbst – ein externer Server ist dafür nicht vorgesehen.', en: 'CoCoon runs mock services itself – external servers are not supported for them.' },
   'error.serviceHostRequired': { de: 'Bitte die Adresse des Servers angeben.', en: 'Please enter the server address.' },
+  'error.serviceOtherWorkspace': {
+    de: 'Der Dienst {service} ist an einen anderen Workspace gebunden. Lege für diesen Workspace einen eigenen Dienst an.',
+    en: 'The service {service} is bound to another workspace. Add a service of its own for this workspace.',
+  },
+  'error.serviceWorkspaceMockOnly': {
+    de: 'Nur Mock-Dienste (WireMock, Mailpit) lassen sich an einen Workspace binden. Datenbanken trennen die Sandboxes über eigene Zugänge.',
+    en: 'Only mock services (WireMock, Mailpit) can be bound to a workspace. Databases separate sandboxes with credentials of their own.',
+  },
   'error.serviceIdTaken': { de: 'Es gibt schon einen Dienst mit der Kennung {id}.', en: 'A service with the id {id} already exists.' },
   'error.invalidImage': { de: 'Ungültiger Image-Name: {image}', en: 'Invalid image name: {image}' },
   'error.serviceConnectFailed': { de: 'Verbindung zum Server fehlgeschlagen: {error}', en: 'Could not connect to the server: {error}' },
@@ -329,6 +341,10 @@ export const messages = {
     en: 'No sandbox backend available. Install Docker, Podman or (Linux) bubblewrap, or set COCOON_DRIVER.\n{error}',
   },
   'console.driver': { de: 'Sandbox-Technik', en: 'Sandbox backend' },
+  'console.bwrapHostNetwork': {
+    de: 'WARNUNG: COCOON_BWRAP_HOST_NETWORK=1: bubblewrap-Sandboxes mit Netzwerk teilen das Netzwerk des Servers (Localhost-Dienste, CoCoon selbst, Metadaten-Endpunkte). Der Egress-Proxy wird nicht erzwungen.',
+    en: 'WARNING: COCOON_BWRAP_HOST_NETWORK=1: bubblewrap sandboxes with network share the server\'s network (localhost services, CoCoon itself, metadata endpoints). The egress proxy is not enforced.',
+  },
 } satisfies Record<string, Record<Language, string>>;
 
 export type MessageKey = keyof typeof messages;

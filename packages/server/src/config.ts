@@ -22,6 +22,8 @@ export function loadConfig(env = process.env) {
     dockerSocket: env.DOCKER_SOCKET,
     /** Isolation backend: auto | docker | podman | bwrap. */
     driver: (env.COCOON_DRIVER ?? 'auto') as 'auto' | 'docker' | 'podman' | 'bwrap',
+    /** bubblewrap cannot enforce egress: only with this opt-in may its sandboxes use "egress"/"open" (shared host network) or be picked by "auto". */
+    bwrapHostNetwork: env.COCOON_BWRAP_HOST_NETWORK === '1',
     /** Ports of the egress proxy process (bubblewrap driver): forward proxy, credential proxy = port + 1. */
     proxyPort: Number(env.COCOON_PROXY_PORT ?? 7431),
     /** CoCoon's own installation (a git clone, updated by the update service). */

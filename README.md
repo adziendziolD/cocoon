@@ -157,9 +157,10 @@ CoCoon talks to sandboxes through a small driver interface, so the isolation tec
 |---|---|---|---|---|
 | **Podman** | Container engine without a background daemon, runs rootless | small, no root service | containers (+ gVisor / Kata / krun runtimes) | uses Podman's Docker-compatible API socket |
 | **Docker** | The standard container engine | daemon (~100 MB), root | containers (+ gVisor / Kata runtimes) | Docker Desktop on macOS/Windows |
-| **bubblewrap** | Linux process sandboxes (namespaces, as used by Flatpak and Claude Code's own sandbox) | tiny – no daemon, no images | user/pid/ipc/uts/(net) namespaces, read-only host, no capabilities | Linux only; shares the host kernel and installed tools; **no resource limits and "Restricted" network is not enforced** (proxy is configured, but could be bypassed) |
+| **bubblewrap** | Linux process sandboxes (namespaces, as used by Flatpak and Claude Code's own sandbox) | tiny – no daemon, no images | user/pid/ipc/uts/(net) namespaces, read-only host, no capabilities | Linux only; shares the host kernel and installed tools; **no resource limits and no enforced egress**: sandboxes with network ("Restricted", "Open") share the host's network, so they are refused unless you set `COCOON_BWRAP_HOST_NETWORK=1`; "No network" works without it |
 
-Selection: `COCOON_DRIVER=auto` (default) uses an explicit `DOCKER_SOCKET`, then a Podman socket, then Docker, then bubblewrap.
+Selection: `COCOON_DRIVER=auto` (default) uses an explicit `DOCKER_SOCKET`, then a Podman socket, then Docker. It does **not** fall back to
+bubblewrap silently, because bubblewrap cannot enforce egress; choose it with `COCOON_DRIVER=bwrap` (or let `auto` use it with `COCOON_BWRAP_HOST_NETWORK=1`).
 Force one with `COCOON_DRIVER=docker|podman|bwrap`. The UI shows the active backend and its capabilities
 (*Settings → Sandbox defaults*), and `system.info` reports `driverKind` and `capabilities`.
 
@@ -171,7 +172,8 @@ Force one with `COCOON_DRIVER=docker|podman|bwrap`. The UI shows the active back
   most distributions). Each sandbox is a directory under `.data/sandboxes/<id>` (workspace, home, tmp); the host system is mounted
   read-only, a long-running *keeper* (tmux server) per sandbox keeps agents alive across cocoond restarts, and the egress proxy runs
   as a local process on `127.0.0.1:7431/7432` (`COCOON_PROXY_PORT`). Sandbox options and secrets are passed to `bwrap` via a file
-  descriptor, so they never show up in the host's process list.
+  descriptor, so they never show up in the host's process list. File transfers (uploads, downloads, staging files) run `tar` inside the
+  sandbox, so symlinks the agent plants in its writable folders cannot lead the server to host files.
 
 **Agent toolbox:** the agent CLIs – and the Node.js runtime they need – are not part of the sandbox image. They are installed once
 (`npm install -g --prefix /opt/agents …`) into a Docker/Podman volume (`cocoon-agents`) or `.data/agents` for bubblewrap, and
@@ -201,7 +203,7 @@ never appear in a command line (`ps`/`docker top`).
 
 | Mode | Implementation | Use for |
 |---|---|---|
-| `egress` *(default, "Restricted")* | Docker/Podman: the sandbox is only attached to the internal network `cocoon-internal` (no gateway, no external DNS); the only way out is the egress proxy (`HTTP(S)_PROXY` is preset): allowlisted domains, ports 80/443, known sandboxes only. bubblewrap: proxy configured, not enforced | Normal work – agents can reach model APIs, GitHub, npm, PyPI |
+| `egress` *(default, "Restricted")* | Docker/Podman: the sandbox is only attached to the internal network `cocoon-internal` (no gateway, no external DNS); the only way out is the egress proxy (`HTTP(S)_PROXY` is preset): allowlisted domains, ports 80/443, known sandboxes only. bubblewrap: refused (no enforced egress) unless `COCOON_BWRAP_HOST_NETWORK=1`; then the proxy is only configured, not enforced | Normal work – agents can reach model APIs, GitHub, npm, PyPI |
 | `open` | Bridge network / host network, unrestricted internet | Projects that need arbitrary downloads |
 | `none` | No network at all | Untrusted code, offline analysis |
 
@@ -403,7 +405,8 @@ Every service also gets `COCOON_<ID>_URL`, so a second instance of the same kind
 **How it works**
 
 - **Managed** (default, Docker/Podman): CoCoon pulls the official image, starts `cocoon-svc-<id>` with a data volume
-  and a random admin password, joins it to the internal network (sandboxes reach it by its id, e.g. `postgres:5432`)
+  and a random admin password, gives it an internal network of its own (`cocoon-svc-<id>-net`) that only the sandboxes
+  with the service join (they reach it by its id, e.g. `postgres:5432`; other sandboxes cannot reach it at all)
   and publishes its port on `127.0.0.1` only, for CoCoon itself and database tools on the server
   (*Credentials for database tools* in the UI, `pnpm cocoon services credentials <id>`).
 - **External** (databases): connect an existing server with an admin user that may create databases and users.
@@ -426,7 +429,21 @@ Every service also gets `COCOON_<ID>_URL`, so a second instance of the same kind
   `services_attach`, `services_reset`, …).
 
 Isolation is meant for development and tests: sandboxes cannot read each other's databases, but they share the
-server's resources, and WireMock/Mailpit are shared by design (prefixes keep stubs apart).
+server's resources. **Mock services and workspaces:** WireMock (its `/__admin` has no login) and Mailpit show everything to everyone who has
+them attached. A mock service is therefore only bound to a workspace if you say so when you add it, and only through the
+API or CLI (`services.add` with `workspaceId`, or `cocoon services add wiremock --workspace <id>`); the settings page has no
+field for it yet. A bound service can only be used by the sandboxes of that workspace: other sandboxes are refused, skipped by
+*every sandbox* and never join the service's network. The service list shows the binding. A sandbox that moves to another
+workspace loses the services bound to the one it left, and a binding to a deleted workspace no longer applies (the service
+serves every sandbox again). Without `--workspace` nothing changes: the service serves every sandbox it is attached to, in any
+workspace. Workspaces that must not see each other's mocks therefore need a bound mock service per workspace, and the unbound
+ones should be set to manual attach or removed. Databases are not bound: each sandbox gets its own credentials.
+Services that existed before per-service networks move off the shared network the next time they start.
+
+**Remaining limits:** all sandboxes of a CoCoon instance still share the internal network `cocoon-internal` (egress proxy, port
+gateway), so a sandbox can reach the ports of other sandboxes there, and the TCP relays of external services. Use separate CoCoon
+instances (`COCOON_INSTANCE`) or hosts for workspaces that must not share a network. A network per sandbox or workspace
+is planned.
 
 ## Orchestration: workspaces, tasks & workflows
 
@@ -484,6 +501,15 @@ in the same sandbox** instead of pushing right away. Each reviews the full diff,
 **GitHub access for agents.** Agent types that list `GITHUB_TOKEN` in their secrets (Claude Code, Codex and OpenCode by
 default) get the stored token in their environment, and CoCoon sets up a git credential helper for github.com, so plain
 `git push` works for them. Remove `GITHUB_TOKEN` from an agent type (*Settings → Agent types*) to keep it away from that agent.
+
+**Pushes and clones by CoCoon.** `git push` (UI, CLI, tasks), clones of GitHub repositories and skill installs run inside the sandbox
+as the agent user with the token in the command's environment. CoCoon runs them in a hardened mode: no repository or `~/.gitconfig`
+hooks (`core.hooksPath=/dev/null`, `--no-verify`), no global or system git config, no credential helper, askpass or ssh command,
+TLS verification on, the sandbox's own proxy pinned, and the push goes to the repository URL instead of the editable remote config.
+Deliberate limitation: with hooks and global config switched off, pre-push hooks (for example husky) do not run, global git filters and `safe.directory` settings do not apply, and git-lfs objects are not uploaded, so push such repositories yourself from the sandbox.
+Remaining risk: while a push runs (seconds), an agent that is already running in the same sandbox can read the token from
+`/proc/<pid>/environ` (same user), and repository-local git settings such as `http.sslCAInfo` cannot be overridden. In sandboxes
+where untrusted code runs, use a fine-grained token limited to the needed repositories, or no `GITHUB_TOKEN` and push yourself.
 
 **Workflows** (*Settings → Workflows*) chain stages, each a fresh agent in the task's sandbox. Prompt templates may use
 `{{task}}`, `{{task.title}}`, `{{task.description}}`, `{{previous.output}}` (last screen of the previous stage),
@@ -845,6 +871,7 @@ Everything is configurable in the UI. Environment variables (all optional, see [
 | `COCOON_SERVICE_IDLE_MINUTES` | `10` | Minutes without a running sandbox before a managed shared service is paused |
 | `DOCKER_SOCKET` | auto-detected | Path to the Docker or Podman API socket |
 | `COCOON_PROXY_PORT` | `7431` | bubblewrap only: port of the local egress proxy (credential proxy = port + 1) |
+| `COCOON_BWRAP_HOST_NETWORK` | – | bubblewrap only: `1` accepts that sandboxes in the modes *Restricted* and *Open* share the host's network (egress is not enforced: localhost services, CoCoon itself and metadata endpoints are reachable) and lets `auto` fall back to bubblewrap. Without it only *No network* sandboxes work |
 | `LOG_LEVEL` | `info` | Server log level |
 
 Settings sections: `general` (language, onboarding completion), `providers`, `sandbox` (image, default network, resources, runtime, max sandboxes,

@@ -77,6 +77,7 @@ export class ServiceManager {
       created: (record, requested) => this.onSandboxCreated(record, requested),
       started: (record) => this.wake(record),
       deleting: (record) => this.onSandboxDeleting(record),
+      moved: (record) => this.onSandboxMoved(record),
     });
   }
 
@@ -126,6 +127,7 @@ export class ServiceManager {
   private async wake(sandbox: SandboxRecord): Promise<void> {
     for (const serviceId of sandbox.services ?? []) {
       const record = this.store.service(serviceId);
+      if (record) await this.link(record, sandbox).catch((err) => this.log(`service ${serviceId}: connecting ${sandbox.id} failed`, err));
       if (record?.mode === 'managed' && record.desired !== 'stopped') void this.ensureRunning(serviceId).catch((err) => this.log(`service ${serviceId}: wake failed`, err));
     }
   }
@@ -149,6 +151,10 @@ export class ServiceManager {
     if (params.mode === 'managed' && !this.docker) throw new CocoonError('bad_request', t('error.serviceNeedsContainers'));
     if (params.mode === 'external' && kind.category === 'mock') throw new CocoonError('bad_request', t('error.serviceMockManagedOnly'));
     if (params.mode === 'external' && !params.host) throw new CocoonError('bad_request', t('error.serviceHostRequired'));
+    if (params.workspaceId) {
+      if (kind.category !== 'mock') throw new CocoonError('bad_request', t('error.serviceWorkspaceMockOnly'));
+      if (!this.store.workspace(params.workspaceId)) throw notFound('Workspace', params.workspaceId);
+    }
     const id = params.id ?? this.freeId(params.kind);
     if (this.store.service(id)) throw new CocoonError('conflict', t('error.serviceIdTaken', { id }));
     if (params.image && !kind.images.some((i) => i.ref === params.image) && !/^[\w./:@-]+$/.test(params.image)) {
@@ -164,6 +170,8 @@ export class ServiceManager {
       mode: params.mode,
       attach: params.attach,
       autoStop: params.mode === 'managed' ? (params.autoStop ?? true) : undefined,
+      // Only an explicit workspace binds a mock service (see servesSandbox()).
+      workspaceId: params.workspaceId,
       createdAt: new Date().toISOString(),
       ...(params.mode === 'managed'
         ? { image: params.image ?? kind.images[0]!.ref, memoryMb: params.memoryMb, adminPassword, desired: 'running' as const }
@@ -231,6 +239,7 @@ export class ServiceManager {
     if (record.mode === 'managed' && this.docker) {
       await ignoreStatus(404, () => this.docker!.docker.getContainer(this.containerName(serviceId)).remove({ force: true }));
       if (deleteData) await ignoreStatus(404, () => this.docker!.docker.getVolume(this.volumeName(serviceId)).remove());
+      await this.docker.removeNetwork(this.networkName(serviceId)).catch((err) => this.log(`service ${serviceId}: removing its network failed`, err));
     }
     if (record.mode === 'managed') {
       // Keeping the data only makes sense if the password it was created with is kept as well (see add()).
@@ -311,17 +320,24 @@ export class ServiceManager {
     const record = this.record(serviceId);
     let sandbox = this.sandboxes.record(sandboxId);
     if (sandbox.network === 'none') throw new CocoonError('bad_request', t('error.serviceNoNetwork'));
+    this.requireWorkspace(record, sandbox);
     await this.ensureRunning(serviceId);
     if (this.docker && sandbox.handle && sandbox.network === 'open') await this.docker.connectInternal(sandbox.handle);
 
     const db: SandboxServiceDb = sandbox.serviceDbs?.[serviceId] ?? { name: sandboxDbName(sandbox.id), password: randomBytes(16).toString('hex') };
     try {
+      await this.link(record, sandbox);
       await ENGINES[record.kind].provision(this.adminConn(record), db.name, db.password);
       delete db.error;
     } catch (err) {
       db.error = errorText(err);
     }
     sandbox = this.sandboxes.record(sandboxId);
+    // The awaits above leave room for the sandbox to move to another workspace: check again before recording anything.
+    if (!this.servesSandbox(record, sandbox)) {
+      await this.unlink(record, sandbox);
+      this.requireWorkspace(record, sandbox);
+    }
     this.sandboxes.update(sandboxId, {
       services: [...new Set([...(sandbox.services ?? []), serviceId])],
       serviceDbs: { ...sandbox.serviceDbs, [serviceId]: db },
@@ -342,6 +358,7 @@ export class ServiceManager {
     }
     const { [serviceId]: _removed, ...rest } = sandbox.serviceDbs ?? {};
     this.sandboxes.update(sandboxId, { services: (sandbox.services ?? []).filter((id) => id !== serviceId), serviceDbs: rest });
+    if (record) await this.unlink(record, sandbox);
     if (record) this.publish(record);
     await this.writeSandboxFiles(sandboxId).catch(() => undefined);
   }
@@ -383,11 +400,21 @@ export class ServiceManager {
 
   private async onSandboxCreated(record: SandboxRecord, requested: string[] | undefined): Promise<void> {
     if (record.network === 'none') return;
-    const ids = (requested ?? this.store.services().filter((s) => s.attach === 'all').map((s) => s.id)).filter((id) => this.store.service(id));
+    const ids = (requested ?? this.store.services().filter((s) => s.attach === 'all').map((s) => s.id)).filter((id) => {
+      const service = this.store.service(id);
+      if (!service) return false;
+      // A mock service bound to another workspace is skipped (see servesSandbox()).
+      if (this.servesSandbox(service, record)) return true;
+      this.log(`service ${id}: not attached to ${record.id}, it belongs to another workspace`);
+      return false;
+    });
     for (const serviceId of ids) {
       await this.attach(record.id, serviceId).catch((err) => {
-        // Remember the selection; agentEnv() retries.
+        // Remember the selection; agentEnv() retries. Not for a service that does not serve the sandbox's workspace
+        // (it may have moved while attaching): it would be connected to the service's network later.
         const current = this.sandboxes.record(record.id);
+        const service = this.store.service(serviceId);
+        if (!service || !this.servesSandbox(service, current)) return;
         const db = current.serviceDbs?.[serviceId] ?? { name: sandboxDbName(record.id), password: randomBytes(16).toString('hex') };
         db.error = (err as Error).message;
         this.sandboxes.update(record.id, {
@@ -412,6 +439,8 @@ export class ServiceManager {
   private async attachToAll(serviceId: string): Promise<void> {
     for (const sandbox of this.store.sandboxes()) {
       if (sandbox.network === 'none' || sandbox.status === 'error' || sandbox.services?.includes(serviceId)) continue;
+      const service = this.store.service(serviceId);
+      if (service && !this.servesSandbox(service, sandbox)) continue; // bound to another workspace (see servesSandbox())
       await this.attach(sandbox.id, serviceId).catch((err) => this.log(`service ${serviceId}: attach to ${sandbox.id} failed`, err));
     }
   }
@@ -476,10 +505,16 @@ export class ServiceManager {
             SecurityOpt: ['no-new-privileges'],
           },
         });
-        // Sandboxes reach the service by its id on the internal network.
-        await docker.getNetwork(INTERNAL_NETWORK).connect({ Container: container.id, EndpointConfig: { Aliases: [record.id] } });
-      } else this.setRuntime(record, { status: 'starting', error: undefined });
+        // Sandboxes reach the service by its id on its own internal network, which only the sandboxes that have it join
+        // (not on the shared network all sandboxes sit on: they could reach services they are not attached to).
+        await this.docker.ensureInternalNetwork(this.networkName(record.id));
+        await docker.getNetwork(this.networkName(record.id)).connect({ Container: container.id, EndpointConfig: { Aliases: [record.id] } });
+      } else {
+        this.setRuntime(record, { status: 'starting', error: undefined });
+        await this.isolate(record, name);
+      }
       await ignoreStatus(304, () => container.start());
+      await this.linkSandboxes(record);
       await this.refreshContainerState(record);
 
       const deadline = Date.now() + READY_TIMEOUT_MS;
@@ -501,6 +536,73 @@ export class ServiceManager {
     } catch (err) {
       this.setRuntime(record, { status: 'error', error: (err as Error).message });
       throw err;
+    }
+  }
+
+  /** Internal network of one managed service: the service and the sandboxes that have it. */
+  private networkName(serviceId: string): string {
+    return `${CONTAINER_PREFIX}${serviceId}-net`;
+  }
+
+  /**
+   * Moves a service container that was created before per-service networks off the shared network. The service joins
+   * its own network and the attached sandboxes follow before it leaves, so connections only break for a moment.
+   */
+  private async isolate(record: ServiceRecord, container: string): Promise<void> {
+    const docker = this.docker!;
+    try {
+      await docker.ensureInternalNetwork(this.networkName(record.id));
+      await docker.connectNetwork(container, this.networkName(record.id), record.id);
+      await this.linkSandboxes(record);
+      await docker.disconnectNetwork(container, INTERNAL_NETWORK);
+    } catch (err) {
+      this.log(`service ${record.id}: moving to its own network failed`, err);
+    }
+  }
+
+  /** Puts one sandbox on the network of a managed service, unless the service is bound to another workspace. */
+  private async link(record: ServiceRecord, sandbox: SandboxRecord): Promise<void> {
+    if (!this.docker || record.mode !== 'managed' || !sandbox.handle || sandbox.network === 'none') return;
+    if (!this.servesSandbox(record, sandbox)) return;
+    await this.docker.ensureInternalNetwork(this.networkName(record.id));
+    await this.docker.connectNetwork(sandbox.handle, this.networkName(record.id));
+  }
+
+  private async unlink(record: ServiceRecord, sandbox: SandboxRecord): Promise<void> {
+    if (!this.docker || record.mode !== 'managed' || !sandbox.handle) return;
+    await this.docker.disconnectNetwork(sandbox.handle, this.networkName(record.id)).catch((err) => this.log(`service ${record.id}: disconnecting ${sandbox.id} failed`, err));
+  }
+
+  private async linkSandboxes(record: ServiceRecord): Promise<void> {
+    for (const sandbox of this.attachedSandboxes(record.id)) {
+      await this.link(record, sandbox).catch((err) => this.log(`service ${record.id}: connecting ${sandbox.id} failed`, err));
+    }
+  }
+
+  /**
+   * The workspace a mock service (WireMock, Mailpit) is bound to. Those have no per-sandbox isolation (whoever reaches
+   * them sees everything), so `services.add` can bind them to one workspace; without one they serve every sandbox.
+   * A binding to a workspace that no longer exists counts as none.
+   */
+  private boundWorkspace(record: ServiceRecord): string | undefined {
+    if (SERVICE_KINDS[record.kind].category !== 'mock' || !record.workspaceId) return undefined;
+    return this.store.workspace(record.workspaceId) ? record.workspaceId : undefined;
+  }
+
+  private servesSandbox(record: ServiceRecord, sandbox: SandboxRecord): boolean {
+    const bound = this.boundWorkspace(record);
+    return bound === undefined || sandbox.workspaceId === bound;
+  }
+
+  private requireWorkspace(record: ServiceRecord, sandbox: SandboxRecord): void {
+    if (!this.servesSandbox(record, sandbox)) throw new CocoonError('conflict', t('error.serviceOtherWorkspace', { service: this.label(record) }));
+  }
+
+  /** A sandbox moved to another workspace loses the services that are bound to the workspace it left. */
+  private async onSandboxMoved(sandbox: SandboxRecord): Promise<void> {
+    for (const serviceId of [...(sandbox.services ?? [])]) {
+      const record = this.store.service(serviceId);
+      if (record && !this.servesSandbox(record, sandbox)) await this.detach(sandbox.id, serviceId).catch((err) => this.log(`service ${serviceId}: detaching ${sandbox.id} failed`, err));
     }
   }
 
@@ -680,6 +782,7 @@ export class ServiceManager {
       error: rt?.error,
       version: rt?.version,
       hasAdminPassword: Boolean(adminPassword),
+      workspaceId: this.boundWorkspace(record),
       hostPorts: rt?.hostPorts ?? {},
       webUrl: webPort ? `http://127.0.0.1:${webPort}` : undefined,
       sandboxes: this.attachedSandboxes(record.id).map((s) => s.id),

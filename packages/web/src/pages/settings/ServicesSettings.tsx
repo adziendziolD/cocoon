@@ -167,6 +167,7 @@ function ServiceRow({ service: s, all }: { service: ServiceInfo; all: ServiceInf
               </span>
             )}
             <span>{t('services.sandboxCount', { count: s.sandboxes.length })}</span>
+            {s.workspaceId && <span>{t('services.workspaceBound', { id: s.workspaceId })}</span>}
           </div>
           {s.error && (s.status === 'error' || s.status === 'unsupported') && (
             <p className="text-xs break-words text-red-600 dark:text-red-400">{s.error}</p>

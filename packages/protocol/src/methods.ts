@@ -332,6 +332,8 @@ export const methods = {
       autoStop: z.boolean().optional(),
       /** Also attach to existing sandboxes now (only with attach "all"). */
       attachExisting: z.boolean().default(true),
+      /** Mock services only (WireMock, Mailpit): bind the service to this workspace so only its sandboxes can use it. Default: every sandbox. */
+      workspaceId: z.string().optional(),
     }),
     result: ServiceInfo,
   },

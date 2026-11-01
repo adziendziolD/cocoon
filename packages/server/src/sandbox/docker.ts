@@ -263,6 +263,53 @@ export class DockerDriver implements SandboxDriver {
     await this.docker.getNetwork(INTERNAL_NETWORK).connect({ Container: handle });
   }
 
+  /**
+   * Creates an internal network (no gateway) if it does not exist yet. Inspect-then-create is not atomic: if a parallel
+   * call created it first, that is the outcome we wanted.
+   */
+  async ensureInternalNetwork(name: string): Promise<void> {
+    try {
+      await this.docker.getNetwork(name).inspect();
+    } catch (err) {
+      if (statusOf(err) !== 404) throw err;
+      try {
+        await this.docker.createNetwork({ Name: name, Internal: true, Labels: { 'cocoon.managed': 'true' } });
+      } catch (createErr) {
+        if (statusOf(createErr) !== 409 && !isDuplicate(createErr)) throw createErr;
+      }
+    }
+  }
+
+  /** Connects a container to a network (with a DNS alias), if not already connected (also not by a parallel call). */
+  async connectNetwork(handle: string, network: string, alias?: string): Promise<void> {
+    const info = await this.docker.getContainer(handle).inspect();
+    if (info.NetworkSettings.Networks[network]) return;
+    try {
+      await this.docker.getNetwork(network).connect({ Container: handle, ...(alias ? { EndpointConfig: { Aliases: [alias] } } : {}) });
+    } catch (err) {
+      if (!isDuplicate(err)) throw err;
+    }
+  }
+
+  /** Disconnects a container from a network, if it is connected. */
+  async disconnectNetwork(handle: string, network: string): Promise<void> {
+    const info = await this.docker.getContainer(handle).inspect();
+    if (!info.NetworkSettings.Networks[network]) return;
+    await this.docker.getNetwork(network).disconnect({ Container: handle, Force: true });
+  }
+
+  /** Removes a network, disconnecting whatever is still attached; a missing network is fine. */
+  async removeNetwork(name: string): Promise<void> {
+    const network = this.docker.getNetwork(name);
+    try {
+      const info = await network.inspect();
+      for (const id of Object.keys(info.Containers ?? {})) await network.disconnect({ Container: id, Force: true }).catch(() => undefined);
+      await network.remove();
+    } catch (err) {
+      if (statusOf(err) !== 404) throw err;
+    }
+  }
+
   async imageDetails(ref: string): Promise<ImageDetails | undefined> {
     try {
       const info = await this.docker.getImage(ref).inspect();
@@ -331,6 +378,15 @@ function collect() {
 
 export function statusOf(err: unknown): number | undefined {
   return (err as { statusCode?: number })?.statusCode;
+}
+
+/**
+ * "Already exists / already connected" errors of Docker and Podman. Docker answers 409 for a network that exists and 403
+ * ("endpoint with name X already exists in network Y") for a container that is connected; Podman words it as "already
+ * connected" / "network name X already used". The message is the common ground.
+ */
+function isDuplicate(err: unknown): boolean {
+  return /already (exists|connected|used|in use)|is already (part of|attached)/i.test((err as Error)?.message ?? '');
 }
 
 export async function ignoreStatus(status: number, fn: () => Promise<unknown>): Promise<void> {

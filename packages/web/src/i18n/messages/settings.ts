@@ -162,11 +162,11 @@ export const de = {
   'backend.noResourceLimits': 'CPU- und Arbeitsspeicher-Limits werden mit dieser Technik nicht durchgesetzt.',
   'backend.noResourceLimitsShort': 'Hinweis: Mit der aktuellen Sandbox-Technik werden diese Limits nicht durchgesetzt.',
   'backend.noEnforcedEgress':
-    'Internetzugang „Eingeschränkt“ richtet nur den Schutz-Proxy ein – ein Programm in der Sandbox könnte ihn umgehen. Wenn du einen erzwungenen Netzwerkschutz brauchst, nutze Docker oder Podman.',
+    'bubblewrap kann den Netzwerkschutz nicht erzwingen: Sandboxes mit Netzwerk („Eingeschränkt“, „Offen“) teilen das Netzwerk des Servers. CoCoon lehnt sie daher ab, solange auf dem Server nicht COCOON_BWRAP_HOST_NETWORK=1 gesetzt ist. Nutze „Kein Netzwerk“, Docker oder Podman.',
   'backend.switchTitle': 'Wie wechsle ich die Sandbox-Technik?',
   'backend.switchText':
-    'Setze auf dem Server die Umgebungsvariable {env} und starte den CoCoon-Server neu. Mit „auto“ (Standard) nimmt CoCoon Podman, sonst Docker, sonst bubblewrap – je nachdem, was installiert ist.',
-  'backend.switchAuto': 'Podman → Docker → bubblewrap',
+    'Setze auf dem Server die Umgebungsvariable {env} und starte den CoCoon-Server neu. Mit „auto“ (Standard) nimmt CoCoon Podman, sonst Docker. bubblewrap nutzt CoCoon nur, wenn du es mit COCOON_DRIVER=bwrap festlegst.',
+  'backend.switchAuto': 'Podman → Docker',
   'backend.egressNotEnforcedNote': 'Mit {name} wird das nicht erzwungen: Ein Programm könnte den Schutz-Proxy umgehen.',
   'backend.limitsNotEnforcedNote': 'Mit {name} werden CPU- und Speicher-Limits nicht durchgesetzt – die Größe ist nur ein Richtwert.',
 
@@ -377,11 +377,11 @@ export const en: Messages<typeof de> = {
   'backend.noResourceLimits': 'CPU and memory limits are not enforced with this technology.',
   'backend.noResourceLimitsShort': 'Note: these limits are not enforced with the current sandbox technology.',
   'backend.noEnforcedEgress':
-    '“Restricted” internet access only configures the protection proxy – a program in the sandbox could bypass it. Use Docker or Podman if you need enforced network protection.',
+    'bubblewrap cannot enforce network protection: sandboxes with network (“Restricted”, “Open”) share the server’s network. CoCoon therefore refuses them unless COCOON_BWRAP_HOST_NETWORK=1 is set on the server. Use “No network”, Docker or Podman.',
   'backend.switchTitle': 'How do I switch the sandbox technology?',
   'backend.switchText':
-    'Set the environment variable {env} on the server and restart the CoCoon server. With “auto” (the default) CoCoon uses Podman, otherwise Docker, otherwise bubblewrap – depending on what is installed.',
-  'backend.switchAuto': 'Podman → Docker → bubblewrap',
+    'Set the environment variable {env} on the server and restart the CoCoon server. With “auto” (the default) CoCoon uses Podman, otherwise Docker. It uses bubblewrap only if you choose it with COCOON_DRIVER=bwrap.',
+  'backend.switchAuto': 'Podman → Docker',
   'backend.egressNotEnforcedNote': 'Not enforced with {name}: a program could bypass the protection proxy.',
   'backend.limitsNotEnforcedNote': 'With {name}, CPU and memory limits are not enforced – the size is only a guideline.',
 
