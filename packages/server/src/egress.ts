@@ -15,11 +15,34 @@ import { scoped } from './instance.ts';
 export const PROXY_HOST = 'cocoon-proxy';
 const PROXY_CONTAINER = scoped('cocoon-egress-proxy');
 
-/** Secrets that are never handed to sandboxes in egress mode; agents get a placeholder + base URL instead. */
-export const PROXIED_SECRETS: Record<string, { route: string; upstream: string; baseUrlEnv: string; basePath: string }> = {
+/**
+ * Secrets that are never handed to sandboxes in egress mode; agents get a placeholder + base URL instead.
+ * `adapters` limits a secret to agent adapters known to send it to the base URL (and nowhere else), so a placeholder
+ * is never used where the real key would be expected on a fixed host.
+ * Not listed on purpose: GITHUB_TOKEN. gh, git and most GitHub clients talk to api.github.com / github.com directly
+ * over TLS with no base URL to redirect, and the proxy cannot rewrite TLS. That token stays readable in the sandbox.
+ */
+export interface ProxiedSecret {
+  route: string;
+  upstream: string;
+  baseUrlEnv: string;
+  basePath: string;
+  adapters?: string[];
+}
+export const PROXIED_SECRETS: Record<string, ProxiedSecret> = {
   ANTHROPIC_API_KEY: { route: 'anthropic', upstream: 'https://api.anthropic.com', baseUrlEnv: 'ANTHROPIC_BASE_URL', basePath: '' },
+  // Claude subscription token: Claude Code sends it as "Authorization: Bearer <token>", the proxy swaps the placeholder.
+  CLAUDE_CODE_OAUTH_TOKEN: { route: 'anthropic', upstream: 'https://api.anthropic.com', baseUrlEnv: 'ANTHROPIC_BASE_URL', basePath: '', adapters: ['claude-code'] },
   OPENAI_API_KEY: { route: 'openai', upstream: 'https://api.openai.com', baseUrlEnv: 'OPENAI_BASE_URL', basePath: '/v1' },
+  // Gemini CLI sends the key as "x-goog-api-key" to GOOGLE_GEMINI_BASE_URL and appends /v1beta/... itself.
+  GEMINI_API_KEY: { route: 'gemini', upstream: 'https://generativelanguage.googleapis.com', baseUrlEnv: 'GOOGLE_GEMINI_BASE_URL', basePath: '', adapters: ['gemini'] },
 };
+
+/** Proxy definition of a secret for an agent adapter, or undefined if the real value has to enter the sandbox. */
+export function proxiedSecret(name: string, adapter: string): ProxiedSecret | undefined {
+  const def = Object.hasOwn(PROXIED_SECRETS, name) ? PROXIED_SECRETS[name] : undefined;
+  return def && (!def.adapters || def.adapters.includes(adapter)) ? def : undefined;
+}
 
 export const placeholderFor = (proxyToken: string, secret: string) => `cocoon_${proxyToken}_${secret}`;
 
@@ -363,7 +386,8 @@ export class EgressManager {
     if (settings.egress.credentialProxy) {
       for (const [name, def] of Object.entries(PROXIED_SECRETS)) {
         const value = this.secrets.resolve(name);
-        if (value) routes[def.route] = { upstream: def.upstream, secrets: { [name]: value } };
+        // Several secrets can share a route (API key and subscription token both go to Anthropic).
+        if (value) (routes[def.route] ??= { upstream: def.upstream, secrets: {} }).secrets[name] = value;
       }
       for (const [id, provider] of Object.entries(this.providers.all())) {
         const key = this.providers.key(provider);

@@ -6,7 +6,10 @@
 //                         only for known sandboxes. Denied attempts are recorded in <POLICY_DIR>/denied.json.
 // CREDENTIAL_PORT (8080)  Credential proxy. Sandboxes get placeholder keys ("cocoon_<sandboxToken>_<SECRET>") and
 //                         talk to http://<proxy>/t/<token>/<route>/...; the proxy swaps placeholders for real keys
-//                         (or injects the provider's auth header) and forwards upstream. Real keys never enter a sandbox.
+//                         (or injects the provider's auth header) and forwards upstream. This covers the secrets cocoond
+//                         routes through here: Anthropic/OpenAI/Gemini keys, the Claude subscription token, provider and
+//                         per-host environment keys. Not covered: GITHUB_TOKEN and any secret handed out as a plain value;
+//                         those are readable inside the sandbox.
 //
 // Sandboxes are identified by their token (Proxy-Authorization: Basic cocoon:<token>, or the /t/<token>/ path prefix)
 // or, for container sandboxes on the internal network, by their IP.

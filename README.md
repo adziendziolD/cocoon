@@ -65,7 +65,7 @@ it too. The design is inspired by [herdr](https://vercel.com/docs/sandbox/ecosys
 | **Sandbox backends** | **Docker**, **Podman** (rootless, no daemon) or **bubblewrap** (lightweight Linux process sandboxes, no images, start in ~0.3 s) – picked automatically. Containers are hardened (non-root, no capabilities, `no-new-privileges`, CPU/RAM/PID limits) with optional gVisor or Kata/Firecracker runtimes |
 | **Small footprint** | Slim base image under 250 MB (Debian, no Node.js); agent CLIs and their Node.js runtime live in a shared, read-only **toolbox** that is installed once and updated without rebuilding images |
 | **Network control** | Per sandbox: no internet, allowlisted domains only (via egress proxy, default), or open internet. Blocked connections are logged and can be allowed with one click |
-| **Credential proxy** | API keys stay on the server – sandboxes only see placeholders, the proxy adds the real key on the way out |
+| **Credential proxy** | Anthropic, OpenAI and Gemini keys and the Claude subscription token stay on the server – sandboxes only see placeholders, the proxy adds the real value on the way out. The GitHub token is not proxied (see below) |
 | **Many agents** | Claude Code, OpenAI Codex, OpenCode, Pi, Qwen Code, Gemini CLI and plain shells – switch the agent of a sandbox at any time, with handover of task, changes and last output |
 | **Local LLMs** | Each agent is started with the right parameters for your own model server; CoCoon detects which APIs a server speaks and **translates** Anthropic Messages / OpenAI Responses to Chat Completions, so Claude Code and Codex work with chat-only servers (llama.cpp, vLLM, LM Studio, …) |
 | **Custom APIs** | Bring your own model endpoint (Anthropic- or OpenAI-compatible: company gateway, LiteLLM, OpenRouter, Ollama, DeepSeek, …) or give agents access to any HTTP API, with model selection and connection test |
@@ -215,6 +215,12 @@ never appear in a command line (`ps`/`docker top`).
 - `:8080` credential proxy: agents call `http://cocoon-proxy:8080/t/<token>/<route>/…`; the proxy swaps placeholders
   (`cocoon_<sandboxToken>_<SECRET>`) for real keys or injects the provider's auth header, then forwards over TLS.
   A sandbox may only use a route after an agent using it was started there.
+  Proxied: `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` (Claude Code only), `OPENAI_API_KEY`, `GEMINI_API_KEY` (Gemini CLI only),
+  provider keys and per-host environment variables. **Not proxied: `GITHUB_TOKEN`.** `gh`, `git` and other GitHub clients connect to
+  `github.com` / `api.github.com` directly over TLS and offer no base URL to redirect, so the token is readable inside the sandbox
+  and, while `github.com` is allowlisted, can be exfiltrated (e.g. via a gist). Use a fine-grained token limited to the needed
+  repositories and permissions, and remove `github.com` from the allowlist if agents do not need to push. The same applies to
+  secrets of other agents that are not on the proxy list (e.g. `GEMINI_API_KEY` for Pi).
 - cocoond writes the policy to `.data/egress/policy.json`; the proxy reloads it immediately and acknowledges the version,
   so e.g. a repository clone only starts once the proxy knows the new sandbox.
 

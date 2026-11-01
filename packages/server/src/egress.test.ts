@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { EgressManager } from './egress.ts';
+import { EgressManager, proxiedSecret } from './egress.ts';
 import { EventBus } from './events.ts';
 import { SecretsService } from './secrets.ts';
 import { SettingsService } from './settings.ts';
@@ -31,7 +31,7 @@ function setup(credentialProxy = true) {
     { onFinished() {} } as unknown as ImageService, bus, { proxyScript: 'x', processPort: 0 }, () => undefined,
   );
   const policy = () => JSON.parse(readFileSync(join(dir, 'egress', 'policy.json'), 'utf8')) as { tokens: Record<string, { routes: string[] }>; routes: Record<string, { upstream: string; secrets: Record<string, string> }> };
-  return { egress, policy };
+  return { egress, policy, store };
 }
 
 describe('policy with environment routes', () => {
@@ -139,5 +139,31 @@ describe('egress proxy container', () => {
     expect(calls.createdNetworks).toEqual([{ Name: 'cocoon-internal', Internal: true }]);
     expect(calls.created[0].HostConfig.NetworkMode).toBe('bridge');
     expect(calls.connected).toEqual(['cocoon-internal']);
+  });
+});
+
+describe('proxied secrets', () => {
+  it('proxies the Claude subscription token and the Gemini key only for adapters that honour a base URL', () => {
+    expect(proxiedSecret('CLAUDE_CODE_OAUTH_TOKEN', 'claude-code')).toMatchObject({ route: 'anthropic', baseUrlEnv: 'ANTHROPIC_BASE_URL' });
+    expect(proxiedSecret('CLAUDE_CODE_OAUTH_TOKEN', 'opencode')).toBeUndefined();
+    expect(proxiedSecret('GEMINI_API_KEY', 'gemini')).toMatchObject({ route: 'gemini', baseUrlEnv: 'GOOGLE_GEMINI_BASE_URL', upstream: 'https://generativelanguage.googleapis.com' });
+    expect(proxiedSecret('GEMINI_API_KEY', 'pi')).toBeUndefined();
+    expect(proxiedSecret('ANTHROPIC_API_KEY', 'pi')).toMatchObject({ route: 'anthropic' });
+  });
+
+  it('never proxies the GitHub token (no base URL to redirect) or inherited property names', () => {
+    expect(proxiedSecret('GITHUB_TOKEN', 'claude-code')).toBeUndefined();
+    expect(proxiedSecret('toString', 'claude-code')).toBeUndefined();
+  });
+
+  it('puts API key and subscription token on one Anthropic route and the Gemini key on its own', () => {
+    const { egress, policy, store } = setup();
+    for (const [name, value] of Object.entries({ ANTHROPIC_API_KEY: 'sk-ant-key', CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-token', GEMINI_API_KEY: 'gem-key' })) {
+      store.putSecret(name, { value, updatedAt: '' });
+    }
+    egress.writePolicy();
+    const p = policy();
+    expect(p.routes.anthropic).toEqual({ upstream: 'https://api.anthropic.com', secrets: { ANTHROPIC_API_KEY: 'sk-ant-key', CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-token' } });
+    expect(p.routes.gemini).toEqual({ upstream: 'https://generativelanguage.googleapis.com', secrets: { GEMINI_API_KEY: 'gem-key' } });
   });
 });

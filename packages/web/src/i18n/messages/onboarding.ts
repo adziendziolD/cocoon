@@ -186,7 +186,7 @@ export const de = {
   'onboarding.defaults.networkText': 'Wie viel Internet sollen neue Sandboxes bekommen? Agenten brauchen Internet, um ihr KI-Modell zu erreichen.',
   'onboarding.defaults.keysSafeTitle': 'Deine Schlüssel bleiben auf dem Server',
   'onboarding.defaults.keysSafeText':
-    'Im eingeschränkten Modus sehen Agenten in der Sandbox nie deine echten API-Keys. Sie bekommen nur Platzhalter – CoCoon setzt den echten Schlüssel erst auf dem Weg nach draußen ein.',
+    'Im eingeschränkten Modus sehen Agenten in der Sandbox nie deine echten KI-Keys (Anthropic, OpenAI, Gemini, Claude-Abo). Sie bekommen nur Platzhalter – CoCoon setzt den echten Schlüssel erst auf dem Weg nach draußen ein. Das GitHub-Token bleibt in der Sandbox lesbar.',
   'onboarding.defaults.keysExposedTitle': 'Weniger Schutz für deine Schlüssel',
   'onboarding.defaults.keysExposedOpen': 'Mit vollem Internetzugang bekommen Agenten deine echten API-Keys in die Sandbox. Empfohlen ist „{mode}“ – dort bleiben die Schlüssel auf dem Server.',
   'onboarding.defaults.keysExposedProxyOff': 'Der Schutz für API-Keys ist in den Netzwerk-Einstellungen ausgeschaltet. Agenten bekommen deshalb die echten Schlüssel in die Sandbox.',
@@ -476,7 +476,7 @@ export const en: Messages<typeof de> = {
   'onboarding.defaults.networkText': 'How much internet should new sandboxes get? Agents need internet to reach their AI model.',
   'onboarding.defaults.keysSafeTitle': 'Your keys stay on the server',
   'onboarding.defaults.keysSafeText':
-    'In restricted mode, agents inside the sandbox never see your real API keys. They only get placeholders – CoCoon adds the real key on the way out.',
+    'In restricted mode, agents inside the sandbox never see your real AI keys (Anthropic, OpenAI, Gemini, Claude subscription). They only get placeholders – CoCoon adds the real key on the way out. The GitHub token stays readable inside the sandbox.',
   'onboarding.defaults.keysExposedTitle': 'Less protection for your keys',
   'onboarding.defaults.keysExposedOpen': 'With full internet access, agents get your real API keys inside the sandbox. “{mode}” is recommended – there the keys stay on the server.',
   'onboarding.defaults.keysExposedProxyOff': 'The API key protection is switched off in the network settings, so agents get the real keys inside the sandbox.',

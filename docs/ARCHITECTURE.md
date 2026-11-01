@@ -126,10 +126,19 @@ Agenten bedienen, aber keine Keys auslesen oder Sicherheitseinstellungen ändern
 | `egress` (Standard) | Sandbox hängt nur im `internal`-Netz `cocoon-internal` (kein Gateway, kein DNS nach außen). Einziger Weg nach draußen ist der Egress-Proxy (`HTTP(S)_PROXY` ist gesetzt): nur Domains der Allowlist, nur Ports 80/443, nur bekannte Sandbox-IPs. Blockierte Versuche landen in `egress.denied` → in der UI mit einem Klick erlaubbar. |
 | `open` | Docker-Bridge, freies Internet |
 
-**Credential-Proxy** (`egress.credentialProxy`, Standard an): Im egress-Modus bekommen Agenten für `ANTHROPIC_API_KEY` /
-`OPENAI_API_KEY` nur einen Platzhalter `cocoon_<sandboxToken>_<NAME>` und `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` zeigt auf den Proxy.
-Der Proxy tauscht den Platzhalter gegen den echten Key und leitet per TLS weiter. **Der echte Key gelangt nie in die Sandbox**
-(getestet: weder in Env, Dateien noch `/proc`). Andere Secrets (z. B. `CLAUDE_CODE_OAUTH_TOKEN`, `GITHUB_TOKEN`) werden direkt injiziert.
+**Credential-Proxy** (`egress.credentialProxy`, Standard an): Agenten bekommen für `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`
+(nur Claude Code), `OPENAI_API_KEY` und `GEMINI_API_KEY` (nur Gemini CLI) nur einen Platzhalter `cocoon_<sandboxToken>_<NAME>`;
+`ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` / `GOOGLE_GEMINI_BASE_URL` zeigt auf den Proxy. Der Proxy tauscht den Platzhalter
+(auch in `Authorization: Bearer` und `x-goog-api-key`) gegen den echten Wert und leitet per TLS weiter. Für diese Secrets gelangt
+der echte Wert nie in die Sandbox (getestet für die API-Keys: weder in Env, Dateien noch `/proc`).
+
+**Restrisiko:** Was nicht in `PROXIED_SECRETS` (`packages/server/src/egress.ts`) steht, wird im Klartext als Env-Variable in die Sandbox
+gegeben. Das gilt vor allem für `GITHUB_TOKEN` (`gh`, `git` und die meisten GitHub-Clients sprechen `api.github.com` / `github.com`
+direkt per TLS an; es gibt keine Basis-URL, die man umbiegen könnte, und der Proxy terminiert kein TLS). Ein Agent kann dieses Token
+lesen und, solange `github.com` auf der Allowlist steht, darüber exfiltrieren (z. B. per Gist). Gegenmaßnahmen: Token mit minimalen
+Rechten (Fine-grained, einzelne Repositories), `github.com` aus der Allowlist nehmen, wenn kein Push gebraucht wird. Ebenso
+`GEMINI_API_KEY` bei anderen Agenten als Gemini CLI (z. B. Pi) und `CLAUDE_CODE_OAUTH_TOKEN` bei anderen Agenten als Claude Code,
+da deren Base-URL-Verhalten nicht bekannt ist.
 
 **Isolation der Dienste:** Jeder verwaltete Dienst (`cocoon-svc-<id>`) hängt in einem eigenen internen Netz `cocoon-svc-<id>-net`
 (Alias = Dienst-ID), dem nur Sandboxes beitreten, die den Dienst haben (`attach`/`detach`/`started`, Start des Dienstes). Alte

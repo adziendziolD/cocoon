@@ -2,7 +2,7 @@ import { ADAPTERS, AGENT_TOOLS, DEFAULT_MODEL_FLAG, defaultMaxOutput, localize, 
 import { currentLanguage } from '../i18n.ts';
 import type { ServiceManager } from '../services/manager.ts';
 import type { EnvService } from '../env.ts';
-import { PROXIED_SECRETS, placeholderFor, type EgressManager } from '../egress.ts';
+import { placeholderFor, proxiedSecret, type EgressManager } from '../egress.ts';
 import { GIT_CREDENTIAL_HELPER_SCRIPT } from '../sandbox/git-auth.ts';
 import { containerReachableUrl, envPrefixFor, providerRoute, providerUrls, translatedRoute, type ProviderService } from '../providers.ts';
 import { CocoonError, notFound } from '../errors.ts';
@@ -304,8 +304,9 @@ export class AgentManager {
   }
 
   /**
-   * Secrets for the agent. In egress mode with credential proxy enabled, proxied API keys are replaced by
-   * placeholders plus a base URL pointing at the proxy, so the real key never enters the sandbox.
+   * Secrets for the agent. With the credential proxy enabled, proxied secrets (see PROXIED_SECRETS: Anthropic, OpenAI,
+   * Gemini keys, Claude subscription token) are replaced by placeholders plus a base URL pointing at the proxy, so the
+   * real value never enters the sandbox. Everything else (notably GITHUB_TOKEN) is passed in plain text.
    * Default Anthropic/OpenAI keys are skipped when a custom provider of that kind is wired in.
    */
   private secretEnv(profile: AgentProfile, sandbox: SandboxRecord, providerKinds: Set<string>, grants: Set<string>): Record<string, string> {
@@ -317,7 +318,7 @@ export class AgentManager {
       // GITHUB_TOKEN inside the sandbox is the token chosen for this sandbox / workspace.
       const value = name === 'GITHUB_TOKEN' ? this.secrets.githubToken(sandbox) : this.secrets.resolve(name);
       if (!value) continue;
-      const proxied = useProxy ? PROXIED_SECRETS[name] : undefined;
+      const proxied = useProxy ? proxiedSecret(name, profileAdapter(profile)) : undefined;
       if (proxied) {
         env[name] = placeholderFor(sandbox.proxyToken, name);
         env[proxied.baseUrlEnv] = `${this.egress.credentialUrl(sandbox, proxied.route)}${proxied.basePath}`;
