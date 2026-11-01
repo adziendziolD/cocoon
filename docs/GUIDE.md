@@ -109,3 +109,6 @@ It's in `.data/admin-token.txt` on the server. Create more tokens (e.g. for the 
 
 **Can I control CoCoon from Claude Code?**
 Yes – *Settings → Access & integrations* shows the ready-made command to add CoCoon as an MCP server.
+
+**Can mock services (WireMock, Mailpit) be limited to one workspace?**
+Yes, but only deliberately and only through the CLI or API: `cocoon services add wiremock --workspace <workspace id>` (the settings page has no field for it yet). A service added this way is only available to the sandboxes of that workspace and is marked in the services list. Without `--workspace`, a mock service is available to every sandbox that has it attached, in any workspace. If workspaces must not see each other's mocks, add a bound service per workspace and set the unbound ones to manual attach or remove them.

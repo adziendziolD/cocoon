@@ -126,3 +126,6 @@ Ja – die Oberfläche folgt der Sprache deines Browsers (sonst Englisch). Unten
 
 **Wie viele Sandboxes kann ich gleichzeitig betreiben?**
 Standardmäßig 20; jede Sandbox bekommt Grenzen für CPU und Arbeitsspeicher (einstellbar unter *Sandbox-Standards*).
+
+**Können Mock-Dienste (WireMock, Mailpit) nur für einen Workspace gelten?**
+Ja, aber nur bewusst und nur per CLI oder API: `cocoon services add wiremock --workspace <Workspace-ID>` (die Einstellungsseite hat dafür noch kein Feld). Ein so angelegter Dienst steht nur den Sandboxes dieses Workspaces zur Verfügung und ist in der Dienste-Liste markiert. Ohne `--workspace` steht ein Mock-Dienst jeder Sandbox zur Verfügung, die ihn angehängt hat, auch in anderen Workspaces. Wenn Workspaces ihre Mocks nicht gegenseitig sehen sollen, lege je Workspace einen gebundenen Dienst an und stelle die ungebundenen auf manuelles Anhängen oder entferne sie.

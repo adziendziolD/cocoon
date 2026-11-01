@@ -209,7 +209,7 @@ export function createRpc(ctx: RpcContext) {
       const sandboxIds = workspaces.remove(p.workspaceId);
       for (const sandboxId of sandboxIds) {
         if (p.deleteSandboxes) await sandboxes.delete(sandboxId);
-        else sandboxes.rename({ sandboxId, workspaceId: null });
+        else await sandboxes.rename({ sandboxId, workspaceId: null });
       }
       return ok;
     },

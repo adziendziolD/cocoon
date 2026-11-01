@@ -160,6 +160,8 @@ export const ServiceInfo = SharedService.extend({
   /** Version reported by the server, if connected. */
   version: z.string().optional(),
   hasAdminPassword: z.boolean(),
+  /** Mock services (WireMock, Mailpit): the workspace the service is bound to (only its sandboxes can use it); unset = every sandbox. */
+  workspaceId: z.string().optional(),
   /** managed: ports published on 127.0.0.1 of the CoCoon server (by container port). */
   hostPorts: z.record(z.string(), z.number()).default({}),
   /** managed mailpit/wiremock: web interface on the server. */

@@ -429,7 +429,7 @@ const services = program.command('services').description('shared services for al
 services.command('ls').action(async () => {
   const all = await client().call('services.list');
   print(all, () =>
-    console.table(all.map((s) => ({ id: s.id, kind: s.kind, mode: s.mode, status: s.status, version: s.version ?? '', attach: s.attach, sandboxes: s.sandboxes.length, error: s.error ?? '' }))),
+    console.table(all.map((s) => ({ id: s.id, kind: s.kind, mode: s.mode, status: s.status, version: s.version ?? '', attach: s.attach, workspace: s.workspaceId ?? '', sandboxes: s.sandboxes.length, error: s.error ?? '' }))),
   );
 });
 services
@@ -442,6 +442,7 @@ services
   .option('--admin-password <password>')
   .option('--tls')
   .option('--manual', 'do not attach to every sandbox automatically')
+  .option('--workspace <id>', 'wiremock | mailpit only: bind the service to this workspace (default: usable by every sandbox)')
   .action(async (kind, o) => {
     const [host, port] = o.external ? String(o.external).split(/:(?=\d+$)/) : [];
     print(
@@ -456,6 +457,7 @@ services
         adminPassword: o.adminPassword,
         tls: o.tls,
         attach: o.manual ? 'manual' : 'all',
+        workspaceId: o.workspace,
       }),
     );
   });

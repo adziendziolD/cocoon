@@ -84,7 +84,7 @@ const sandbox = (id: string, workspaceId?: string, extra: Partial<SandboxRecord>
 const mock = (id: string, kind: 'wiremock' | 'mailpit' = 'wiremock', extra: Partial<ServiceRecord> = {}): ServiceRecord =>
   ({ id, kind, mode: 'managed', attach: 'all', createdAt: '', adminPassword: 'admin', desired: 'running', autoStop: false, ...extra }) as ServiceRecord;
 
-function setup(services: ServiceRecord[], sandboxes: SandboxRecord[], docker = fakeDocker()) {
+function setup(services: ServiceRecord[], sandboxes: SandboxRecord[], docker = fakeDocker(), workspaces = new Set(['ws1', 'ws2', 'ws3', 'ws9'])) {
   const svc = new Map(services.map((s) => [s.id, s]));
   const sbs = new Map(sandboxes.map((s) => [s.id, s]));
   const store = {
@@ -96,7 +96,7 @@ function setup(services: ServiceRecord[], sandboxes: SandboxRecord[], docker = f
     deleteRetainedService: () => undefined,
     putRetainedService: () => undefined,
     sandboxes: () => [...sbs.values()],
-    workspace: () => ({}),
+    workspace: (id: string) => (workspaces.has(id) ? {} : undefined),
   } as unknown as Store;
   let hooks: any;
   const sandboxManager = {
@@ -109,7 +109,7 @@ function setup(services: ServiceRecord[], sandboxes: SandboxRecord[], docker = f
   const egress = { setRelaySource: vi.fn(), writePolicy: vi.fn(), noProxy: () => '' } as unknown as EgressManager;
   const log = vi.fn();
   const manager = new ServiceManager(docker.driver, store, { publish: vi.fn() } as unknown as EventBus, sandboxManager, egress, log);
-  return { manager, docker, hooks: () => hooks, svc, sbs, log };
+  return { manager, docker, hooks: () => hooks, svc, sbs, log, workspaces };
 }
 
 beforeEach(() => {
@@ -162,16 +162,32 @@ describe('per-service networks', () => {
   });
 });
 
-describe('mock services serve one workspace', () => {
-  it('refuses a sandbox of another workspace once the first one has attached', async () => {
-    const { manager, svc, docker } = setup([mock('wiremock')], [sandbox('sb-a', 'ws1'), sandbox('sb-b', 'ws2'), sandbox('sb-c', 'ws1')]);
+describe('mock services bound to a workspace', () => {
+  it('without a binding a mock service serves every workspace and never binds itself', async () => {
+    const { manager, svc, docker } = setup([mock('wiremock')], [sandbox('sb-a', 'ws1'), sandbox('sb-b', 'ws2'), sandbox('sb-c')]);
+    await manager.startService('wiremock');
+    for (const id of ['sb-a', 'sb-b', 'sb-c']) await manager.attach(id, 'wiremock');
+    expect(svc.get('wiremock')!.workspaceId).toBeUndefined();
+    expect((await manager.list()).find((s) => s.id === 'wiremock')!.workspaceId).toBeUndefined();
+    expect([...docker.networks.get('cocoon-svc-wiremock-net')!].sort()).toEqual(['cocoon-svc-wiremock', 'sb-a-container', 'sb-b-container', 'sb-c-container']);
+  });
+
+  it('new sandboxes of every workspace get an unbound service automatically', async () => {
+    const { manager, hooks, sbs } = setup([mock('wiremock')], [sandbox('sb-a', 'ws1'), sandbox('sb-b', 'ws2')]);
+    await manager.startService('wiremock');
+    await hooks().created(sbs.get('sb-a'), undefined);
+    await hooks().created(sbs.get('sb-b'), undefined);
+    expect(sbs.get('sb-a')!.services).toEqual(['wiremock']);
+    expect(sbs.get('sb-b')!.services).toEqual(['wiremock']);
+  });
+
+  it('refuses a sandbox of another workspace when the service was bound explicitly', async () => {
+    const { manager, docker } = setup([mock('wiremock', 'wiremock', { workspaceId: 'ws1' })], [sandbox('sb-a', 'ws1'), sandbox('sb-b', 'ws2'), sandbox('sb-c')]);
     await manager.startService('wiremock');
     await manager.attach('sb-a', 'wiremock');
-    expect(svc.get('wiremock')!.workspaceId).toBe('ws1');
     await expect(manager.attach('sb-b', 'wiremock')).rejects.toThrow(/anderen Workspace|another workspace/);
-    await manager.attach('sb-c', 'wiremock');
-    // The refused sandbox never joined the network of the service.
-    expect([...docker.networks.get('cocoon-svc-wiremock-net')!].sort()).toEqual(['cocoon-svc-wiremock', 'sb-a-container', 'sb-c-container']);
+    await expect(manager.attach('sb-c', 'wiremock')).rejects.toThrow(/anderen Workspace|another workspace/);
+    expect([...docker.networks.get('cocoon-svc-wiremock-net')!].sort()).toEqual(['cocoon-svc-wiremock', 'sb-a-container']);
   });
 
   it('does not attach another workspace automatically (new sandbox, or a service added later)', async () => {
@@ -184,10 +200,9 @@ describe('mock services serve one workspace', () => {
     expect(sbs.get('sb-a')!.services).toEqual(['wiremock']);
   });
 
-  it('takes no new workspace while a service from before this change is attached to others', async () => {
-    const { manager } = setup([mock('mails', 'mailpit')], [sandbox('sb-a', 'ws1', { services: ['mails'] }), sandbox('sb-b', 'ws2', { services: ['mails'] }), sandbox('sb-c', 'ws3')]);
-    await manager.startService('mails');
-    await expect(manager.attach('sb-c', 'mails')).rejects.toThrow();
+  it('shows the binding in the service info', async () => {
+    const { manager } = setup([mock('wiremock', 'wiremock', { workspaceId: 'ws1' })], []);
+    expect((await manager.list())[0]!.workspaceId).toBe('ws1');
   });
 
   it('keeps databases open to every workspace (they isolate per sandbox user)', async () => {
@@ -201,9 +216,83 @@ describe('mock services serve one workspace', () => {
     expect(svc.get('postgres')!.workspaceId).toBeUndefined();
   });
 
-  it('a scope given when adding the service is kept', async () => {
+  it('a workspace given when adding the service is kept', async () => {
     const { manager, svc } = setup([], []);
     await manager.add({ kind: 'wiremock', workspaceId: 'ws9', attach: 'manual', attachExisting: false, mode: 'managed' } as never);
     expect(svc.get('wiremock')!.workspaceId).toBe('ws9');
+  });
+
+  it('rejects an unknown workspace, and a binding for databases', async () => {
+    const { manager, svc } = setup([], []);
+    await expect(manager.add({ kind: 'wiremock', workspaceId: 'nope', attach: 'manual', attachExisting: false, mode: 'managed' } as never)).rejects.toThrow();
+    await expect(manager.add({ kind: 'postgres', workspaceId: 'ws9', attach: 'manual', attachExisting: false, mode: 'managed' } as never)).rejects.toThrow(/Mock/);
+    expect(svc.size).toBe(0);
+  });
+});
+
+describe('a binding does not outlive its workspace or the sandbox in it', () => {
+  it('treats a binding to a deleted workspace as none: the service is usable by everyone again', async () => {
+    const { manager, workspaces, hooks, sbs } = setup([mock('wiremock', 'wiremock', { workspaceId: 'ws1' })], [sandbox('sb-a'), sandbox('sb-b', 'ws2')]);
+    await manager.startService('wiremock');
+    await expect(manager.attach('sb-a', 'wiremock')).rejects.toThrow();
+    workspaces.delete('ws1'); // workspace.delete: the sandboxes lose their workspace
+    expect((await manager.list())[0]!.workspaceId).toBeUndefined();
+    await manager.attach('sb-a', 'wiremock');
+    await hooks().created(sbs.get('sb-b'), undefined);
+    expect(sbs.get('sb-b')!.services).toEqual(['wiremock']);
+  });
+
+  it('a sandbox moved to another workspace loses the services bound to the one it left', async () => {
+    const { manager, docker, hooks, sbs } = setup(
+      [mock('wiremock', 'wiremock', { workspaceId: 'ws1' }), mock('mails', 'mailpit')],
+      [sandbox('sb-a', 'ws1')],
+    );
+    await manager.startService('wiremock');
+    await manager.startService('mails');
+    await manager.attach('sb-a', 'wiremock');
+    await manager.attach('sb-a', 'mails');
+    sbs.set('sb-a', { ...sbs.get('sb-a')!, workspaceId: 'ws2' }); // sandbox.update
+    await hooks().moved(sbs.get('sb-a'));
+    expect(sbs.get('sb-a')!.services).toEqual(['mails']);
+    expect(docker.networks.get('cocoon-svc-wiremock-net')).not.toContain('sb-a-container');
+    expect(docker.networks.get('cocoon-svc-mails-net')).toContain('sb-a-container');
+  });
+
+  it('a sandbox moved into the workspace of a bound service keeps working with the unbound ones', async () => {
+    const { manager, hooks, sbs } = setup([mock('wiremock', 'wiremock', { workspaceId: 'ws1' })], [sandbox('sb-a', 'ws1', { services: ['wiremock'] })]);
+    await manager.startService('wiremock');
+    await hooks().moved(sbs.get('sb-a'));
+    expect(sbs.get('sb-a')!.services).toEqual(['wiremock']);
+  });
+});
+
+describe('workspace isolation survives races and restarts', () => {
+  it('does not record a service the sandbox may no longer use when it moved while attaching', async () => {
+    const postgres = { id: 'postgres', kind: 'postgres', mode: 'managed', attach: 'all', createdAt: '', adminPassword: 'x', desired: 'running' } as ServiceRecord;
+    const bound = mock('wiremock', 'wiremock', { workspaceId: 'ws1' });
+    const { manager, docker, hooks, sbs } = setup([postgres, bound], [sandbox('sb-a', 'ws1')]);
+    vi.spyOn(ENGINES.postgres, 'test').mockResolvedValue('PostgreSQL');
+    // While the sandbox is being attached to the first service, it is moved to another workspace.
+    vi.spyOn(ENGINES.postgres, 'provision').mockImplementation(async () => void sbs.set('sb-a', { ...sbs.get('sb-a')!, workspaceId: 'ws2' }));
+    await manager.startService('postgres');
+    await manager.startService('wiremock');
+    await hooks().created(sbs.get('sb-a'), undefined);
+    const record = sbs.get('sb-a')!;
+    expect(record.services).toEqual(['postgres']);
+    expect(record.serviceDbs).not.toHaveProperty('wiremock');
+    // Neither a restart of the sandbox nor of the service connects it to the network of the foreign service.
+    await hooks().started(record);
+    await manager.startService('wiremock');
+    expect(docker.networks.get('cocoon-svc-wiremock-net')).not.toContain('sb-a-container');
+  });
+
+  it('does not connect a sandbox to the network of a service bound to another workspace (stale selection)', async () => {
+    const { manager, docker, hooks, sbs } = setup(
+      [mock('wiremock', 'wiremock', { workspaceId: 'ws1' })],
+      [sandbox('sb-a', 'ws1', { services: ['wiremock'] }), sandbox('sb-b', 'ws2', { services: ['wiremock'], serviceDbs: { wiremock: { name: 'x', password: 'y', error: 'conflict' } } })],
+    );
+    await manager.startService('wiremock');
+    await hooks().started(sbs.get('sb-b'));
+    expect([...docker.networks.get('cocoon-svc-wiremock-net')!].sort()).toEqual(['cocoon-svc-wiremock', 'sb-a-container']);
   });
 });

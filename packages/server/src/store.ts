@@ -54,8 +54,8 @@ export interface ServiceRecord extends SharedService {
   /** external with container drivers: proxy port relaying to the server. */
   relayPort?: number;
   /**
-   * Mock services (WireMock, Mailpit) only: the workspace whose sandboxes they serve ('' = sandboxes without a
-   * workspace). Unset until the first sandbox attaches, and for services that were shared across workspaces before.
+   * Mock services (WireMock, Mailpit) only: the workspace whose sandboxes they serve, set only when `services.add` got
+   * one. Unset: every sandbox. Ignored once the workspace no longer exists.
    */
   workspaceId?: string;
 }

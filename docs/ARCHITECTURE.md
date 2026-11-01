@@ -134,9 +134,14 @@ Der Proxy tauscht den Platzhalter gegen den echten Key und leitet per TLS weiter
 **Isolation der Dienste:** Jeder verwaltete Dienst (`cocoon-svc-<id>`) hängt in einem eigenen internen Netz `cocoon-svc-<id>-net`
 (Alias = Dienst-ID), dem nur Sandboxes beitreten, die den Dienst haben (`attach`/`detach`/`started`, Start des Dienstes). Alte
 Dienst-Container wechseln beim nächsten Start vom gemeinsamen `cocoon-internal` ins eigene Netz (erst Dienst und Sandboxes verbinden,
-dann das alte Netz verlassen). Mock-Dienste (WireMock, Mailpit) bedienen genau einen Workspace (`ServiceRecord.workspaceId`, gesetzt von
-der ersten Sandbox, die sich anhängt, oder von `services.add`); Sandboxes anderer Workspaces werden abgelehnt bzw. bei `attach: 'all'`
-übersprungen. Bereits workspaceübergreifend genutzte Mock-Dienste bleiben unverändert, nehmen aber keinen weiteren Workspace auf.
+dann das alte Netz verlassen). Mock-Dienste (WireMock, Mailpit) werden nur dann an einen Workspace gebunden, wenn `services.add` eine `workspaceId` bekommt
+(`ServiceRecord.workspaceId`; nur per API/CLI, `cocoon services add wiremock --workspace <id>`, die Einstellungsseite sendet keine).
+Es gibt keine implizite Bindung. Ein gebundener Dienst lässt nur Sandboxes dieses Workspaces zu (`attach` lehnt andere ab, `attach: 'all'`
+überspringt sie, `link` verbindet sie nie mit dem Dienst-Netz); `ServiceInfo.workspaceId` zeigt die Bindung. Eine Bindung an einen nicht mehr
+vorhandenen Workspace gilt als ungebunden, und eine Sandbox, die per `sandbox.update` in einen anderen Workspace wechselt, verliert die
+Dienste des alten Workspaces (Hook `moved`). Ungebundene Mock-Dienste verhalten sich wie vorher: Sie bedienen jede Sandbox, die sie angehängt
+hat, auch workspaceübergreifend. Workspace-Trennung für Mock-Dienste ist damit Opt-in: je Workspace ein gebundener Dienst, ungebundene auf
+`manual` stellen oder entfernen. Datenbanken werden nicht gebunden (eigene Zugänge je Sandbox).
 Offen: Alle Sandboxes teilen weiter `cocoon-internal` (Egress-Proxy, Port-Gateway). Sandboxes erreichen dort die Ports anderer Sandboxes
 und die TCP-Relays externer Dienste. Ein Netz je Sandbox oder Workspace würde Proxy, Gateway, Relay-Bind und alle Dienste dynamisch an
 jedes Netz hängen und wurde ohne echte Docker-Tests nicht umgesetzt.

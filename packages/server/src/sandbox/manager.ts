@@ -28,6 +28,8 @@ export interface SandboxHooks {
   created?(record: SandboxRecord, requestedServices: string[] | undefined): Promise<void>;
   /** After a stopped sandbox was started again. Must not throw. */
   started?(record: SandboxRecord): Promise<void>;
+  /** After a sandbox was moved to another workspace (or out of its workspace). Must not throw. */
+  moved?(record: SandboxRecord): Promise<void>;
   /** Before the sandbox is removed. Must not throw. */
   deleting?(record: SandboxRecord): Promise<void>;
 }
@@ -67,19 +69,22 @@ export class SandboxManager {
   }
 
   /** Public rename / move to another workspace. */
-  rename(params: MethodParams<'sandbox.update'>): Sandbox {
+  async rename(params: MethodParams<'sandbox.update'>): Promise<Sandbox> {
     const record = this.record(params.sandboxId);
     if (params.name && params.name !== record.name) {
       if (this.store.sandboxes().some((s) => s.name === params.name)) throw new CocoonError('conflict', t('error.sandboxNameTaken', { name: params.name }));
       record.name = params.name;
     }
+    let moved = false;
     if (params.workspaceId !== undefined) {
       if (params.workspaceId && !this.store.workspace(params.workspaceId)) throw notFound('Workspace', params.workspaceId);
+      moved = (params.workspaceId ?? undefined) !== record.workspaceId;
       record.workspaceId = params.workspaceId ?? undefined;
     }
     if (params.githubToken !== undefined) record.githubToken = params.githubToken ?? undefined;
     this.save(record);
-    return publicSandbox(record);
+    if (moved) for (const hooks of this.hooks) await hooks.moved?.(record);
+    return publicSandbox(this.record(params.sandboxId));
   }
 
   /** Returns the driver handle of a running sandbox, or throws. */

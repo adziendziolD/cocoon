@@ -429,11 +429,15 @@ Every service also gets `COCOON_<ID>_URL`, so a second instance of the same kind
   `services_attach`, `services_reset`, …).
 
 Isolation is meant for development and tests: sandboxes cannot read each other's databases, but they share the
-server's resources. **Mock services serve one workspace:** WireMock (its `/__admin` has no login) and Mailpit show everything
-to everyone who reaches them, so they are bound to one workspace: the first sandbox that attaches decides, or pass
-`workspaceId` to `services.add`. Sandboxes of other workspaces are refused (and skipped by *every sandbox*), and cannot reach the
-service's network; add a mock service per workspace instead. Mock services that were already shared across several workspaces
-keep working as before (nothing is detached) but accept no further workspace; detach and attach them to split them.
+server's resources. **Mock services and workspaces:** WireMock (its `/__admin` has no login) and Mailpit show everything to everyone who has
+them attached. A mock service is therefore only bound to a workspace if you say so when you add it, and only through the
+API or CLI (`services.add` with `workspaceId`, or `cocoon services add wiremock --workspace <id>`); the settings page has no
+field for it yet. A bound service can only be used by the sandboxes of that workspace: other sandboxes are refused, skipped by
+*every sandbox* and never join the service's network. The service list shows the binding. A sandbox that moves to another
+workspace loses the services bound to the one it left, and a binding to a deleted workspace no longer applies (the service
+serves every sandbox again). Without `--workspace` nothing changes: the service serves every sandbox it is attached to, in any
+workspace. Workspaces that must not see each other's mocks therefore need a bound mock service per workspace, and the unbound
+ones should be set to manual attach or removed. Databases are not bound: each sandbox gets its own credentials.
 Services that existed before per-service networks move off the shared network the next time they start.
 
 **Remaining limits:** all sandboxes of a CoCoon instance still share the internal network `cocoon-internal` (egress proxy, port
