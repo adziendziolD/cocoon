@@ -75,7 +75,9 @@
 1. **Hooks** (`hook`): Beim Erstellen einer Sandbox werden native Hooks installiert, die `/opt/cocoon/bin/cocoon-status <status>` aufrufen:
    Claude Code über `~/.claude/settings.json` (`UserPromptSubmit`/`PreToolUse`/`PostToolUse` → working, `Notification[permission_prompt]` → blocked,
    `Stop` → done), Codex über `notify` in `~/.codex/config.toml` (→ done). Das Skript schreibt in `/opt/cocoon/status/<agentId>` –
-   **kein Netzwerkzugriff zur Control-Plane nötig**.
+   **kein Netzwerkzugriff zur Control-Plane nötig**. Das Verzeichnis gehört dem Agent-User (0755, nicht mehr 1777). Alle Agents einer Sandbox
+   laufen unter derselben UID und können einander weiterhin Status melden; die Snapshot-Ausgabe (Status-Datei, Prozessname, Bildschirm)
+   wird von Steuerzeichen befreit, damit ein Agent keine Records anderer Agents fälschen kann.
 2. **Heuristik** (`heuristic`): Bildschirm ändert sich → working; ruhig + Blocked-Pattern → blocked; ruhig nach Aufgabe → done;
    bei Shell-Agenten zählt ein laufender Vordergrundprozess als working.
 

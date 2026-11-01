@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { planRepos, type MethodParams, type RepoSource, type Sandbox, type SandboxRepo } from '@cocoon/protocol';
 import { agentNotesScript } from '../agents/notes.ts';
 import { CLAUDE_SETTINGS, CODEX_NOTIFY, claudeStateSeed, installHooksScript } from '../agents/hooks.ts';
-import { COCOON_DIR, STAGING_DIR, STATUS_DIR, STATUS_BIN, STATUS_SCRIPT, TMUX_CONF, TMUX_CONF_PATH } from '../agents/tmux.ts';
+import { sharedDirsScript, STATUS_BIN, STATUS_SCRIPT, TMUX_CONF, TMUX_CONF_PATH } from '../agents/tmux.ts';
 import type { EgressManager } from '../egress.ts';
 import { CocoonError, notFound } from '../errors.ts';
 import type { EventBus } from '../events.ts';
@@ -236,9 +236,9 @@ export class SandboxManager {
       if (res.exitCode !== 0) throw new Error(res.stderr.trim() || `exit ${res.exitCode}`);
     };
 
-    // As root: shared CoCoon files (tmux config, status hook script, world-writable status + staging dirs).
+    // As root: shared CoCoon files (tmux config, status hook script, status dir owned by the agent user, staging dir).
     await run(
-      `mkdir -p ${COCOON_DIR}/bin ${STATUS_DIR} ${STAGING_DIR} && chmod 1777 ${STATUS_DIR} ${STAGING_DIR}
+      `${sharedDirsScript()}
        printf '%s' "$TMUX_CONF" > ${TMUX_CONF_PATH}
        printf '%s' "$STATUS_SCRIPT" > ${STATUS_BIN} && chmod 755 ${STATUS_BIN}`,
       { TMUX_CONF, STATUS_SCRIPT },
