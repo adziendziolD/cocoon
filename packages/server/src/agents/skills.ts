@@ -9,9 +9,14 @@ export function skillsDirFor(adapter: AgentAdapter): string | undefined {
  * Installs skills from a GitHub repository into $HOME/$SKILLS_DIR (run in the sandbox as the agent user).
  * - SKILL_PATH points at a skill folder (containing SKILL.md) → installed as SKILL_NAME.
  * - Otherwise every skill folder directly below the path (or below its "skills/" folder) is installed.
- * Input env: SKILLS_DIR, SKILL_URL, SKILL_REF, SKILL_PATH, SKILL_NAME.
+ * Input env: SKILLS_DIR, SKILL_URL, SKILL_REF, SKILL_PATH, SKILL_NAME. Path and name are checked again here (no "..",
+ * no absolute paths, name is a single folder name) although parseSkillSource already validates them.
  */
 export const INSTALL_SKILL_SCRIPT = `set -e
+bad() { echo "invalid skill name or path" >&2; exit 1; }
+[ -z "$SKILL_PATH" ] || case "/$SKILL_PATH/" in */../*|*//*) bad;; esac
+case "/$SKILLS_DIR/" in */../*|*//*) bad;; esac
+case "$SKILL_NAME" in ''|.|..|*[!A-Za-z0-9._-]*) bad;; esac
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 if [ -n "$SKILL_REF" ]; then git clone --quiet --depth 1 --branch "$SKILL_REF" -- "$SKILL_URL" "$TMP/r"; else git clone --quiet --depth 1 -- "$SKILL_URL" "$TMP/r"; fi
 SRC="$TMP/r"; [ -z "$SKILL_PATH" ] || SRC="$TMP/r/$SKILL_PATH"
