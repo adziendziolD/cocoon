@@ -1,4 +1,4 @@
-import { request, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { request, type IncomingHttpHeaders, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { connect } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { PREVIEW_COOKIE, type PortService } from './ports.ts';
@@ -32,6 +32,22 @@ function upstreamHeaders(req: IncomingMessage, port: number, prefix = ''): Recor
   headers['x-forwarded-proto'] = (req.headers['x-forwarded-proto'] as string | undefined) ?? 'http';
   headers.host = `localhost:${port}`;
   return headers;
+}
+
+/** Sandbox flags for path-based previews: scripts run, but in an opaque origin (no access to the admin origin's storage). */
+export const PATH_MODE_CSP = 'sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads';
+
+/**
+ * Response headers of a path-based preview, which shares the origin with the admin UI: the app in the sandbox may not
+ * set cookies on that origin, and its documents run in an opaque origin so they cannot read the admin token.
+ */
+export function pathModeHeaders(headers: IncomingHttpHeaders): Record<string, string | string[] | undefined> {
+  const out: Record<string, string | string[] | undefined> = { ...headers };
+  delete out['set-cookie'];
+  const upstream = headers['content-security-policy'];
+  // Policies combine: keep the app's own and add ours.
+  out['content-security-policy'] = upstream ? [upstream, PATH_MODE_CSP].flat() : PATH_MODE_CSP;
+  return out;
 }
 
 function page(res: ServerResponse, status: number, title: string, text: string): void {
@@ -78,7 +94,7 @@ export function servePreview(ports: PortService, req: IncomingMessage, res: Serv
     return page(res, 401, 'Not logged in to this preview', 'Open the preview from CoCoon (Sandbox → Ports). / Öffne die Vorschau aus CoCoon heraus (Sandbox → Ports).');
   }
   const upstream = request({ host: '127.0.0.1', port: hostPort, method: req.method, path: route.rest, headers: upstreamHeaders(req, target.port, route.prefix) }, (up) => {
-    res.writeHead(up.statusCode ?? 502, up.headers);
+    res.writeHead(up.statusCode ?? 502, route.prefix ? pathModeHeaders(up.headers) : up.headers);
     up.pipe(res);
   });
   upstream.on('error', () => {

@@ -28,6 +28,10 @@ export const messages = {
     de: 'Freigeben im Netzwerk ist ausgeschaltet (COCOON_PORTS_SHARE_BIND ist leer). Nutze die Vorschau.',
     en: 'Sharing on the network is turned off (COCOON_PORTS_SHARE_BIND is empty). Use the preview instead.',
   },
+  'error.previewPathModeOff': {
+    de: 'Vorschau-Links für den Zugriff von einem anderen Rechner brauchen eine eigene Origin: setze COCOON_PREVIEW_DOMAIN (Wildcard-Domain). Nur im Notfall: {env}=1 aktiviert die pfadbasierte Vorschau auf der Admin-Origin (eingeschränkt, siehe README).',
+    en: 'Preview links for access from another machine need their own origin: set COCOON_PREVIEW_DOMAIN (wildcard domain). As a last resort, {env}=1 enables path-based previews on the admin origin (restricted, see README).',
+  },
   'error.portNotOpen': { de: 'Port {port} ist nicht geöffnet.', en: 'Port {port} is not open.' },
   'error.portRangeFull': { de: 'Alle Host-Ports im Bereich {range} sind belegt. Schließe einen offenen Port.', en: 'All host ports in the range {range} are in use. Close an open port first.' },
   'error.workspaceKeyTaken': { de: 'Das Kürzel „{key}“ ist ungültig oder wird schon von einem anderen Workspace benutzt (2–6 Großbuchstaben/Ziffern).', en: 'The key "{key}" is invalid or already used by another workspace (2–6 capital letters/digits).' },

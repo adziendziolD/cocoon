@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // @ts-expect-error plain JavaScript module of the gateway container
 import { parsePorts } from '../../../images/port-gateway/gateway.mjs';
 import { parseListening, parsePreviewHost, parsePreviewPath, parseRange, PortService, previewLabel } from './ports.ts';
@@ -103,9 +103,11 @@ describe('preview link redemption', () => {
 });
 
 describe('path-based previews (CoCoon opened from another machine)', () => {
-  const make = () => {
+  beforeEach(() => void vi.stubEnv('COCOON_PREVIEW_PATH_MODE', '1'));
+  afterEach(() => void vi.unstubAllEnvs());
+  const make = (previewDomain?: string) => {
     const sandboxes = { record: () => ({ ports: [{ port: 8765 }] }), addHooks: () => {}, update: () => {} };
-    const config = { ports: { enabled: true, previewRange: '7500-7501', shareRange: '7550-7551', shareBind: '', previewDomain: undefined }, port: 7420 };
+    const config = { ports: { enabled: true, previewRange: '7500-7501', shareRange: '7550-7551', shareBind: '', previewDomain }, port: 7420 };
     const svc = new PortService(config as never, {} as never, { dataDir: '/tmp', sandbox: () => ({ ports: [{ port: 8765, hostPort: 7500 }] }) } as never, sandboxes as never, { subscribe: () => {} } as never, {} as never, () => {});
     return Object.assign(svc, { assertEnabled: () => {}, enabled: true }) as PortService;
   };
@@ -136,5 +138,19 @@ describe('path-based previews (CoCoon opened from another machine)', () => {
     expect(svc.previewTargetFor(route, session)).toBe(7500);
     expect(svc.previewTargetFor(route, undefined)).toBeUndefined();
     expect(svc.previewTargetFor({ sandboxId: 'sb_ca0845d20e84', port: 3000 }, session)).toBeUndefined();
+  });
+
+  it('refuses path links and path routes without the opt-in', () => {
+    vi.stubEnv('COCOON_PREVIEW_PATH_MODE', '');
+    const svc = make();
+    expect(() => svc.previewLink('sb_ca0845d20e84', 8765, 'https://cocoon.example')).toThrow(/COCOON_PREVIEW_DOMAIN/);
+    expect(svc.previewRoute('cocoon.example', '/preview/p8765-ca0845d20e84/')).toBeUndefined();
+  });
+
+  it('ignores path routes when host mode is configured, even with the opt-in', () => {
+    const svc = make('preview.example.com');
+    expect(svc.previewRoute('cocoon.example', '/preview/p8765-ca0845d20e84/')).toBeUndefined();
+    expect(svc.previewRoute('p8765-ca0845d20e84.preview.example.com', '/x')).toMatchObject({ port: 8765, prefix: '' });
+    expect(svc.previewLink('sb_ca0845d20e84', 8765, 'https://cocoon.example').url).toMatch(/^https:\/\/p8765-ca0845d20e84\.preview\.example\.com\//);
   });
 });

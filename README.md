@@ -351,12 +351,17 @@ listening TCP ports of every running sandbox). From there:
 
 - **Open preview** – opens the server in the browser, only for people logged in to CoCoon. The preview runs on its own host
   name, `http://p<port>-<sandbox>.localhost:7420/` (browsers resolve `*.localhost` to the local machine), or
-  `https://p<port>-<sandbox>.<COCOON_PREVIEW_DOMAIN>/` with a wildcard domain behind your reverse proxy. When CoCoon is opened
-  from another machine (e.g. via Tailscale Serve, where `*.localhost` would point to your own computer) and no preview domain
-  is set, the link is path-based instead: `<CoCoon URL>/preview/p<port>-<sandbox>/` (cookie scoped to that path, prefix stripped
-  before it reaches the app and sent as `X-Forwarded-Prefix`; apps with absolute asset paths need a base path setting). The link contains a
+  `https://p<port>-<sandbox>.<COCOON_PREVIEW_DOMAIN>/` with a wildcard domain behind your reverse proxy. The link contains a
   one-time token that is exchanged for a cookie valid for that preview only. The app sees `Host: localhost:<port>`, so dev
   servers that only allow localhost (e.g. Vite) work, and WebSockets / hot reload are proxied as well.
+  When CoCoon is opened from another machine (e.g. via Tailscale Serve, where `*.localhost` would point to your own computer),
+  set `COCOON_PREVIEW_DOMAIN`: every preview then has its own origin. Without it, CoCoon refuses to create the link.
+  As a last resort, `COCOON_PREVIEW_PATH_MODE=1` enables path-based previews `<CoCoon URL>/preview/p<port>-<sandbox>/` on the
+  admin origin (ignored when `COCOON_PREVIEW_DOMAIN` is set). Because the app's pages share the origin of the CoCoon UI, they are
+  restricted: responses carry `Content-Security-Policy: sandbox allow-scripts …` (no `allow-same-origin`, so the page runs in
+  an opaque origin and cannot read the admin token) and the app's `Set-Cookie` headers are dropped. Many single-page apps
+  (module scripts, fetch to the same origin) do not work in this mode; the prefix is stripped before it reaches the app and sent as
+  `X-Forwarded-Prefix`.
 - **Share on the network** – publishes the server on a host port (`http://<host-ip>:7550`) for everyone who can reach the
   machine, without login. Opt-in per port, logged in the activity log, can be turned off entirely.
 
@@ -813,6 +818,7 @@ Everything is configurable in the UI. Environment variables (all optional, see [
 | `COCOON_PORTS_SHARE_RANGE` | `7550-7599` | host ports for shared ports |
 | `COCOON_PORTS_SHARE_BIND` | empty | address shared ports are published on, e.g. `0.0.0.0` for the whole network; shared ports have no authentication. Empty = sharing disabled |
 | `COCOON_PREVIEW_DOMAIN` | – | wildcard domain for previews (`p<port>-<sandbox>.<domain>`, HTTPS); default `*.localhost` on the CoCoon port |
+| `COCOON_PREVIEW_PATH_MODE` | – | `1` enables path-based previews on the admin origin (sandboxed, cookies stripped; see [Servers & ports](#servers--ports-previews-and-sharing)); ignored with `COCOON_PREVIEW_DOMAIN` |
 | `COCOON_SERVICE_IDLE_MINUTES` | `10` | Minutes without a running sandbox before a managed shared service is paused |
 | `DOCKER_SOCKET` | auto-detected | Path to the Docker or Podman API socket |
 | `COCOON_PROXY_PORT` | `7431` | bubblewrap only: port of the local egress proxy (credential proxy = port + 1) |
