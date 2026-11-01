@@ -118,7 +118,7 @@ async function clientHello(servername) {
   const got = new Promise((resolve) => (captured = resolve));
   const server = net.createServer((socket) => socket.once('data', (d) => (captured(d), socket.destroy())));
   const port = await listen(server);
-  const client = tls.connect({ host: '127.0.0.1', port, servername, rejectUnauthorized: false });
+  const client = tls.connect({ host: '127.0.0.1', port, servername });
   client.on('error', () => undefined);
   const data = await got;
   client.destroy();

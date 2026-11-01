@@ -113,7 +113,7 @@ async function clientHello(servername) {
   let captured;
   const got = new Promise((resolve) => (captured = resolve));
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const client = tls.connect({ host: '127.0.0.1', port: server.address().port, servername, rejectUnauthorized: false });
+  const client = tls.connect({ host: '127.0.0.1', port: server.address().port, servername });
   client.on('error', () => undefined);
   const data = await got;
   client.destroy();
