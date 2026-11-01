@@ -122,6 +122,12 @@ export class TaskService {
     const workspace = this.workspaces.get(task.workspaceId);
     this.validate(workspace, { ...patch, taskId });
     const { status, ...fields } = patch;
+    // Checked before anything is applied: a refused move must leave the task as it was.
+    if (status && status !== task.status) {
+      if (status === 'running' || status === 'review') throw new CocoonError('bad_request', t('error.taskUseStart'));
+      // Work that was started goes through review and publishing (task.approve); a task that never ran can just be closed.
+      if (status === 'done' && task.status !== 'backlog' && task.status !== 'queued') throw new CocoonError('bad_request', t('error.taskUseApprove', { title: task.title }));
+    }
     Object.assign(task, applyPatch(task, fields));
     for (const key of ['workflowId', 'model', 'sandboxId'] as const) if (fields[key] === null || fields[key] === '') delete task[key];
     if (patch.workflowId) task.agentKind = undefined;
@@ -129,7 +135,6 @@ export class TaskService {
     if (!task.workflowId && !task.agentKind) task.agentKind = workspace.defaultAgentKind;
 
     if (status && status !== task.status) {
-      if (status === 'running' || status === 'review') throw new CocoonError('bad_request', t('error.taskUseStart'));
       this.stopAgent(task);
       task.status = status;
       task.attention = false;

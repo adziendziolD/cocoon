@@ -289,6 +289,36 @@ describe('TaskService: races', () => {
   });
 });
 
+describe('TaskService: update cannot skip review and publishing', () => {
+  it('refuses status done for running, failed and review tasks and leaves them untouched', async () => {
+    const e = engine();
+    const task = await running(e);
+    expect(() => e.tasks.update({ taskId: task.id, status: 'done', title: 'sneaky' })).toThrow(/already started|schon gestartet/);
+    expect(e.store.task(task.id)).toMatchObject({ status: 'running', title: 'Add dark mode' });
+
+    e.report(task.agentId!, 'exited', 1);
+    expect(e.status(task.id)).toBe('failed');
+    expect(() => e.tasks.update({ taskId: task.id, status: 'done' })).toThrow(/already started|schon gestartet/);
+    expect(e.status(task.id)).toBe('failed');
+
+    e.tasks.markFinished(task.id);
+    expect(e.status(task.id)).toBe('review');
+    expect(() => e.tasks.update({ taskId: task.id, status: 'done' })).toThrow(/already started|schon gestartet/);
+    expect(e.status(task.id)).toBe('review');
+
+    // The way to done stays open: approve.
+    expect((await e.tasks.approve(task.id)).status).toBe('done');
+  });
+
+  it('still lets a task that never ran be closed or moved around', () => {
+    const e = engine();
+    const task = e.tasks.create({ workspaceId: e.ws.id, title: 'Not needed' });
+    expect(e.tasks.update({ taskId: task.id, status: 'done' }).status).toBe('done');
+    expect(e.tasks.update({ taskId: task.id, status: 'backlog' }).status).toBe('backlog');
+    expect(e.tasks.update({ taskId: task.id, status: 'queued' }).status).toBe('queued');
+  });
+});
+
 describe('TaskService: dependencies', () => {
   it('rejects dependency cycles', () => {
     const e = engine();

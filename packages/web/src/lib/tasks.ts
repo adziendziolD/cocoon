@@ -82,6 +82,8 @@ export function moveKind(from: TaskStatus, to: TaskStatus): MoveKind {
   if (from === to) return 'reorder';
   if (to === 'running') return from === 'backlog' || from === 'queued' || from === 'failed' ? 'start' : 'forbidden';
   if (from === 'running') return to === 'backlog' ? 'stop' : 'forbidden';
+  // Started work is closed through review (approve), never directly.
+  if (to === 'done' && from === 'failed') return 'forbidden';
   if (to === 'review') return from === 'failed' ? 'markFinished' : 'forbidden';
   if (from === 'review' && to === 'done') return 'approve';
   return 'update';

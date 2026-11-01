@@ -255,6 +255,10 @@ export const messages = {
   'error.taskNotInReview': { de: 'Die Aufgabe „{title}“ wartet gerade nicht auf ein Review', en: 'Task "{title}" is not waiting for a review' },
   'error.taskNotFailed': { de: 'Die Aufgabe „{title}“ ist nicht fehlgeschlagen', en: 'Task "{title}" has not failed' },
   'error.taskDependencies': { de: 'Die Aufgabe wartet noch auf: {titles}', en: 'The task is still waiting for: {titles}' },
+  'error.taskUseApprove': {
+    de: 'Die Aufgabe „{title}“ wurde schon gestartet: Sie wird über „Prüfen“ abgeschlossen (fehlgeschlagen: erst „Doch fertig“, dann „Freigeben“), damit Review und Veröffentlichung nicht übersprungen werden.',
+    en: 'The task "{title}" was already started: it is closed through "Review" (failed: "Finished after all" first, then "Approve"), so that review and publishing are not skipped.',
+  },
   'error.taskUseStart': { de: 'Zum Starten bitte „Starten“ verwenden', en: 'Use "Start" to run a task' },
   'error.unknownWorkflow': { de: 'Unbekannter Ablauf „{id}“', en: 'Unknown workflow "{id}"' },
   'error.unknownDependency': { de: 'Abhängigkeit {id} gehört nicht zu diesem Workspace', en: 'Dependency {id} does not belong to this workspace' },
