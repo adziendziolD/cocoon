@@ -49,8 +49,10 @@ interface Meta {
  * Each sandbox is a directory (workspace, home, tmp, /opt/cocoon) on the host; the host system is mounted read-only and
  * processes run in their own user/pid/ipc/uts (and, for "none", network) namespaces without capabilities.
  * A long-running "keeper" (tmux server) per sandbox keeps agents alive across control-plane restarts.
- * Trade-offs: shares the host kernel and installed tools, no resource limits, and the "restricted" network mode only
- * configures the egress proxy (it is not enforced).
+ * Trade-offs: shares the host kernel and installed tools, no resource limits, and no enforced egress: only the "none"
+ * network mode gets its own network namespace. Sandboxes with network ("egress", "open") share the host's network
+ * (localhost services, CoCoon itself, cloud metadata) and merely get the egress proxy configured, so they are refused
+ * unless the operator opted in (`allowHostNetwork`, COCOON_BWRAP_HOST_NETWORK=1).
  */
 export class BwrapDriver implements SandboxDriver {
   readonly kind = 'bwrap' as const;
@@ -59,7 +61,10 @@ export class BwrapDriver implements SandboxDriver {
   private readonly root: string;
   readonly toolboxDir: string;
 
-  constructor(dataDir: string) {
+  constructor(
+    dataDir: string,
+    private readonly opts: { allowHostNetwork?: boolean } = {},
+  ) {
     this.root = join(dataDir, 'sandboxes');
     this.toolboxDir = join(dataDir, 'agents');
     mkdirSync(this.root, { recursive: true, mode: 0o700 });
@@ -78,6 +83,7 @@ export class BwrapDriver implements SandboxDriver {
   }
 
   async create(spec: SandboxSpec): Promise<{ handle: string }> {
+    this.requireNetworkAllowed(spec.network);
     const dir = join(this.root, spec.sandboxId);
     for (const sub of ['workspace', 'home', 'cocoon', 'tmp', 'etc']) mkdirSync(join(dir, sub), { recursive: true, mode: 0o755 });
     writeFileSync(join(dir, 'etc/passwd'), `root:x:0:0:root:/root:/bin/sh\nagent:x:${SANDBOX_UID}:${SANDBOX_UID}:agent:${HOME}:/bin/bash\n`);
@@ -92,11 +98,12 @@ export class BwrapDriver implements SandboxDriver {
   async start(handle: string): Promise<void> {
     if ((await this.state(handle)) === 'running') return;
     const dir = this.dir(handle);
+    const payload = argsPayload(this.args(handle, { keeper: true })); // before spawning: refuses sandboxes that may not run
     const keeper = spawn('bwrap', ['--args', '3', '--', 'tmux', '-L', 'cocoon', '-f', TMUX_CONF_PATH, '-D'], {
       detached: true,
       stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
     });
-    (keeper.stdio[3] as NodeJS.WritableStream).end(argsPayload(this.args(handle, { keeper: true })));
+    (keeper.stdio[3] as NodeJS.WritableStream).end(payload);
     keeper.unref();
     if (!keeper.pid) throw new Error('could not start sandbox keeper');
     writeFileSync(join(dir, 'keeper.pid'), String(keeper.pid));
@@ -267,14 +274,20 @@ export class BwrapDriver implements SandboxDriver {
     return dir;
   }
 
+  /** Egress cannot be enforced without a network namespace of its own: refuse network modes that share the host's. */
+  private requireNetworkAllowed(network: NetworkMode): void {
+    if (network !== 'none' && !this.opts.allowHostNetwork) throw new CocoonError('bad_request', t('error.bwrapHostNetwork'));
+  }
+
   private meta(handle: string): Meta {
     return JSON.parse(readFileSync(join(this.dir(handle), 'meta.json'), 'utf8')) as Meta;
   }
 
   /** Runs a command in a fresh bwrap of the sandbox; stderr is piped, stdin only if asked for. */
   private spawnIn(handle: string, command: string[], opts: ExecOptions & { stdin?: boolean } = {}) {
+    const payload = argsPayload(this.args(handle, opts)); // before spawning: refuses sandboxes that may not run
     const child = spawn('bwrap', ['--args', '3', '--', ...command], { stdio: [opts.stdin ? 'pipe' : 'ignore', 'pipe', 'pipe', 'pipe'] });
-    (child.stdio[3] as NodeJS.WritableStream).end(argsPayload(this.args(handle, opts)));
+    (child.stdio[3] as NodeJS.WritableStream).end(payload);
     return child;
   }
 
@@ -300,6 +313,7 @@ export class BwrapDriver implements SandboxDriver {
   private args(handle: string, opts: ExecOptions & { tty?: boolean; keeper?: boolean } = {}): string[] {
     const dir = this.dir(handle);
     const meta = this.meta(handle);
+    this.requireNetworkAllowed(meta.network);
     const root = opts.user === 'root' || opts.user === '0' || opts.user === '0:0';
     const args = [
       '--unshare-user', '--unshare-pid', '--unshare-ipc', '--unshare-uts', '--unshare-cgroup-try',

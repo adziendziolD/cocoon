@@ -30,7 +30,7 @@ import { WorkspaceService as WorkspacesService } from './workspaces.ts';
 const config = loadConfig();
 let driver: Awaited<ReturnType<typeof selectDriver>>;
 try {
-  driver = await selectDriver(config.driver, { socket: config.dockerSocket, dataDir: config.dataDir });
+  driver = await selectDriver(config.driver, { socket: config.dockerSocket, dataDir: config.dataDir, bwrapHostNetwork: config.bwrapHostNetwork });
 } catch (err) {
   console.error(t('console.driverDown', { error: (err as Error).message }));
   process.exit(1);
@@ -88,6 +88,7 @@ const baseUrl = config.publicUrl ?? `http://${config.host === '0.0.0.0' ? 'local
 const adminToken = tokens.ensureAdminToken();
 console.log(`\n  ${t('console.running')}: ${baseUrl}`);
 console.log(`  ${t('console.driver')}: ${driver.name}`);
+if (driver.kind === 'bwrap' && config.bwrapHostNetwork) console.warn(`  ${t('console.bwrapHostNetwork')}`);
 if (adminToken) {
   // Only on a terminal: with output redirected to a file or a service log the token would be stored there.
   if (process.stdout.isTTY) console.log(`  ${t('console.login')}: ${baseUrl}/?token=${adminToken}`);

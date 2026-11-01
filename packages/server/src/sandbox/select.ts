@@ -30,22 +30,34 @@ function podmanSockets(): string[] {
 const dockerSocket = () => ['/var/run/docker.sock', `${process.env.HOME}/.docker/run/docker.sock`].find((s) => existsSync(s));
 
 /**
- * Picks the isolation backend. "auto": explicit DOCKER_SOCKET → Podman socket → Docker socket → bubblewrap (Linux).
+ * Picks the isolation backend. "auto": explicit DOCKER_SOCKET → Podman socket → Docker socket. bubblewrap (Linux) is
+ * not picked silently: it cannot enforce egress (sandboxes with network share the host's network), so "auto" only
+ * falls back to it when the operator opted in with `bwrapHostNetwork`; COCOON_DRIVER=bwrap chooses it explicitly.
  */
-export async function selectDriver(choice: DriverChoice, opts: { socket?: string; dataDir: string }): Promise<SandboxDriver> {
+export async function selectDriver(
+  choice: DriverChoice,
+  opts: { socket?: string; dataDir: string; bwrapHostNetwork?: boolean },
+): Promise<SandboxDriver> {
+  const bwrap = () => new BwrapDriver(opts.dataDir, { allowHostNetwork: opts.bwrapHostNetwork });
   const candidates: SandboxDriver[] = [];
   if (choice === 'docker') candidates.push(new DockerDriver('docker', opts.socket ?? dockerSocket()));
   else if (choice === 'podman') candidates.push(...(opts.socket ? [opts.socket] : podmanSockets()).map((s) => new DockerDriver('podman', s)));
-  else if (choice === 'bwrap') candidates.push(new BwrapDriver(opts.dataDir));
+  else if (choice === 'bwrap') candidates.push(bwrap());
   else {
     if (opts.socket) candidates.push(new DockerDriver(opts.socket.includes('podman') ? 'podman' : 'docker', opts.socket));
     candidates.push(...podmanSockets().filter((s) => existsSync(s)).map((s) => new DockerDriver('podman', s)));
     const docker = dockerSocket();
     if (docker) candidates.push(new DockerDriver('docker', docker));
-    if (process.platform === 'linux') candidates.push(new BwrapDriver(opts.dataDir));
+    if (process.platform === 'linux' && opts.bwrapHostNetwork) candidates.push(bwrap());
   }
 
   const errors: string[] = [];
+  if (choice === 'auto' && process.platform === 'linux' && !opts.bwrapHostNetwork) {
+    errors.push(
+      'bubblewrap: not used automatically because it cannot enforce egress (sandboxes with network share the host network). ' +
+        'Set COCOON_DRIVER=bwrap to use it (network mode "none" only), or additionally COCOON_BWRAP_HOST_NETWORK=1 to accept the shared host network.',
+    );
+  }
   for (const driver of candidates) {
     try {
       await driver.check();

@@ -24,7 +24,7 @@ bubblewrap ist am leichtesten):
 curl -fsSL https://get.docker.com | sh
 # Variante B – Podman (kein Hintergrunddienst, kein Root):  sudo apt install -y podman
 #              danach als cocoon-Benutzer: systemctl --user enable --now podman.socket
-# Variante C – bubblewrap (sehr leicht, keine Images): sudo apt install -y bubblewrap tmux git
+# Variante C – bubblewrap (sehr leicht, keine Images, aber kein erzwungener Netzwerkschutz, siehe README): sudo apt install -y bubblewrap tmux git
 
 # Node.js 24 und pnpm installieren
 curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -

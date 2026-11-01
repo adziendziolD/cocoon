@@ -157,9 +157,10 @@ CoCoon talks to sandboxes through a small driver interface, so the isolation tec
 |---|---|---|---|---|
 | **Podman** | Container engine without a background daemon, runs rootless | small, no root service | containers (+ gVisor / Kata / krun runtimes) | uses Podman's Docker-compatible API socket |
 | **Docker** | The standard container engine | daemon (~100 MB), root | containers (+ gVisor / Kata runtimes) | Docker Desktop on macOS/Windows |
-| **bubblewrap** | Linux process sandboxes (namespaces, as used by Flatpak and Claude Code's own sandbox) | tiny – no daemon, no images | user/pid/ipc/uts/(net) namespaces, read-only host, no capabilities | Linux only; shares the host kernel and installed tools; **no resource limits and "Restricted" network is not enforced** (proxy is configured, but could be bypassed) |
+| **bubblewrap** | Linux process sandboxes (namespaces, as used by Flatpak and Claude Code's own sandbox) | tiny – no daemon, no images | user/pid/ipc/uts/(net) namespaces, read-only host, no capabilities | Linux only; shares the host kernel and installed tools; **no resource limits and no enforced egress**: sandboxes with network ("Restricted", "Open") share the host's network, so they are refused unless you set `COCOON_BWRAP_HOST_NETWORK=1`; "No network" works without it |
 
-Selection: `COCOON_DRIVER=auto` (default) uses an explicit `DOCKER_SOCKET`, then a Podman socket, then Docker, then bubblewrap.
+Selection: `COCOON_DRIVER=auto` (default) uses an explicit `DOCKER_SOCKET`, then a Podman socket, then Docker. It does **not** fall back to
+bubblewrap silently, because bubblewrap cannot enforce egress; choose it with `COCOON_DRIVER=bwrap` (or let `auto` use it with `COCOON_BWRAP_HOST_NETWORK=1`).
 Force one with `COCOON_DRIVER=docker|podman|bwrap`. The UI shows the active backend and its capabilities
 (*Settings → Sandbox defaults*), and `system.info` reports `driverKind` and `capabilities`.
 
@@ -202,7 +203,7 @@ never appear in a command line (`ps`/`docker top`).
 
 | Mode | Implementation | Use for |
 |---|---|---|
-| `egress` *(default, "Restricted")* | Docker/Podman: the sandbox is only attached to the internal network `cocoon-internal` (no gateway, no external DNS); the only way out is the egress proxy (`HTTP(S)_PROXY` is preset): allowlisted domains, ports 80/443, known sandboxes only. bubblewrap: proxy configured, not enforced | Normal work – agents can reach model APIs, GitHub, npm, PyPI |
+| `egress` *(default, "Restricted")* | Docker/Podman: the sandbox is only attached to the internal network `cocoon-internal` (no gateway, no external DNS); the only way out is the egress proxy (`HTTP(S)_PROXY` is preset): allowlisted domains, ports 80/443, known sandboxes only. bubblewrap: refused (no enforced egress) unless `COCOON_BWRAP_HOST_NETWORK=1`; then the proxy is only configured, not enforced | Normal work – agents can reach model APIs, GitHub, npm, PyPI |
 | `open` | Bridge network / host network, unrestricted internet | Projects that need arbitrary downloads |
 | `none` | No network at all | Untrusted code, offline analysis |
 
@@ -846,6 +847,7 @@ Everything is configurable in the UI. Environment variables (all optional, see [
 | `COCOON_SERVICE_IDLE_MINUTES` | `10` | Minutes without a running sandbox before a managed shared service is paused |
 | `DOCKER_SOCKET` | auto-detected | Path to the Docker or Podman API socket |
 | `COCOON_PROXY_PORT` | `7431` | bubblewrap only: port of the local egress proxy (credential proxy = port + 1) |
+| `COCOON_BWRAP_HOST_NETWORK` | – | bubblewrap only: `1` accepts that sandboxes in the modes *Restricted* and *Open* share the host's network (egress is not enforced: localhost services, CoCoon itself and metadata endpoints are reachable) and lets `auto` fall back to bubblewrap. Without it only *No network* sandboxes work |
 | `LOG_LEVEL` | `info` | Server log level |
 
 Settings sections: `general` (language, onboarding completion), `providers`, `sandbox` (image, default network, resources, runtime, max sandboxes,

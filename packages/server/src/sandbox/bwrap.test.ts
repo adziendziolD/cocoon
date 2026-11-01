@@ -68,6 +68,34 @@ async function driver(network: SandboxSpec['network'] = 'none') {
   return d;
 }
 
+describe('bwrap network modes (egress is not enforced, the sandbox would share the host network)', () => {
+  it.each(['egress', 'open'] as const)('refuses "%s" sandboxes without the host-network opt-in', async (network) => {
+    const d = new BwrapDriver(dir);
+    await expect(d.create(spec(network))).rejects.toThrow(/COCOON_BWRAP_HOST_NETWORK/);
+  });
+
+  it('allows "none" and isolates it in its own network namespace', async () => {
+    const d = await driver('none');
+    await d.exec('sb_abc123', ['true']);
+    expect(spawned[0]!.options).toContain('--unshare-net');
+  });
+
+  it.each(['egress', 'open'] as const)('creates "%s" sandboxes with the opt-in, sharing the host network', async (network) => {
+    const d = new BwrapDriver(dir, { allowHostNetwork: true });
+    await d.create(spec(network));
+    await d.exec('sb_abc123', ['true']);
+    expect(spawned[0]!.options).not.toContain('--unshare-net');
+  });
+
+  it('does not start or run commands in sandboxes with network that were created before the opt-in was required', async () => {
+    await new BwrapDriver(dir, { allowHostNetwork: true }).create(spec('egress'));
+    const d = new BwrapDriver(dir);
+    await expect(d.start('sb_abc123')).rejects.toThrow(/COCOON_BWRAP_HOST_NETWORK/);
+    await expect(d.exec('sb_abc123', ['true'])).rejects.toThrow(/COCOON_BWRAP_HOST_NETWORK/);
+    expect(spawned).toEqual([]);
+  });
+});
+
 describe('bwrap archives (a host tar would follow symlinks planted by the agent)', () => {
   it('extracts with tar inside the sandbox, never with a host tar', async () => {
     const d = await driver();
