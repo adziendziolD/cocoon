@@ -77,7 +77,7 @@ const rpc = createRpc({ driver, store, settings, secrets, providers, tokens, ima
 const app = await buildHttpServer({ config, rpc, bus, tokens, agents, workspace, ports });
 log = (msg, err) => app.log.warn({ err }, msg);
 
-await sandboxes.reconcile();
+await sandboxes.reconcile(logProxy);
 agents.start();
 tasks.startEngine();
 schedules.start();

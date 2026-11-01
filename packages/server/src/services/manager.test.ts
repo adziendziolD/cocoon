@@ -62,7 +62,7 @@ function setup(services: ServiceRecord[], sandbox: Partial<SandboxRecord> & { id
   const log = vi.fn();
   // A plain object is not a DockerDriver: managed services can't be started, nothing touches Docker.
   const manager = new ServiceManager({} as SandboxDriver, store, bus, sandboxManager, egress, log);
-  return { manager, exec, sh, log };
+  return { manager, exec, sh, log, removeService: (id: string) => byId.delete(id) };
 }
 
 describe('ServiceManager env assembly', () => {
@@ -242,6 +242,26 @@ describe('ServiceManager: Redis users after a restart', () => {
     withRuntime(manager, 'cache', 40_000);
     await expect(manager.agentEnv('sb-1')).resolves.toBeDefined();
     expect(log).toHaveBeenCalledWith(expect.stringContaining('restoring the user'), expect.any(Error));
+  });
+});
+
+describe('ServiceManager: a service removed while the agent starts', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('skips it and still returns the env of the other services', async () => {
+    const provision = vi.spyOn(ENGINES.redis, 'provision').mockResolvedValue(undefined);
+    const { manager, removeService } = setup([service('cache', 'redis'), service('postgres', 'postgres')], {
+      id: 'sb-1',
+      services: ['cache', 'postgres'],
+      serviceDbs: { cache: db('sb_1', 'x'), postgres: db('sb_1', 'y') },
+    });
+    // Starting takes a while; the service is deleted in the meantime.
+    vi.spyOn(manager as unknown as { ensureRunning(id: string): Promise<void> }, 'ensureRunning').mockImplementation(async (id) => {
+      if (id === 'cache') removeService('cache');
+    });
+    const env = await manager.agentEnv('sb-1');
+    expect(provision).not.toHaveBeenCalled();
+    expect(env.DATABASE_URL).toBe('postgresql://sb_1:y@postgres:5432/sb_1');
   });
 });
 
