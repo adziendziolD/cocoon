@@ -1,3 +1,6 @@
+import { CocoonError } from '../errors.ts';
+import { t } from '../i18n.ts';
+
 /**
  * Agents run inside a dedicated tmux server in the sandbox. That gives us, for free:
  * persistence across control-plane restarts and client disconnects, scrollback for `agent.read`,
@@ -46,8 +49,12 @@ export function newSession(opts: { name: string; cwd: string; command: string[];
   );
 }
 
+/** Names the env file may export: the key is interpolated into shell code, so anything else would be injection. */
+export const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 /** Shell file exporting the given variables (sourced by newSession). */
 export function envFileContent(env: Record<string, string>): string {
+  for (const key of Object.keys(env)) if (!ENV_KEY.test(key)) throw new CocoonError('bad_request', t('error.envKeyInvalid', { key: key.slice(0, 64) }));
   return Object.entries(env)
     .map(([key, value]) => `export ${key}='${value.replace(/'/g, `'\\''`)}'\n`)
     .join('');
