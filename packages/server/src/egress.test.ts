@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { EgressManager, proxiedSecret } from './egress.ts';
+import { EgressManager, providerTargets, proxiedSecret } from './egress.ts';
 import { EventBus } from './events.ts';
 import { SecretsService } from './secrets.ts';
 import { SettingsService } from './settings.ts';
@@ -18,19 +18,26 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-function setup(credentialProxy = true) {
+function setup(credentialProxy = true, extra: { egress?: Record<string, unknown>; providers?: Record<string, unknown> } = {}) {
   const store = new Store(dir);
   const bus = new EventBus();
-  const settings = new SettingsService(store, bus, { egress: { credentialProxy } });
+  const settings = new SettingsService(store, bus, { egress: { credentialProxy, ...extra.egress } });
   const record = (id: string, token: string): SandboxRecord =>
     ({ id, name: id, image: 'i', status: 'running', network: 'egress', runtime: null, resources: {}, repos: [], workdir: '/workspace', createdAt: '', proxyToken: token, ip: `10.0.0.${id.length}`, grants: ['anthropic'], services: [] }) as SandboxRecord;
   store.putSandbox(record('sb_a', 'aaaa'));
   store.putSandbox(record('sb_bb', 'bbbb'));
   const egress = new EgressManager(
-    {} as SandboxDriver, store, settings, new SecretsService(store), { all: () => ({}) } as unknown as ProviderService,
+    {} as SandboxDriver, store, settings, new SecretsService(store), { all: () => extra.providers ?? {}, key: () => undefined } as unknown as ProviderService,
     { onFinished() {} } as unknown as ImageService, bus, { proxyScript: 'x', processPort: 0 }, () => undefined,
   );
-  const policy = () => JSON.parse(readFileSync(join(dir, 'egress', 'policy.json'), 'utf8')) as { tokens: Record<string, { routes: string[] }>; routes: Record<string, { upstream: string; secrets: Record<string, string> }> };
+  const policy = () =>
+    JSON.parse(readFileSync(join(dir, 'egress', 'policy.json'), 'utf8')) as {
+      allowlist: string[];
+      allowPrivate: string[];
+      targets: { host: string; port: number }[];
+      tokens: Record<string, { routes: string[] }>;
+      routes: Record<string, { upstream: string; secrets: Record<string, string> }>;
+    };
   return { egress, policy, store };
 }
 
@@ -49,6 +56,39 @@ describe('policy with environment routes', () => {
     egress.setEnvRoutes(() => [{ name: 'env-x', upstream: 'https://x.dev', secrets: { A: 'real' } }]);
     expect(Object.keys(policy().routes)).toEqual([]);
     expect(JSON.stringify(policy())).not.toContain('real');
+  });
+});
+
+describe('policy for the egress proxy checks', () => {
+  it('defaults to no private hosts', () => {
+    const { egress, policy } = setup();
+    egress.writePolicy();
+    expect(policy().allowPrivate).toEqual([]);
+  });
+
+  it('passes the allowPrivate list of the settings on', () => {
+    const { egress, policy } = setup(true, { egress: { allowPrivate: ['git.internal.corp'] } });
+    egress.writePolicy();
+    expect(policy().allowPrivate).toEqual(['git.internal.corp']);
+  });
+
+  it('lists the exact host and port of every provider as a target', () => {
+    const provider = (baseUrl: string) => ({ kind: 'openai', baseUrl, label: 'x', auth: 'none' });
+    const { egress, policy } = setup(true, {
+      providers: { ollama: provider('http://localhost:11434/v1'), cloud: provider('https://api.example.com/v1'), same: provider('https://api.example.com/other') },
+    });
+    egress.writePolicy();
+    expect(policy().targets).toEqual([{ host: 'localhost', port: 11434 }, { host: 'api.example.com', port: 443 }]);
+  });
+});
+
+describe('providerTargets', () => {
+  it('defaults the port by scheme, lower-cases hosts and strips IPv6 brackets', () => {
+    expect(providerTargets(['http://Host.Docker.Internal/v1', 'https://x.dev', 'http://[::1]:8080/v1'])).toEqual([
+      { host: 'host.docker.internal', port: 80 },
+      { host: 'x.dev', port: 443 },
+      { host: '::1', port: 8080 },
+    ]);
   });
 });
 

@@ -2,8 +2,16 @@
 //
 // Runs as a container (Docker/Podman) or as a plain process next to cocoond (bubblewrap driver).
 //
-// FORWARD_PORT (3128)     HTTP(S) forward proxy (CONNECT + plain HTTP). Only allowlisted domains on ports 80/443,
-//                         only for known sandboxes. Denied attempts are recorded in <POLICY_DIR>/denied.json.
+// FORWARD_PORT (3128)     HTTP(S) forward proxy (CONNECT + plain HTTP). Only allowlisted domains on ports 80/443 (plus the
+//                         exact host:port pairs of policy.targets), only for known sandboxes. Denied attempts are recorded
+//                         in <POLICY_DIR>/denied.json. Beyond the name check (see guard.mjs):
+//                         - destinations resolving to private, loopback or link-local addresses (host gateway, cloud
+//                           metadata 169.254.169.254, ...) are refused unless the entry is a target or in allowPrivate;
+//                           the connection uses the checked addresses only (no second lookup)
+//                         - plain HTTP is sent with the checked destination as Host header
+//                         - a CONNECT tunnel must start with a TLS ClientHello whose SNI equals the CONNECT host, otherwise
+//                           it is closed before anything reaches the upstream (domain fronting, non-TLS over 443). Clients
+//                           using Encrypted Client Hello show a different outer name and are refused as well.
 // CREDENTIAL_PORT (8080)  Credential proxy. Sandboxes get placeholder keys ("cocoon_<sandboxToken>_<SECRET>") and
 //                         talk to http://<proxy>/t/<token>/<route>/...; the proxy swaps placeholders for real keys
 //                         (or injects the provider's auth header) and forwards upstream. This covers the secrets cocoond
@@ -15,13 +23,15 @@
 // or, for container sandboxes on the internal network, by their IP.
 //
 // Policy (<POLICY_DIR>/policy.json, written by cocoond, reloaded on change):
-//   { version, allowlist: string[], sandboxes: { [ip]: Sandbox }, tokens: { [token]: Sandbox },
+//   { version, allowlist: string[], allowPrivate: string[], targets: { host, port }[],
+//     sandboxes: { [ip]: Sandbox }, tokens: { [token]: Sandbox },
 //     routes: { [name]: { upstream, secrets: { [NAME]: value }, inject?: { header, value } } } }
 //   Sandbox = { sandboxId, token, routes: string[] } – a sandbox may only use the credential routes it was granted.
 import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
+import { evaluateTarget, guardedLookup, isPrivateAddress, parseAuthority, peekClientHello, sniMatches } from './guard.mjs';
 import { swapHeaders } from './placeholders.mjs';
 import {
   chatToMessage,
@@ -40,7 +50,8 @@ const DENIED_FILE = `${POLICY_DIR}/denied.json`;
 const FORWARD_PORT = Number(process.env.FORWARD_PORT ?? 3128);
 const CREDENTIAL_PORT = Number(process.env.CREDENTIAL_PORT ?? 8080);
 const BIND_HOST = process.env.BIND_HOST ?? '0.0.0.0';
-const ALLOWED_PORTS = new Set([80, 443]);
+const HELLO_TIMEOUT_MS = 10_000;
+const MAX_HELLO_BYTES = 40 * 1024;
 
 const log = (obj) => console.log(JSON.stringify({ at: new Date().toISOString(), ...obj }));
 
@@ -107,21 +118,15 @@ function sandboxFor(req) {
   return policy.sandboxes[clientIp(req.socket ?? req)];
 }
 
-function isAllowed(host) {
-  const h = host.toLowerCase().replace(/\.$/, '');
-  return policy.allowlist.some((pattern) => {
-    const p = pattern.toLowerCase().trim();
-    return p.startsWith('*.') ? h.endsWith(p.slice(1)) : h === p;
-  });
-}
-
 // ── denied log ────────────────────────────────────────────────────────────────
+// reason: undefined (not allowlisted), "private" (resolves to an internal address), "sni" (TLS server name differs from
+// the CONNECT host), "not-tls" (tunnel does not start with a TLS ClientHello).
 const denied = [];
 let deniedDirty = false;
-function recordDenied(req, host, port) {
+function recordDenied(req, host, port, reason) {
   const sandbox = sandboxFor(req);
-  log({ msg: 'denied', ip: clientIp(req.socket), sandboxId: sandbox?.sandboxId, host, port });
-  denied.unshift({ at: new Date().toISOString(), sandboxId: sandbox?.sandboxId, host, port });
+  log({ msg: 'denied', ip: clientIp(req.socket), sandboxId: sandbox?.sandboxId, host, port, reason });
+  denied.unshift({ at: new Date().toISOString(), sandboxId: sandbox?.sandboxId, host, port, reason });
   denied.length = Math.min(denied.length, 200);
   deniedDirty = true;
 }
@@ -146,41 +151,96 @@ const forward = http.createServer((req, res) => {
     return;
   }
   const port = Number(url.port || 80);
-  if (url.protocol !== 'http:' || !sandboxFor(req) || !ALLOWED_PORTS.has(port) || !isAllowed(url.hostname)) {
-    recordDenied(req, url.hostname, port);
-    res.writeHead(403).end(`cocoon: access to ${url.hostname} is not allowed (add it to the allowlist)\n`);
+  const host = url.hostname.replace(/^\[(.*)\]$/, '$1');
+  const decision = evaluateTarget(policy, host, port);
+  if (url.protocol !== 'http:' || !sandboxFor(req) || !decision.allowed) {
+    recordDenied(req, host, port);
+    res.writeHead(403).end(`cocoon: access to ${host} is not allowed (add it to the allowlist)\n`);
     return;
   }
+  const denyPrivate = () => {
+    recordDenied(req, host, port, 'private');
+    if (!res.headersSent) res.writeHead(403).end(`cocoon: ${host} resolves to an internal address\n`);
+  };
+  // IP literals skip DNS, so they are checked here; names are checked by the lookup below.
+  if (!decision.allowPrivate && net.isIP(host) && isPrivateAddress(host)) return denyPrivate();
   const headers = { ...req.headers };
   delete headers['proxy-authorization'];
   delete headers['proxy-connection'];
+  // The upstream Host is the destination that was checked, not whatever the client claims (virtual-host fronting).
+  headers.host = url.host;
   const upstream = http.request(
-    { host: url.hostname, port, path: url.pathname + url.search, method: req.method, headers },
+    // agent: false = no connection reuse, so a socket opened under one policy decision is never reused under another.
+    { host, port, path: url.pathname + url.search, method: req.method, headers, agent: false, lookup: guardedLookup({ allowPrivate: decision.allowPrivate }) },
     (upRes) => {
       res.writeHead(upRes.statusCode ?? 502, upRes.headers);
       upRes.pipe(res);
     },
   );
-  upstream.on('error', () => res.headersSent ? res.destroy() : res.writeHead(502).end());
+  upstream.on('error', (err) => {
+    if (err.code === 'ECOCOON_PRIVATE') return denyPrivate();
+    if (res.headersSent) res.destroy();
+    else res.writeHead(502).end();
+  });
   req.pipe(upstream);
 });
 
 forward.on('connect', (req, clientSocket, head) => {
-  const [host, portText] = (req.url ?? '').split(':');
-  const port = Number(portText || 443);
   clientSocket.on('error', () => undefined);
-  if (!host || !sandboxFor(req) || !ALLOWED_PORTS.has(port) || !isAllowed(host)) {
-    recordDenied(req, host ?? '?', port);
+  const target = parseAuthority(req.url ?? '', 443);
+  const decision = target && evaluateTarget(policy, target.host, target.port);
+  if (!target || !sandboxFor(req) || !decision.allowed) {
+    recordDenied(req, target?.host ?? '?', target?.port);
     clientSocket.end('HTTP/1.1 403 Forbidden\r\n\r\n');
     return;
   }
-  const upstream = net.connect(port, host, () => {
+  const { host, port } = target;
+  const denyPrivate = () => {
+    recordDenied(req, host, port, 'private');
+    clientSocket.end('HTTP/1.1 403 Forbidden\r\n\r\n');
+  };
+  if (!decision.allowPrivate && net.isIP(host) && isPrivateAddress(host)) return denyPrivate();
+
+  let established = false;
+  const upstream = net.connect({ host, port, lookup: guardedLookup({ allowPrivate: decision.allowPrivate }) }, () => {
+    established = true;
     clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-    if (head?.length) upstream.write(head);
-    upstream.pipe(clientSocket);
-    clientSocket.pipe(upstream);
+    // Nothing reaches the upstream before the ClientHello was read and its SNI matched the CONNECT host. Otherwise an
+    // allowlisted name could be used to reach any other virtual host behind the same address (domain fronting), and
+    // plain protocols could be tunnelled over port 443.
+    let buffered = head?.length ? Buffer.from(head) : Buffer.alloc(0);
+    const reject = (reason) => {
+      clearTimeout(timer);
+      clientSocket.off('data', onData);
+      recordDenied(req, host, port, reason);
+      clientSocket.destroy();
+      upstream.destroy();
+    };
+    const timer = setTimeout(() => reject('not-tls'), HELLO_TIMEOUT_MS);
+    const check = () => {
+      const hello = peekClientHello(buffered);
+      if (hello.status === 'more' && buffered.length <= MAX_HELLO_BYTES) return;
+      if (hello.status !== 'ok') return reject('not-tls');
+      if (!sniMatches(hello.sni, host)) return reject('sni');
+      clearTimeout(timer);
+      clientSocket.off('data', onData);
+      clientSocket.pause();
+      upstream.write(buffered);
+      upstream.pipe(clientSocket);
+      clientSocket.pipe(upstream);
+    };
+    const onData = (chunk) => {
+      buffered = Buffer.concat([buffered, chunk]);
+      check();
+    };
+    clientSocket.on('data', onData);
+    check();
   });
-  upstream.on('error', () => clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n'));
+  upstream.on('error', (err) => {
+    if (err.code === 'ECOCOON_PRIVATE') return denyPrivate();
+    if (established) clientSocket.destroy();
+    else clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+  });
   clientSocket.on('close', () => upstream.destroy());
 });
 

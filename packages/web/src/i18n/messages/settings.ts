@@ -92,6 +92,14 @@ export const de = {
   'network.settings.denied.meta': '{count}× · zuletzt {time}',
   'network.settings.denied.alreadyAllowed': 'Inzwischen erlaubt',
   'network.settings.denied.allow': 'Erlauben',
+  'network.settings.denied.allowPrivate': 'Intern erlauben',
+  'network.settings.denied.reason.private': 'Löst auf eine interne Adresse auf (Heim-, Firmennetz oder Host-Rechner)',
+  'network.settings.denied.reason.sni': 'Der TLS-Servername passt nicht zum Ziel',
+  'network.settings.denied.reason.not-tls': 'Die Verbindung ist kein TLS',
+  'network.settings.private.title': 'Interne Adressen',
+  'network.settings.private.description':
+    'Erlaubte Seiten, die auf interne Adressen auflösen (Heimnetz, Firmennetz, Host-Rechner, Cloud-Metadaten), werden blockiert. Trage hier Hosts ein, die das dürfen, z. B. einen internen Git-Server. Sie müssen zusätzlich oben erlaubt sein.',
+  'network.settings.private.empty': 'Keine Ausnahmen.',
 
   // SandboxDefaultsSettings
   'sandboxDefaults.saved': 'Sandbox-Standards gespeichert',
@@ -308,6 +316,14 @@ export const en: Messages<typeof de> = {
   'network.settings.denied.meta': '{count}× · last {time}',
   'network.settings.denied.alreadyAllowed': 'Allowed now',
   'network.settings.denied.allow': 'Allow',
+  'network.settings.denied.allowPrivate': 'Allow internal',
+  'network.settings.denied.reason.private': 'Resolves to an internal address (home or company network, or the host machine)',
+  'network.settings.denied.reason.sni': 'The TLS server name does not match the target',
+  'network.settings.denied.reason.not-tls': 'The connection is not TLS',
+  'network.settings.private.title': 'Internal addresses',
+  'network.settings.private.description':
+    'Allowed sites that resolve to internal addresses (home network, company network, the host machine, cloud metadata) are blocked. List hosts here that may do so, e.g. an internal git server. They must also be allowed above.',
+  'network.settings.private.empty': 'No exceptions.',
 
   // SandboxDefaultsSettings
   'sandboxDefaults.saved': 'Sandbox defaults saved',

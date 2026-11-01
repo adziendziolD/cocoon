@@ -123,8 +123,22 @@ Agenten bedienen, aber keine Keys auslesen oder Sicherheitseinstellungen ändern
 | Modus | Umsetzung |
 |---|---|
 | `none` | Docker `NetworkMode: none` |
-| `egress` (Standard) | Sandbox hängt nur im `internal`-Netz `cocoon-internal` (kein Gateway, kein DNS nach außen). Einziger Weg nach draußen ist der Egress-Proxy (`HTTP(S)_PROXY` ist gesetzt): nur Domains der Allowlist, nur Ports 80/443, nur bekannte Sandbox-IPs. Blockierte Versuche landen in `egress.denied` → in der UI mit einem Klick erlaubbar. |
+| `egress` (Standard) | Sandbox hängt nur im `internal`-Netz `cocoon-internal` (kein Gateway, kein DNS nach außen). Einziger Weg nach draußen ist der Egress-Proxy (`HTTP(S)_PROXY` ist gesetzt): nur Domains der Allowlist, nur Ports 80/443, nur bekannte Sandbox-IPs. Blockierte Versuche landen in `egress.denied` → in der UI mit einem Klick erlaubbar. Zusätzlich prüft der Proxy das Ziel (siehe unten). |
 | `open` | Docker-Bridge, freies Internet |
+
+**Zielprüfung im Egress-Proxy** (`images/egress-proxy/guard.mjs`): Ein erlaubter Name reicht nicht.
+- Auflösung: Der Proxy löst den Namen selbst auf und lehnt ab, wenn eine Adresse privat, Loopback, Link-Local, Unique-Local,
+  Multicast oder reserviert ist (inkl. `169.254.169.254`, Host-Gateway, IPv4-mapped/NAT64/6to4-IPv6). Verbunden wird nur mit den
+  geprüften Adressen (keine zweite Auflösung, also kein DNS-Rebinding). IP-Literale werden direkt geprüft.
+- Ausnahmen gibt es nur explizit: `egress.allowPrivate` (Hosts der Allowlist, die intern auflösen dürfen, z. B. ein interner
+  Git-Server) und `targets` in der Policy (exakter Host und Port eines konfigurierten API-Anbieters, z. B. Ollama auf dem Host).
+- Plain HTTP: Der Upstream-`Host` ist das geprüfte Ziel, nicht der Header des Clients. Verbindungen werden nicht wiederverwendet.
+- CONNECT: Nach dem Verbindungsaufbau liest der Proxy das ClientHello (auch über mehrere Records verteilt) und leitet erst dann
+  Daten weiter, wenn die SNI genau dem CONNECT-Host entspricht (bei IP-Literalen: keine SNI). Sonst wird der Tunnel geschlossen
+  (Domain-Fronting über erlaubte CDN-Hosts, Nicht-TLS über 443). CONNECT-Tunnel müssen immer mit TLS beginnen, auch auf Port 80.
+- Grenzen: Encrypted Client Hello (ECH) wird abgelehnt, weil nur der äußere Name sichtbar ist. Nach dem ClientHello wird der
+  Tunnel nicht mehr inspiziert (kein TLS-Aufbruch). Der Credential-Proxy leitet an feste, vom Admin konfigurierte Upstreams
+  weiter und nutzt diese Prüfung nicht.
 
 **Credential-Proxy** (`egress.credentialProxy`, Standard an): Agenten bekommen für `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`
 (nur Claude Code), `OPENAI_API_KEY` und `GEMINI_API_KEY` (nur Gemini CLI) nur einen Platzhalter `cocoon_<sandboxToken>_<NAME>`;

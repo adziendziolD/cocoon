@@ -210,6 +210,13 @@ never appear in a command line (`ps`/`docker top`).
 **Egress proxy** (`images/egress-proxy`, dependency-free Node.js, read-only container, no capabilities):
 - `:3128` forward proxy enforcing the domain allowlist (`*.example.com` matches subdomains). Denied attempts appear under
   *Settings → Network & security* with an "Allow" button.
+  The proxy also checks where an allowed name leads: it refuses names that resolve to private, loopback or link-local addresses
+  (host gateway, cloud metadata `169.254.169.254`, home or company network) unless the host is listed in `egress.allowPrivate`
+  (*Settings → Network & security → Internal addresses*) or is the exact host and port of a configured API provider; it connects
+  only to the addresses it checked; plain HTTP is forwarded with the checked target as `Host`; and a `CONNECT` tunnel must start
+  with a TLS ClientHello whose server name (SNI) equals the `CONNECT` host, otherwise it is closed before anything reaches the
+  upstream (no domain fronting via allowlisted CDN hosts, no plain protocols over 443). Clients that use Encrypted Client Hello
+  are refused too, because only the outer name is visible. Such refusals show up under *Blocked connections* with their reason.
 - Sandboxes are identified by a per-sandbox token (`Proxy-Authorization` / `/t/<token>/` path prefix) or, on the internal container
   network, by their IP.
 - `:8080` credential proxy: agents call `http://cocoon-proxy:8080/t/<token>/<route>/…`; the proxy swaps placeholders
@@ -881,7 +888,7 @@ Everything is configurable in the UI. Environment variables (all optional, see [
 | `LOG_LEVEL` | `info` | Server log level |
 
 Settings sections: `general` (language, onboarding completion), `providers`, `sandbox` (image, default network, resources, runtime, max sandboxes,
-workdir), `egress` (allowlist, credential proxy), `agents` (agent types), `status` (poll interval, idle threshold),
+workdir), `egress` (allowlist, internal-address exceptions `allowPrivate`, credential proxy), `agents` (agent types), `status` (poll interval, idle threshold),
 `git` (author name/email), `workflows`, `notifications` (webhook URL, events).
 
 ## Deployment

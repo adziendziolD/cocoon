@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Settings } from '@cocoon/protocol';
+import type { DeniedConnection, Settings } from '@cocoon/protocol';
 import { Ban, Check, Plus, RefreshCw, RotateCcw, X } from 'lucide-react';
 import { useDenied, useSandboxes, useSettings } from '../../api/queries';
 import { Button } from '../../components/Button';
@@ -28,6 +28,7 @@ export function NetworkSettings() {
   const settings = useSettings();
   const { draft, setDraft, dirty, reset } = useDraft<Egress>(settings.data?.egress);
   const [input, setInput] = useState('');
+  const [privateInput, setPrivateInput] = useState('');
   const [confirmReset, setConfirmReset] = useState(false);
   const save = useSaveSettings(t('network.settings.saved'), (s) => reset(s.egress));
   const allow = useSaveSettings(t('network.settings.allowed'), (s) => !dirty && reset(s.egress));
@@ -51,6 +52,20 @@ export function NetworkSettings() {
     const server = settings.data?.egress.allowlist ?? [];
     if (dirty) setDraft({ ...draft, allowlist: [...draft.allowlist, host] });
     allow.mutate({ egress: { allowlist: [...server, host] } });
+  };
+
+  const allowPrivateHost = (host: string) => {
+    const server = settings.data?.egress.allowPrivate ?? [];
+    if (dirty) setDraft({ ...draft, allowPrivate: [...draft.allowPrivate, host] });
+    allow.mutate({ egress: { allowPrivate: [...server, host] } });
+  };
+
+  const privateCandidate = privateInput.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const privateErr = privateCandidate && !DOMAIN_RE.test(privateCandidate) ? t('network.settings.invalidDomain') : undefined;
+  const addPrivate = () => {
+    if (!privateCandidate || privateErr) return;
+    if (!draft.allowPrivate.includes(privateCandidate)) setDraft({ ...draft, allowPrivate: [...draft.allowPrivate, privateCandidate] });
+    setPrivateInput('');
   };
 
   return (
@@ -113,6 +128,43 @@ export function NetworkSettings() {
       </Card>
 
       <Card>
+        <CardHeader title={t('network.settings.private.title')} description={t('network.settings.private.description')} />
+        <CardBody className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            {draft.allowPrivate.map((d) => (
+              <span key={d} className="inline-flex items-center gap-1 rounded-full border border-line bg-surface-2 py-1 pr-1 pl-3 font-mono text-xs text-fg">
+                {d}
+                <button
+                  onClick={() => setDraft({ ...draft, allowPrivate: draft.allowPrivate.filter((x) => x !== d) })}
+                  className="rounded-full p-0.5 text-fg-subtle hover:bg-red-500/10 hover:text-red-600"
+                  aria-label={t('network.settings.allowlist.removeAria', { domain: d })}
+                >
+                  <X className="size-3.5" />
+                </button>
+              </span>
+            ))}
+            {draft.allowPrivate.length === 0 && <span className="text-sm text-fg-muted">{t('network.settings.private.empty')}</span>}
+          </div>
+          <div>
+            <div className="flex gap-2">
+              <Input
+                value={privateInput}
+                onChange={(e) => setPrivateInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addPrivate())}
+                placeholder={t('network.settings.allowlist.placeholder')}
+                className="max-w-md font-mono"
+                invalid={!!privateErr}
+              />
+              <Button icon={<Plus className="size-4" />} onClick={addPrivate} disabled={!privateCandidate || !!privateErr}>
+                {t('common.add')}
+              </Button>
+            </div>
+            {privateErr && <p className="mt-1.5 text-xs text-red-600">{privateErr}</p>}
+          </div>
+        </CardBody>
+      </Card>
+
+      <Card>
         <CardHeader title={t('network.settings.proxy.title')} />
         <CardBody>
           <Toggle
@@ -131,7 +183,13 @@ export function NetworkSettings() {
 
       <SaveBar visible={dirty} onSave={() => save.mutate({ egress: draft })} onDiscard={() => reset()} saving={save.isPending} />
 
-      <DeniedCard allowlist={settings.data?.egress.allowlist ?? []} onAllow={allowHost} allowing={allow.isPending} />
+      <DeniedCard
+        allowlist={settings.data?.egress.allowlist ?? []}
+        allowPrivate={settings.data?.egress.allowPrivate ?? []}
+        onAllow={allowHost}
+        onAllowPrivate={allowPrivateHost}
+        allowing={allow.isPending}
+      />
 
       <ConfirmDialog
         open={confirmReset}
@@ -146,18 +204,29 @@ export function NetworkSettings() {
   );
 }
 
-function DeniedCard({ allowlist, onAllow, allowing }: { allowlist: string[]; onAllow: (host: string) => void; allowing: boolean }) {
+interface DeniedCardProps {
+  allowlist: string[];
+  allowPrivate: string[];
+  onAllow: (host: string) => void;
+  onAllowPrivate: (host: string) => void;
+  allowing: boolean;
+}
+
+function DeniedCard({ allowlist, allowPrivate, onAllow, onAllowPrivate, allowing }: DeniedCardProps) {
   const t = useT();
   const denied = useDenied();
   const sandboxes = useSandboxes();
   const sbName = (id?: string) => (id ? (sandboxes.data?.find((s) => s.id === id)?.name ?? id) : undefined);
 
   // Group by host, newest first.
-  const grouped = new Map<string, { host: string; count: number; last: string; sandboxes: Set<string> }>();
+  const grouped = new Map<string, { host: string; count: number; last: string; reason?: DeniedConnection['reason']; sandboxes: Set<string> }>();
   for (const d of denied.data ?? []) {
-    const g = grouped.get(d.host) ?? { host: d.host, count: 0, last: d.at, sandboxes: new Set<string>() };
+    const g = grouped.get(d.host) ?? { host: d.host, count: 0, last: d.at, reason: d.reason, sandboxes: new Set<string>() };
     g.count++;
-    if (d.at > g.last) g.last = d.at;
+    if (d.at > g.last) {
+      g.last = d.at;
+      g.reason = d.reason;
+    }
     const n = sbName(d.sandboxId);
     if (n) g.sandboxes.add(n);
     grouped.set(d.host, g);
@@ -196,8 +265,17 @@ function DeniedCard({ allowlist, onAllow, allowing }: { allowlist: string[]; onA
                     {t('network.settings.denied.meta', { count: r.count, time: formatRelative(r.last) })}
                     {r.sandboxes.size > 0 && ` · ${[...r.sandboxes].join(', ')}`}
                   </div>
+                  {r.reason && <div className="text-xs text-red-600">{t(`network.settings.denied.reason.${r.reason}`)}</div>}
                 </div>
-                {already ? (
+                {r.reason === 'private' ? (
+                  isAllowed(r.host, allowPrivate) ? (
+                    <span className="text-xs text-emerald-600">{t('network.settings.denied.alreadyAllowed')}</span>
+                  ) : (
+                    <Button size="sm" icon={<Check className="size-3.5" />} onClick={() => onAllowPrivate(r.host)} disabled={allowing}>
+                      {t('network.settings.denied.allowPrivate')}
+                    </Button>
+                  )
+                ) : r.reason ? null : already ? (
                   <span className="text-xs text-emerald-600">{t('network.settings.denied.alreadyAllowed')}</span>
                 ) : (
                   <Button size="sm" icon={<Check className="size-3.5" />} onClick={() => onAllow(r.host)} disabled={allowing}>

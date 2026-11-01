@@ -75,6 +75,18 @@ export interface Relay {
   port: number;
 }
 
+/** Exact host/port pairs of provider base URLs, deduplicated (port defaults to 80/443 by scheme). */
+export function providerTargets(urls: string[]): { host: string; port: number }[] {
+  const targets = new Map<string, { host: string; port: number }>();
+  for (const url of urls) {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^\[(.*)\]$/, '$1').toLowerCase();
+    const port = Number(parsed.port || (parsed.protocol === 'https:' ? 443 : 80));
+    targets.set(`${host}:${port}`, { host, port });
+  }
+  return [...targets.values()];
+}
+
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
 function rewriteLocalhost(url: string, host: string): string {
@@ -416,9 +428,16 @@ export class EgressManager {
     // Provider hosts are always reachable (needed when the credential proxy is off).
     const providerHosts = Object.values(this.providers.all()).map((p) => new URL(this.runner.reachableUrl(p.baseUrl)).hostname);
     const allowlist = [...new Set([...settings.egress.allowlist, ...providerHosts])];
+    // The proxy refuses hosts that resolve to internal addresses. Provider endpoints are configured by an administrator
+    // (e.g. Ollama on the CoCoon host), so exactly their host and port may do so.
+    const targets = providerTargets(Object.values(this.providers.all()).map((p) => this.runner.reachableUrl(p.baseUrl)));
     const file = join(this.dir, 'policy.json');
     this.version++;
-    writeFileSync(`${file}.tmp`, JSON.stringify({ version: this.version, allowlist, sandboxes, tokens, routes, relays: this.relays(), relayBind: this.runner.relayBind() }), { mode: 0o600 });
+    writeFileSync(
+      `${file}.tmp`,
+      JSON.stringify({ version: this.version, allowlist, allowPrivate: settings.egress.allowPrivate, targets, sandboxes, tokens, routes, relays: this.relays(), relayBind: this.runner.relayBind() }),
+      { mode: 0o600 },
+    );
     renameSync(`${file}.tmp`, file);
   }
 

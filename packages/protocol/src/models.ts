@@ -543,6 +543,11 @@ export const Settings = z.object({
     .object({
       /** Domains reachable from sandboxes in "egress" mode. "*.example.com" matches subdomains. */
       allowlist: z.array(z.string()).default(DEFAULT_ALLOWLIST),
+      /**
+       * Allowlisted hosts (same patterns) that may resolve to private, loopback or link-local addresses, e.g. an internal
+       * git server. Everything else that resolves to such an address is refused, even if it is on the allowlist.
+       */
+      allowPrivate: z.array(z.string()).default([]),
       /** Keep API keys out of sandboxes: agents talk to the proxy, which adds the real key. */
       credentialProxy: z.boolean().default(true),
     })
@@ -831,5 +836,7 @@ export const DeniedConnection = z.object({
   sandboxId: z.string().optional(),
   host: z.string(),
   port: z.number().optional(),
+  /** Why an allowlisted host was refused: resolves to an internal address, TLS name differs from the target, or no TLS. */
+  reason: z.enum(['private', 'sni', 'not-tls']).optional(),
 });
 export type DeniedConnection = z.infer<typeof DeniedConnection>;
