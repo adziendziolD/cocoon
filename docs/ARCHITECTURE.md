@@ -123,13 +123,37 @@ Agenten bedienen, aber keine Keys auslesen oder Sicherheitseinstellungen ändern
 | Modus | Umsetzung |
 |---|---|
 | `none` | Docker `NetworkMode: none` |
-| `egress` (Standard) | Sandbox hängt nur im `internal`-Netz `cocoon-internal` (kein Gateway, kein DNS nach außen). Einziger Weg nach draußen ist der Egress-Proxy (`HTTP(S)_PROXY` ist gesetzt): nur Domains der Allowlist, nur Ports 80/443, nur bekannte Sandbox-IPs. Blockierte Versuche landen in `egress.denied` → in der UI mit einem Klick erlaubbar. |
+| `egress` (Standard) | Sandbox hängt nur im `internal`-Netz `cocoon-internal` (kein Gateway, kein DNS nach außen). Einziger Weg nach draußen ist der Egress-Proxy (`HTTP(S)_PROXY` ist gesetzt): nur Domains der Allowlist, nur Ports 80/443, nur bekannte Sandbox-IPs. Blockierte Versuche landen in `egress.denied` → in der UI mit einem Klick erlaubbar. Zusätzlich prüft der Proxy das Ziel (siehe unten). |
 | `open` | Docker-Bridge, freies Internet |
 
-**Credential-Proxy** (`egress.credentialProxy`, Standard an): Im egress-Modus bekommen Agenten für `ANTHROPIC_API_KEY` /
-`OPENAI_API_KEY` nur einen Platzhalter `cocoon_<sandboxToken>_<NAME>` und `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` zeigt auf den Proxy.
-Der Proxy tauscht den Platzhalter gegen den echten Key und leitet per TLS weiter. **Der echte Key gelangt nie in die Sandbox**
-(getestet: weder in Env, Dateien noch `/proc`). Andere Secrets (z. B. `CLAUDE_CODE_OAUTH_TOKEN`, `GITHUB_TOKEN`) werden direkt injiziert.
+**Zielprüfung im Egress-Proxy** (`images/egress-proxy/guard.mjs`): Ein erlaubter Name reicht nicht.
+- Auflösung: Der Proxy löst den Namen selbst auf und lehnt ab, wenn eine Adresse privat, Loopback, Link-Local, Unique-Local,
+  Multicast oder reserviert ist (inkl. `169.254.169.254`, Host-Gateway, IPv4-mapped/NAT64/6to4-IPv6). Verbunden wird nur mit den
+  geprüften Adressen (keine zweite Auflösung, also kein DNS-Rebinding). IP-Literale werden direkt geprüft.
+- Ausnahmen gibt es nur explizit: `egress.allowPrivate` (Hosts der Allowlist, die intern auflösen dürfen, z. B. ein interner
+  Git-Server) und `targets` in der Policy (exakter Host und Port eines konfigurierten API-Anbieters, z. B. Ollama auf dem Host).
+- Plain HTTP: Der Upstream-`Host` ist das geprüfte Ziel, nicht der Header des Clients. Verbindungen werden nicht wiederverwendet.
+- CONNECT: Nach dem Verbindungsaufbau liest der Proxy das ClientHello (auch über mehrere Records verteilt) und leitet erst dann
+  Daten weiter, wenn die SNI genau dem CONNECT-Host entspricht (bei IP-Literalen: keine SNI). Sonst wird der Tunnel geschlossen
+  (Domain-Fronting über erlaubte CDN-Hosts, Nicht-TLS über 443). CONNECT-Tunnel müssen immer mit TLS beginnen, auch auf Port 80.
+- Grenzen: Encrypted Client Hello (ECH) wird abgelehnt, weil nur der äußere Name sichtbar ist. Nach dem ClientHello wird der
+  Tunnel nicht mehr inspiziert (kein TLS-Aufbruch). Der Credential-Proxy leitet an feste, vom Admin konfigurierte Upstreams
+  weiter und nutzt diese Prüfung nicht.
+
+**Credential-Proxy** (`egress.credentialProxy`, Standard an): Agenten bekommen für `ANTHROPIC_API_KEY` und `OPENAI_API_KEY`
+(experimentell und standardmäßig aus, mit `COCOON_PROXY_EXTRA_SECRETS=1`: auch `CLAUDE_CODE_OAUTH_TOKEN` nur für Claude Code und
+`GEMINI_API_KEY` nur für Gemini CLI; deren Verhalten ist nicht gegen die echten CLIs geprüft) nur einen Platzhalter `cocoon_<sandboxToken>_<NAME>`;
+`ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` / `GOOGLE_GEMINI_BASE_URL` zeigt auf den Proxy. Der Proxy tauscht den Platzhalter
+(auch in `Authorization: Bearer` und `x-goog-api-key`) gegen den echten Wert und leitet per TLS weiter. Für diese Secrets gelangt
+der echte Wert nie in die Sandbox (getestet für die API-Keys: weder in Env, Dateien noch `/proc`).
+
+**Restrisiko:** Was nicht in `PROXIED_SECRETS` (`packages/server/src/egress.ts`) steht, wird im Klartext als Env-Variable in die Sandbox
+gegeben. Das gilt vor allem für `GITHUB_TOKEN` (`gh`, `git` und die meisten GitHub-Clients sprechen `api.github.com` / `github.com`
+direkt per TLS an; es gibt keine Basis-URL, die man umbiegen könnte, und der Proxy terminiert kein TLS). Ein Agent kann dieses Token
+lesen und, solange `github.com` auf der Allowlist steht, darüber exfiltrieren (z. B. per Gist). Gegenmaßnahmen: Token mit minimalen
+Rechten (Fine-grained, einzelne Repositories), `github.com` aus der Allowlist nehmen, wenn kein Push gebraucht wird. Ebenso
+`GEMINI_API_KEY` und `CLAUDE_CODE_OAUTH_TOKEN`, solange `COCOON_PROXY_EXTRA_SECRETS` nicht gesetzt ist, und auch dann bei anderen
+Agenten als Gemini CLI (z. B. Pi) bzw. Claude Code, da deren Base-URL-Verhalten nicht bekannt ist.
 
 **Isolation der Dienste:** Jeder verwaltete Dienst (`cocoon-svc-<id>`) hängt in einem eigenen internen Netz `cocoon-svc-<id>-net`
 (Alias = Dienst-ID), dem nur Sandboxes beitreten, die den Dienst haben (`attach`/`detach`/`started`, Start des Dienstes). Alte
@@ -178,7 +202,9 @@ Agent-Typen (`providers`, `model`) oder einzelne Starts (`agent.spawn { provider
 Im egress-Modus zeigt die Base-URL auf den Credential-Proxy (`http://cocoon-proxy:8080/p-<id>`); der Proxy **setzt den Auth-Header
 selbst** und tauscht Platzhalter – der echte Key bleibt auf dem Server. Eine Sandbox darf eine Route erst nutzen, wenn darin ein Agent
 mit diesem Anbieter gestartet wurde (Grants pro Sandbox). `localhost` in der Base-URL wird automatisch zu `host.docker.internal`, sodass
-Dienste auf dem Server selbst (z. B. Ollama) erreichbar sind. Anbieter-Hosts werden automatisch zur Allowlist hinzugefügt.
+Dienste auf dem Server selbst (z. B. Ollama) erreichbar sind. Anbieter sind über den Egress-Proxy automatisch erreichbar, aber nur auf ihrem Host und Port (`targets` in der Policy), nicht über
+den Host auf 80/443: Ein lokaler Anbieter wie Ollama (`localhost:11434`) öffnet nur `host.docker.internal:11434`, andere Dienste
+des Servers bleiben unerreichbar. Anbieter-Hosts landen nicht in der Allowlist.
 `providers.test` prüft Erreichbarkeit, Anmeldung und liest die Modellliste – direkt vom Server, auch vor dem Speichern.
 
 ### Mehrsprachigkeit

@@ -15,11 +15,40 @@ import { scoped } from './instance.ts';
 export const PROXY_HOST = 'cocoon-proxy';
 const PROXY_CONTAINER = scoped('cocoon-egress-proxy');
 
-/** Secrets that are never handed to sandboxes in egress mode; agents get a placeholder + base URL instead. */
-export const PROXIED_SECRETS: Record<string, { route: string; upstream: string; baseUrlEnv: string; basePath: string }> = {
+/**
+ * Secrets that are never handed to sandboxes in egress mode; agents get a placeholder + base URL instead.
+ * `adapters` limits a secret to agent adapters known to send it to the base URL (and nowhere else), so a placeholder
+ * is never used where the real key would be expected on a fixed host.
+ * Not listed on purpose: GITHUB_TOKEN. gh, git and most GitHub clients talk to api.github.com / github.com directly
+ * over TLS with no base URL to redirect, and the proxy cannot rewrite TLS. That token stays readable in the sandbox.
+ */
+export interface ProxiedSecret {
+  route: string;
+  upstream: string;
+  baseUrlEnv: string;
+  basePath: string;
+  adapters?: string[];
+  /** Only proxied with COCOON_PROXY_EXTRA_SECRETS=1: how the agent CLI uses the base URL is not verified against the real CLI. */
+  optIn?: boolean;
+}
+
+/** Turns on proxying of the Claude subscription token and the Gemini key (experimental, see PROXIED_SECRETS). */
+export const EXTRA_SECRETS_ENV = 'COCOON_PROXY_EXTRA_SECRETS';
+export const PROXIED_SECRETS: Record<string, ProxiedSecret> = {
   ANTHROPIC_API_KEY: { route: 'anthropic', upstream: 'https://api.anthropic.com', baseUrlEnv: 'ANTHROPIC_BASE_URL', basePath: '' },
+  // Claude subscription token: Claude Code sends it as "Authorization: Bearer <token>", the proxy swaps the placeholder.
+  CLAUDE_CODE_OAUTH_TOKEN: { route: 'anthropic', upstream: 'https://api.anthropic.com', baseUrlEnv: 'ANTHROPIC_BASE_URL', basePath: '', adapters: ['claude-code'], optIn: true },
   OPENAI_API_KEY: { route: 'openai', upstream: 'https://api.openai.com', baseUrlEnv: 'OPENAI_BASE_URL', basePath: '/v1' },
+  // Gemini CLI sends the key as "x-goog-api-key" to GOOGLE_GEMINI_BASE_URL and appends /v1beta/... itself.
+  GEMINI_API_KEY: { route: 'gemini', upstream: 'https://generativelanguage.googleapis.com', baseUrlEnv: 'GOOGLE_GEMINI_BASE_URL', basePath: '', adapters: ['gemini'], optIn: true },
 };
+
+/** Proxy definition of a secret for an agent adapter, or undefined if the real value has to enter the sandbox. */
+export function proxiedSecret(name: string, adapter: string): ProxiedSecret | undefined {
+  const def = Object.hasOwn(PROXIED_SECRETS, name) ? PROXIED_SECRETS[name] : undefined;
+  if (def?.optIn && process.env[EXTRA_SECRETS_ENV] !== '1') return undefined;
+  return def && (!def.adapters || def.adapters.includes(adapter)) ? def : undefined;
+}
 
 export const placeholderFor = (proxyToken: string, secret: string) => `cocoon_${proxyToken}_${secret}`;
 
@@ -50,6 +79,18 @@ export interface Relay {
   listen: number;
   host: string;
   port: number;
+}
+
+/** Exact host/port pairs of provider base URLs, deduplicated (port defaults to 80/443 by scheme). */
+export function providerTargets(urls: string[]): { host: string; port: number }[] {
+  const targets = new Map<string, { host: string; port: number }>();
+  for (const url of urls) {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^\[(.*)\]$/, '$1').toLowerCase();
+    const port = Number(parsed.port || (parsed.protocol === 'https:' ? 443 : 80));
+    targets.set(`${host}:${port}`, { host, port });
+  }
+  return [...targets.values()];
 }
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
@@ -362,8 +403,10 @@ export class EgressManager {
     const routes: Record<string, Route> = { ...envRoutes };
     if (settings.egress.credentialProxy) {
       for (const [name, def] of Object.entries(PROXIED_SECRETS)) {
+        if (def.optIn && process.env[EXTRA_SECRETS_ENV] !== '1') continue;
         const value = this.secrets.resolve(name);
-        if (value) routes[def.route] = { upstream: def.upstream, secrets: { [name]: value } };
+        // Several secrets can share a route (API key and subscription token both go to Anthropic).
+        if (value) (routes[def.route] ??= { upstream: def.upstream, secrets: {} }).secrets[name] = value;
       }
       for (const [id, provider] of Object.entries(this.providers.all())) {
         const key = this.providers.key(provider);
@@ -389,12 +432,18 @@ export class EgressManager {
         }
       }
     }
-    // Provider hosts are always reachable (needed when the credential proxy is off).
-    const providerHosts = Object.values(this.providers.all()).map((p) => new URL(this.runner.reachableUrl(p.baseUrl)).hostname);
-    const allowlist = [...new Set([...settings.egress.allowlist, ...providerHosts])];
+    // Provider endpoints are always reachable (needed when the credential proxy is off), but only on their own host and
+    // port. Adding the bare host to the allowlist would open ports 80/443 on it, and for a local provider (Ollama on the
+    // CoCoon host, reached as host.docker.internal) that means every web service of the host. The proxy also accepts
+    // internal addresses for these targets, since an administrator configured them.
+    const targets = providerTargets(Object.values(this.providers.all()).map((p) => this.runner.reachableUrl(p.baseUrl)));
     const file = join(this.dir, 'policy.json');
     this.version++;
-    writeFileSync(`${file}.tmp`, JSON.stringify({ version: this.version, allowlist, sandboxes, tokens, routes, relays: this.relays(), relayBind: this.runner.relayBind() }), { mode: 0o600 });
+    writeFileSync(
+      `${file}.tmp`,
+      JSON.stringify({ version: this.version, allowlist: settings.egress.allowlist, allowPrivate: settings.egress.allowPrivate, targets, sandboxes, tokens, routes, relays: this.relays(), relayBind: this.runner.relayBind() }),
+      { mode: 0o600 },
+    );
     renameSync(`${file}.tmp`, file);
   }
 

@@ -36,6 +36,16 @@ describe('swapHeaders', () => {
     expect(swapHeaders({ authorization: foreign }, TOKEN, secrets).authorization).toBe(foreign);
   });
 
+  it('swaps the Claude subscription token (Bearer) and the Gemini key (x-goog-api-key)', () => {
+    const route = { CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-real', GEMINI_API_KEY: 'gem-real' };
+    const headers = swapHeaders(
+      { authorization: `Bearer ${placeholder('CLAUDE_CODE_OAUTH_TOKEN')}`, 'x-goog-api-key': placeholder('GEMINI_API_KEY') },
+      TOKEN,
+      route,
+    );
+    expect(headers).toEqual({ authorization: 'Bearer sk-ant-oat-real', 'x-goog-api-key': 'gem-real' });
+  });
+
   it('does not modify the input', () => {
     const input = { authorization: placeholder('STRIPE_API_KEY') };
     swapHeaders(input, TOKEN, secrets);

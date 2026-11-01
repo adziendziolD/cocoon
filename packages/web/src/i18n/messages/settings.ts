@@ -77,7 +77,7 @@ export const de = {
   'network.settings.proxy.title': 'Schutz für API-Keys',
   'network.settings.proxy.label': 'Credential-Proxy verwenden (empfohlen)',
   'network.settings.proxy.description':
-    'Agenten bekommen nur einen Platzhalter statt deines echten API-Keys. Erst wenn eine Anfrage die Sandbox verlässt, setzt der Server den echten Schlüssel ein. So kann selbst ein fehlgeleiteter Agent deinen Key nicht auslesen oder weitergeben.',
+    'Agenten bekommen nur einen Platzhalter statt deines echten Anthropic- oder OpenAI-Keys. Erst wenn eine Anfrage die Sandbox verlässt, setzt der Server den echten Wert ein. So kann selbst ein fehlgeleiteter Agent diese Schlüssel nicht auslesen oder weitergeben. Nicht geschützt sind das GitHub-Token, das Claude-Abo-Token und der Gemini-Key: Sie liegen in der Sandbox und sind dort lesbar. Nimm dafür ein Token mit minimalen Rechten.',
   'network.settings.proxy.offWarning':
     'Ohne Credential-Proxy liegen die API-Keys als normale Umgebungsvariablen in der Sandbox und sind für jedes Programm darin lesbar.',
   'network.settings.reset.title': 'Netzwerk-Einstellungen zurücksetzen?',
@@ -92,6 +92,14 @@ export const de = {
   'network.settings.denied.meta': '{count}× · zuletzt {time}',
   'network.settings.denied.alreadyAllowed': 'Inzwischen erlaubt',
   'network.settings.denied.allow': 'Erlauben',
+  'network.settings.denied.allowPrivate': 'Intern erlauben',
+  'network.settings.denied.reason.private': 'Löst auf eine interne Adresse auf (Heim-, Firmennetz oder Host-Rechner)',
+  'network.settings.denied.reason.sni': 'Der TLS-Servername passt nicht zum Ziel',
+  'network.settings.denied.reason.not-tls': 'Die Verbindung ist kein TLS',
+  'network.settings.private.title': 'Interne Adressen',
+  'network.settings.private.description':
+    'Erlaubte Seiten, die auf interne Adressen auflösen (Heimnetz, Firmennetz, Host-Rechner, Cloud-Metadaten), werden blockiert. Trage hier Hosts ein, die das dürfen, z. B. einen internen Git-Server. Sie müssen zusätzlich oben erlaubt sein.',
+  'network.settings.private.empty': 'Keine Ausnahmen.',
 
   // SandboxDefaultsSettings
   'sandboxDefaults.saved': 'Sandbox-Standards gespeichert',
@@ -175,7 +183,7 @@ export const de = {
   'secrets.saved': '{name} gespeichert',
   'secrets.intro.title': 'Wofür brauche ich das?',
   'secrets.intro.text':
-    'KI-Agenten brauchen einen Zugang zu ihrem Anbieter, um zu „denken“. Diese Schlüssel werden nur auf deinem Server gespeichert. Ist der Credential-Proxy aktiv (Standard), bekommen Agenten den echten Schlüssel nie zu sehen – der Server fügt ihn erst unterwegs hinzu. Du brauchst nur die Schlüssel für die Agenten, die du nutzen willst.',
+    'KI-Agenten brauchen einen Zugang zu ihrem Anbieter, um zu „denken“. Diese Schlüssel werden nur auf deinem Server gespeichert. Ist der Credential-Proxy aktiv (Standard), bekommen Agenten Anthropic- und OpenAI-Keys nie zu sehen – der Server fügt sie erst unterwegs hinzu. Ausnahmen sind das GitHub-Token (es muss in der Sandbox lesbar sein), das Claude-Abo-Token und der Gemini-Key. Du brauchst nur die Schlüssel für die Agenten, die du nutzen willst.',
   'secrets.intro.providers': 'Schlüssel für eigene API-Anbieter verwaltest du unter {link}.',
   'secrets.providersLink': 'API-Anbieter',
   'secrets.known.title': 'Bekannte Zugangsdaten',
@@ -293,7 +301,7 @@ export const en: Messages<typeof de> = {
   'network.settings.proxy.title': 'Protecting API keys',
   'network.settings.proxy.label': 'Use credential proxy (recommended)',
   'network.settings.proxy.description':
-    'Agents only get a placeholder instead of your real API key. The server inserts the real key only when a request leaves the sandbox. That way even a misbehaving agent can’t read or leak your key.',
+    'Agents only get a placeholder instead of your real Anthropic or OpenAI key. The server inserts the real value only when a request leaves the sandbox. That way even a misbehaving agent can’t read or leak these keys. The GitHub token, the Claude subscription token and the Gemini key are not covered: they live inside the sandbox and can be read there. Use a token with minimal permissions.',
   'network.settings.proxy.offWarning':
     'Without the credential proxy, API keys are stored as normal environment variables in the sandbox and can be read by any program in it.',
   'network.settings.reset.title': 'Reset network settings?',
@@ -308,6 +316,14 @@ export const en: Messages<typeof de> = {
   'network.settings.denied.meta': '{count}× · last {time}',
   'network.settings.denied.alreadyAllowed': 'Allowed now',
   'network.settings.denied.allow': 'Allow',
+  'network.settings.denied.allowPrivate': 'Allow internal',
+  'network.settings.denied.reason.private': 'Resolves to an internal address (home or company network, or the host machine)',
+  'network.settings.denied.reason.sni': 'The TLS server name does not match the target',
+  'network.settings.denied.reason.not-tls': 'The connection is not TLS',
+  'network.settings.private.title': 'Internal addresses',
+  'network.settings.private.description':
+    'Allowed sites that resolve to internal addresses (home network, company network, the host machine, cloud metadata) are blocked. List hosts here that may do so, e.g. an internal git server. They must also be allowed above.',
+  'network.settings.private.empty': 'No exceptions.',
 
   // SandboxDefaultsSettings
   'sandboxDefaults.saved': 'Sandbox defaults saved',
@@ -390,7 +406,7 @@ export const en: Messages<typeof de> = {
   'secrets.saved': '{name} saved',
   'secrets.intro.title': 'What do I need this for?',
   'secrets.intro.text':
-    'AI agents need access to their provider in order to “think”. These keys are stored only on your server. When the credential proxy is on (the default), agents never see the real key – the server adds it on the way out. You only need keys for the agents you want to use.',
+    'AI agents need access to their provider in order to “think”. These keys are stored only on your server. When the credential proxy is on (the default), agents never see Anthropic or OpenAI keys – the server adds them on the way out. Exceptions are the GitHub token (it has to be readable inside the sandbox), the Claude subscription token and the Gemini key. You only need keys for the agents you want to use.',
   'secrets.intro.providers': 'Keys for custom API providers are managed under {link}.',
   'secrets.providersLink': 'API providers',
   'secrets.known.title': 'Known credentials',

@@ -1,8 +1,8 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { EgressManager } from './egress.ts';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { EgressManager, providerTargets, proxiedSecret } from './egress.ts';
 import { EventBus } from './events.ts';
 import { SecretsService } from './secrets.ts';
 import { SettingsService } from './settings.ts';
@@ -18,20 +18,27 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-function setup(credentialProxy = true) {
+function setup(credentialProxy = true, extra: { egress?: Record<string, unknown>; providers?: Record<string, unknown> } = {}) {
   const store = new Store(dir);
   const bus = new EventBus();
-  const settings = new SettingsService(store, bus, { egress: { credentialProxy } });
+  const settings = new SettingsService(store, bus, { egress: { credentialProxy, ...extra.egress } });
   const record = (id: string, token: string): SandboxRecord =>
     ({ id, name: id, image: 'i', status: 'running', network: 'egress', runtime: null, resources: {}, repos: [], workdir: '/workspace', createdAt: '', proxyToken: token, ip: `10.0.0.${id.length}`, grants: ['anthropic'], services: [] }) as SandboxRecord;
   store.putSandbox(record('sb_a', 'aaaa'));
   store.putSandbox(record('sb_bb', 'bbbb'));
   const egress = new EgressManager(
-    {} as SandboxDriver, store, settings, new SecretsService(store), { all: () => ({}) } as unknown as ProviderService,
+    {} as SandboxDriver, store, settings, new SecretsService(store), { all: () => extra.providers ?? {}, key: () => undefined } as unknown as ProviderService,
     { onFinished() {} } as unknown as ImageService, bus, { proxyScript: 'x', processPort: 0 }, () => undefined,
   );
-  const policy = () => JSON.parse(readFileSync(join(dir, 'egress', 'policy.json'), 'utf8')) as { tokens: Record<string, { routes: string[] }>; routes: Record<string, { upstream: string; secrets: Record<string, string> }> };
-  return { egress, policy };
+  const policy = () =>
+    JSON.parse(readFileSync(join(dir, 'egress', 'policy.json'), 'utf8')) as {
+      allowlist: string[];
+      allowPrivate: string[];
+      targets: { host: string; port: number }[];
+      tokens: Record<string, { routes: string[] }>;
+      routes: Record<string, { upstream: string; secrets: Record<string, string> }>;
+    };
+  return { egress, policy, store };
 }
 
 describe('policy with environment routes', () => {
@@ -49,6 +56,65 @@ describe('policy with environment routes', () => {
     egress.setEnvRoutes(() => [{ name: 'env-x', upstream: 'https://x.dev', secrets: { A: 'real' } }]);
     expect(Object.keys(policy().routes)).toEqual([]);
     expect(JSON.stringify(policy())).not.toContain('real');
+  });
+});
+
+describe('policy for the egress proxy checks', () => {
+  it('defaults to no private hosts', () => {
+    const { egress, policy } = setup();
+    egress.writePolicy();
+    expect(policy().allowPrivate).toEqual([]);
+  });
+
+  it('passes the allowPrivate list of the settings on', () => {
+    const { egress, policy } = setup(true, { egress: { allowPrivate: ['git.internal.corp'] } });
+    egress.writePolicy();
+    expect(policy().allowPrivate).toEqual(['git.internal.corp']);
+  });
+
+  it('lists the exact host and port of every provider as a target', () => {
+    const provider = (baseUrl: string) => ({ kind: 'openai', baseUrl, label: 'x', auth: 'none' });
+    const { egress, policy } = setup(true, {
+      providers: { ollama: provider('http://localhost:11434/v1'), cloud: provider('https://api.example.com/v1'), same: provider('https://api.example.com/other') },
+    });
+    egress.writePolicy();
+    expect(policy().targets).toEqual([{ host: 'localhost', port: 11434 }, { host: 'api.example.com', port: 443 }]);
+  });
+});
+
+describe('local providers (Ollama on the CoCoon host)', () => {
+  const ollama = { kind: 'openai', baseUrl: 'http://localhost:11434/v1', label: 'Ollama', auth: 'none' };
+  const readPolicy = () => JSON.parse(readFileSync(join(dir, 'egress', 'policy.json'), 'utf8')) as { allowlist: string[]; targets: { host: string; port: number }[] };
+
+  it.each([
+    ['docker', 'host.docker.internal'],
+    ['podman', 'host.containers.internal'],
+  ] as const)('allows only the provider port on the %s host alias, not the host on 80/443', (kind, alias) => {
+    const { driver } = fakeDocker(kind);
+    proxyManager(driver, { ollama }).writePolicy();
+    const policy = readPolicy();
+    expect(policy.allowlist).not.toContain(alias);
+    expect(policy.allowlist).not.toContain('localhost');
+    expect(policy.targets).toEqual([{ host: alias, port: 11434 }]);
+  });
+
+  it('keeps the configured allowlist untouched by providers', () => {
+    const { driver } = fakeDocker('docker');
+    proxyManager(driver, { ollama, cloud: { ...ollama, baseUrl: 'https://api.example.com/v1' } }).writePolicy();
+    const policy = readPolicy();
+    expect(policy.allowlist).toEqual(expect.arrayContaining(['api.anthropic.com', 'github.com']));
+    expect(policy.allowlist).not.toContain('api.example.com');
+    expect(policy.targets).toEqual([{ host: 'host.docker.internal', port: 11434 }, { host: 'api.example.com', port: 443 }]);
+  });
+});
+
+describe('providerTargets', () => {
+  it('defaults the port by scheme, lower-cases hosts and strips IPv6 brackets', () => {
+    expect(providerTargets(['http://Host.Docker.Internal/v1', 'https://x.dev', 'http://[::1]:8080/v1'])).toEqual([
+      { host: 'host.docker.internal', port: 80 },
+      { host: 'x.dev', port: 443 },
+      { host: '::1', port: 8080 },
+    ]);
   });
 });
 
@@ -95,11 +161,11 @@ function fakeDocker(kind: 'docker' | 'podman', proxyNetworks?: string[]) {
   return { driver, calls };
 }
 
-function proxyManager(driver: SandboxDriver) {
+function proxyManager(driver: SandboxDriver, providers: Record<string, unknown> = {}) {
   const store = new Store(dir);
   const bus = new EventBus();
   return new EgressManager(
-    driver, store, new SettingsService(store, bus, {}), new SecretsService(store), { all: () => ({}) } as unknown as ProviderService,
+    driver, store, new SettingsService(store, bus, {}), new SecretsService(store), { all: () => providers, key: () => undefined } as unknown as ProviderService,
     { onFinished() {}, exists: async () => true } as unknown as ImageService, bus, { proxyScript: 'x', processPort: 0 }, () => undefined,
   );
 }
@@ -139,5 +205,46 @@ describe('egress proxy container', () => {
     expect(calls.createdNetworks).toEqual([{ Name: 'cocoon-internal', Internal: true }]);
     expect(calls.created[0].HostConfig.NetworkMode).toBe('bridge');
     expect(calls.connected).toEqual(['cocoon-internal']);
+  });
+});
+
+describe('proxied secrets', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('leaves the Claude subscription token and the Gemini key in the sandbox unless opted in', () => {
+    expect(proxiedSecret('CLAUDE_CODE_OAUTH_TOKEN', 'claude-code')).toBeUndefined();
+    expect(proxiedSecret('GEMINI_API_KEY', 'gemini')).toBeUndefined();
+    expect(proxiedSecret('ANTHROPIC_API_KEY', 'claude-code')).toMatchObject({ route: 'anthropic' });
+    const { egress, policy, store } = setup();
+    for (const [name, value] of Object.entries({ ANTHROPIC_API_KEY: 'k', CLAUDE_CODE_OAUTH_TOKEN: 't', GEMINI_API_KEY: 'g' })) store.putSecret(name, { value, updatedAt: '' });
+    egress.writePolicy();
+    expect(policy().routes.anthropic?.secrets).toEqual({ ANTHROPIC_API_KEY: 'k' });
+    expect(policy().routes.gemini).toBeUndefined();
+  });
+
+  it('proxies the Claude subscription token and the Gemini key only for adapters that honour a base URL, when opted in', () => {
+    vi.stubEnv('COCOON_PROXY_EXTRA_SECRETS', '1');
+    expect(proxiedSecret('CLAUDE_CODE_OAUTH_TOKEN', 'claude-code')).toMatchObject({ route: 'anthropic', baseUrlEnv: 'ANTHROPIC_BASE_URL' });
+    expect(proxiedSecret('CLAUDE_CODE_OAUTH_TOKEN', 'opencode')).toBeUndefined();
+    expect(proxiedSecret('GEMINI_API_KEY', 'gemini')).toMatchObject({ route: 'gemini', baseUrlEnv: 'GOOGLE_GEMINI_BASE_URL', upstream: 'https://generativelanguage.googleapis.com' });
+    expect(proxiedSecret('GEMINI_API_KEY', 'pi')).toBeUndefined();
+    expect(proxiedSecret('ANTHROPIC_API_KEY', 'pi')).toMatchObject({ route: 'anthropic' });
+  });
+
+  it('never proxies the GitHub token (no base URL to redirect) or inherited property names', () => {
+    expect(proxiedSecret('GITHUB_TOKEN', 'claude-code')).toBeUndefined();
+    expect(proxiedSecret('toString', 'claude-code')).toBeUndefined();
+  });
+
+  it('puts API key and subscription token on one Anthropic route and the Gemini key on its own', () => {
+    vi.stubEnv('COCOON_PROXY_EXTRA_SECRETS', '1');
+    const { egress, policy, store } = setup();
+    for (const [name, value] of Object.entries({ ANTHROPIC_API_KEY: 'sk-ant-key', CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-token', GEMINI_API_KEY: 'gem-key' })) {
+      store.putSecret(name, { value, updatedAt: '' });
+    }
+    egress.writePolicy();
+    const p = policy();
+    expect(p.routes.anthropic).toEqual({ upstream: 'https://api.anthropic.com', secrets: { ANTHROPIC_API_KEY: 'sk-ant-key', CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-token' } });
+    expect(p.routes.gemini).toEqual({ upstream: 'https://generativelanguage.googleapis.com', secrets: { GEMINI_API_KEY: 'gem-key' } });
   });
 });
