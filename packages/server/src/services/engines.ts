@@ -349,7 +349,7 @@ const wiremock: Engine = {
     return { url, env: { MOCK_API_URL: url, WIREMOCK_URL: base, WIREMOCK_ADMIN_URL: `${base}/__admin`, MOCK_API_PREFIX: `/${name}` } };
   },
   instructions: ({ name }, envName) =>
-    `- **WireMock (HTTP API mocks)** – point the code under test at \`$${envName}\` instead of real APIs. Register stubs via \`POST $WIREMOCK_ADMIN_URL/mappings\`; their URLs must start with \`/${name}\` (\`$MOCK_API_PREFIX\`), e.g. \`{"request":{"method":"GET","urlPath":"/${name}/users/1"},"response":{"status":200,"jsonBody":{"id":1}}}\`. The WireMock server is shared – never delete stubs outside your prefix.`,
+    `- **WireMock (HTTP API mocks)** – point the code under test at \`$${envName}\` instead of real APIs. Register stubs via \`POST $WIREMOCK_ADMIN_URL/mappings\`; their URLs must start with \`/${name}\` (\`$MOCK_API_PREFIX\`), e.g. \`{"request":{"method":"GET","urlPath":"/${name}/users/1"},"response":{"status":200,"jsonBody":{"id":1}}}\`. The WireMock server is shared with the other sandboxes of this workspace – never delete stubs outside your prefix.`,
 };
 
 // ── Mailpit ───────────────────────────────────────────────────────────────────
@@ -370,7 +370,7 @@ const mailpit: Engine = {
     return { url: `smtp://${host}:${port}`, env: { SMTP_HOST: host, SMTP_PORT: String(port), SMTP_URL: `smtp://${host}:${port}`, MAILPIT_API_URL: api } };
   },
   instructions: (_conn, envName) =>
-    `- **Mailpit (email catcher)** – send mail via SMTP to \`$${envName}\` (\`SMTP_HOST\`/\`SMTP_PORT\`, no TLS, any or no login); nothing leaves the server. Read received mails via \`$MAILPIT_API_URL/messages\` and \`$MAILPIT_API_URL/message/<ID>\`. The mailbox is shared with other sandboxes.`,
+    `- **Mailpit (email catcher)** – send mail via SMTP to \`$${envName}\` (\`SMTP_HOST\`/\`SMTP_PORT\`, no TLS, any or no login); nothing leaves the server. Read received mails via \`$MAILPIT_API_URL/messages\` and \`$MAILPIT_API_URL/message/<ID>\`. The mailbox is shared with the other sandboxes of this workspace.`,
 };
 
 export const ENGINES: Record<ServiceKind, Engine> = { postgres, mysql: mysqlEngine, mongodb, redis, wiremock, mailpit };

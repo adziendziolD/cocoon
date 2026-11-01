@@ -126,6 +126,7 @@ export class ServiceManager {
   private async wake(sandbox: SandboxRecord): Promise<void> {
     for (const serviceId of sandbox.services ?? []) {
       const record = this.store.service(serviceId);
+      if (record) await this.link(record, sandbox).catch((err) => this.log(`service ${serviceId}: connecting ${sandbox.id} failed`, err));
       if (record?.mode === 'managed' && record.desired !== 'stopped') void this.ensureRunning(serviceId).catch((err) => this.log(`service ${serviceId}: wake failed`, err));
     }
   }
@@ -149,6 +150,7 @@ export class ServiceManager {
     if (params.mode === 'managed' && !this.docker) throw new CocoonError('bad_request', t('error.serviceNeedsContainers'));
     if (params.mode === 'external' && kind.category === 'mock') throw new CocoonError('bad_request', t('error.serviceMockManagedOnly'));
     if (params.mode === 'external' && !params.host) throw new CocoonError('bad_request', t('error.serviceHostRequired'));
+    if (params.workspaceId && !this.store.workspace(params.workspaceId)) throw notFound('Workspace', params.workspaceId);
     const id = params.id ?? this.freeId(params.kind);
     if (this.store.service(id)) throw new CocoonError('conflict', t('error.serviceIdTaken', { id }));
     if (params.image && !kind.images.some((i) => i.ref === params.image) && !/^[\w./:@-]+$/.test(params.image)) {
@@ -164,6 +166,8 @@ export class ServiceManager {
       mode: params.mode,
       attach: params.attach,
       autoStop: params.mode === 'managed' ? (params.autoStop ?? true) : undefined,
+      // Mock services serve one workspace (see claim()); without one the first attached sandbox decides.
+      workspaceId: kind.category === 'mock' ? params.workspaceId : undefined,
       createdAt: new Date().toISOString(),
       ...(params.mode === 'managed'
         ? { image: params.image ?? kind.images[0]!.ref, memoryMb: params.memoryMb, adminPassword, desired: 'running' as const }
@@ -231,6 +235,7 @@ export class ServiceManager {
     if (record.mode === 'managed' && this.docker) {
       await ignoreStatus(404, () => this.docker!.docker.getContainer(this.containerName(serviceId)).remove({ force: true }));
       if (deleteData) await ignoreStatus(404, () => this.docker!.docker.getVolume(this.volumeName(serviceId)).remove());
+      await this.docker.removeNetwork(this.networkName(serviceId)).catch((err) => this.log(`service ${serviceId}: removing its network failed`, err));
     }
     if (record.mode === 'managed') {
       // Keeping the data only makes sense if the password it was created with is kept as well (see add()).
@@ -311,11 +316,13 @@ export class ServiceManager {
     const record = this.record(serviceId);
     let sandbox = this.sandboxes.record(sandboxId);
     if (sandbox.network === 'none') throw new CocoonError('bad_request', t('error.serviceNoNetwork'));
+    if (!this.claim(record, sandbox)) throw new CocoonError('conflict', t('error.serviceOtherWorkspace', { service: this.label(record) }));
     await this.ensureRunning(serviceId);
     if (this.docker && sandbox.handle && sandbox.network === 'open') await this.docker.connectInternal(sandbox.handle);
 
     const db: SandboxServiceDb = sandbox.serviceDbs?.[serviceId] ?? { name: sandboxDbName(sandbox.id), password: randomBytes(16).toString('hex') };
     try {
+      await this.link(record, sandbox);
       await ENGINES[record.kind].provision(this.adminConn(record), db.name, db.password);
       delete db.error;
     } catch (err) {
@@ -342,6 +349,9 @@ export class ServiceManager {
     }
     const { [serviceId]: _removed, ...rest } = sandbox.serviceDbs ?? {};
     this.sandboxes.update(sandboxId, { services: (sandbox.services ?? []).filter((id) => id !== serviceId), serviceDbs: rest });
+    if (this.docker && record?.mode === 'managed' && sandbox.handle) {
+      await this.docker.disconnectNetwork(sandbox.handle, this.networkName(serviceId)).catch((err) => this.log(`service ${serviceId}: disconnecting ${sandboxId} failed`, err));
+    }
     if (record) this.publish(record);
     await this.writeSandboxFiles(sandboxId).catch(() => undefined);
   }
@@ -383,7 +393,14 @@ export class ServiceManager {
 
   private async onSandboxCreated(record: SandboxRecord, requested: string[] | undefined): Promise<void> {
     if (record.network === 'none') return;
-    const ids = (requested ?? this.store.services().filter((s) => s.attach === 'all').map((s) => s.id)).filter((id) => this.store.service(id));
+    const ids = (requested ?? this.store.services().filter((s) => s.attach === 'all').map((s) => s.id)).filter((id) => {
+      const service = this.store.service(id);
+      if (!service) return false;
+      // A mock service of another workspace is skipped (see claim()).
+      if (this.claim(service, record, false)) return true;
+      this.log(`service ${id}: not attached to ${record.id}, it belongs to another workspace`);
+      return false;
+    });
     for (const serviceId of ids) {
       await this.attach(record.id, serviceId).catch((err) => {
         // Remember the selection; agentEnv() retries.
@@ -412,6 +429,8 @@ export class ServiceManager {
   private async attachToAll(serviceId: string): Promise<void> {
     for (const sandbox of this.store.sandboxes()) {
       if (sandbox.network === 'none' || sandbox.status === 'error' || sandbox.services?.includes(serviceId)) continue;
+      const service = this.store.service(serviceId);
+      if (service && !this.claim(service, sandbox, false)) continue; // another workspace's mock service (see claim())
       await this.attach(sandbox.id, serviceId).catch((err) => this.log(`service ${serviceId}: attach to ${sandbox.id} failed`, err));
     }
   }
@@ -476,10 +495,16 @@ export class ServiceManager {
             SecurityOpt: ['no-new-privileges'],
           },
         });
-        // Sandboxes reach the service by its id on the internal network.
-        await docker.getNetwork(INTERNAL_NETWORK).connect({ Container: container.id, EndpointConfig: { Aliases: [record.id] } });
-      } else this.setRuntime(record, { status: 'starting', error: undefined });
+        // Sandboxes reach the service by its id on its own internal network, which only the sandboxes that have it join
+        // (not on the shared network all sandboxes sit on: they could reach services they are not attached to).
+        await this.docker.ensureInternalNetwork(this.networkName(record.id));
+        await docker.getNetwork(this.networkName(record.id)).connect({ Container: container.id, EndpointConfig: { Aliases: [record.id] } });
+      } else {
+        this.setRuntime(record, { status: 'starting', error: undefined });
+        await this.isolate(record, name);
+      }
       await ignoreStatus(304, () => container.start());
+      await this.linkSandboxes(record);
       await this.refreshContainerState(record);
 
       const deadline = Date.now() + READY_TIMEOUT_MS;
@@ -502,6 +527,58 @@ export class ServiceManager {
       this.setRuntime(record, { status: 'error', error: (err as Error).message });
       throw err;
     }
+  }
+
+  /** Internal network of one managed service: the service and the sandboxes that have it. */
+  private networkName(serviceId: string): string {
+    return `${CONTAINER_PREFIX}${serviceId}-net`;
+  }
+
+  /**
+   * Moves a service container that was created before per-service networks off the shared network. The service joins
+   * its own network and the attached sandboxes follow before it leaves, so connections only break for a moment.
+   */
+  private async isolate(record: ServiceRecord, container: string): Promise<void> {
+    const docker = this.docker!;
+    try {
+      await docker.ensureInternalNetwork(this.networkName(record.id));
+      await docker.connectNetwork(container, this.networkName(record.id), record.id);
+      await this.linkSandboxes(record);
+      await docker.disconnectNetwork(container, INTERNAL_NETWORK);
+    } catch (err) {
+      this.log(`service ${record.id}: moving to its own network failed`, err);
+    }
+  }
+
+  /** Puts one sandbox on the network of a managed service. */
+  private async link(record: ServiceRecord, sandbox: SandboxRecord): Promise<void> {
+    if (!this.docker || record.mode !== 'managed' || !sandbox.handle || sandbox.network === 'none') return;
+    await this.docker.ensureInternalNetwork(this.networkName(record.id));
+    await this.docker.connectNetwork(sandbox.handle, this.networkName(record.id));
+  }
+
+  private async linkSandboxes(record: ServiceRecord): Promise<void> {
+    for (const sandbox of this.attachedSandboxes(record.id)) {
+      await this.link(record, sandbox).catch((err) => this.log(`service ${record.id}: connecting ${sandbox.id} failed`, err));
+    }
+  }
+
+  /**
+   * Mock services (WireMock, Mailpit) have no per-sandbox isolation: whoever reaches them sees everything. They therefore
+   * serve the sandboxes of one workspace: the first sandbox that attaches (or `services.add` with a workspace) decides.
+   * Services that were attached to several workspaces before this rule stay as they are, but take no new workspace.
+   */
+  private claim(record: ServiceRecord, sandbox: SandboxRecord, commit = true): boolean {
+    if (SERVICE_KINDS[record.kind].category !== 'mock') return true;
+    const scope = sandbox.workspaceId ?? '';
+    if (record.workspaceId !== undefined) return record.workspaceId === scope;
+    const others = this.attachedSandboxes(record.id).filter((s) => s.id !== sandbox.id).map((s) => s.workspaceId ?? '');
+    if (others.length && !others.includes(scope)) return false;
+    if (commit && others.every((s) => s === scope)) {
+      record.workspaceId = scope;
+      this.store.putService(record);
+    }
+    return true;
   }
 
   /**
@@ -672,7 +749,7 @@ export class ServiceManager {
 
   private info(record: ServiceRecord): ServiceInfo {
     const rt = this.runtime.get(record.id);
-    const { adminPassword, desired: _d, relayPort: _r, ...service } = record;
+    const { adminPassword, desired: _d, relayPort: _r, workspaceId: _w, ...service } = record;
     const webPort = record.kind === 'mailpit' ? rt?.hostPorts['8025'] : undefined;
     return {
       ...service,

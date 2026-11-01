@@ -405,7 +405,8 @@ Every service also gets `COCOON_<ID>_URL`, so a second instance of the same kind
 **How it works**
 
 - **Managed** (default, Docker/Podman): CoCoon pulls the official image, starts `cocoon-svc-<id>` with a data volume
-  and a random admin password, joins it to the internal network (sandboxes reach it by its id, e.g. `postgres:5432`)
+  and a random admin password, gives it an internal network of its own (`cocoon-svc-<id>-net`) that only the sandboxes
+  with the service join (they reach it by its id, e.g. `postgres:5432`; other sandboxes cannot reach it at all)
   and publishes its port on `127.0.0.1` only, for CoCoon itself and database tools on the server
   (*Credentials for database tools* in the UI, `pnpm cocoon services credentials <id>`).
 - **External** (databases): connect an existing server with an admin user that may create databases and users.
@@ -428,7 +429,17 @@ Every service also gets `COCOON_<ID>_URL`, so a second instance of the same kind
   `services_attach`, `services_reset`, …).
 
 Isolation is meant for development and tests: sandboxes cannot read each other's databases, but they share the
-server's resources, and WireMock/Mailpit are shared by design (prefixes keep stubs apart).
+server's resources. **Mock services serve one workspace:** WireMock (its `/__admin` has no login) and Mailpit show everything
+to everyone who reaches them, so they are bound to one workspace: the first sandbox that attaches decides, or pass
+`workspaceId` to `services.add`. Sandboxes of other workspaces are refused (and skipped by *every sandbox*), and cannot reach the
+service's network; add a mock service per workspace instead. Mock services that were already shared across several workspaces
+keep working as before (nothing is detached) but accept no further workspace; detach and attach them to split them.
+Services that existed before per-service networks move off the shared network the next time they start.
+
+**Remaining limits:** all sandboxes of a CoCoon instance still share the internal network `cocoon-internal` (egress proxy, port
+gateway), so a sandbox can reach the ports of other sandboxes there, and the TCP relays of external services. Use separate CoCoon
+instances (`COCOON_INSTANCE`) or hosts for workspaces that must not share a network. A network per sandbox or workspace
+is planned.
 
 ## Orchestration: workspaces, tasks & workflows
 

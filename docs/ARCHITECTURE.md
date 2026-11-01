@@ -131,6 +131,16 @@ Agenten bedienen, aber keine Keys auslesen oder Sicherheitseinstellungen ändern
 Der Proxy tauscht den Platzhalter gegen den echten Key und leitet per TLS weiter. **Der echte Key gelangt nie in die Sandbox**
 (getestet: weder in Env, Dateien noch `/proc`). Andere Secrets (z. B. `CLAUDE_CODE_OAUTH_TOKEN`, `GITHUB_TOKEN`) werden direkt injiziert.
 
+**Isolation der Dienste:** Jeder verwaltete Dienst (`cocoon-svc-<id>`) hängt in einem eigenen internen Netz `cocoon-svc-<id>-net`
+(Alias = Dienst-ID), dem nur Sandboxes beitreten, die den Dienst haben (`attach`/`detach`/`started`, Start des Dienstes). Alte
+Dienst-Container wechseln beim nächsten Start vom gemeinsamen `cocoon-internal` ins eigene Netz (erst Dienst und Sandboxes verbinden,
+dann das alte Netz verlassen). Mock-Dienste (WireMock, Mailpit) bedienen genau einen Workspace (`ServiceRecord.workspaceId`, gesetzt von
+der ersten Sandbox, die sich anhängt, oder von `services.add`); Sandboxes anderer Workspaces werden abgelehnt bzw. bei `attach: 'all'`
+übersprungen. Bereits workspaceübergreifend genutzte Mock-Dienste bleiben unverändert, nehmen aber keinen weiteren Workspace auf.
+Offen: Alle Sandboxes teilen weiter `cocoon-internal` (Egress-Proxy, Port-Gateway). Sandboxes erreichen dort die Ports anderer Sandboxes
+und die TCP-Relays externer Dienste. Ein Netz je Sandbox oder Workspace würde Proxy, Gateway, Relay-Bind und alle Dienste dynamisch an
+jedes Netz hängen und wurde ohne echte Docker-Tests nicht umgesetzt.
+
 **GitHub-Token bei Push/Clone (gehärtet):** `git push`, Klonen und Skill-Installation laufen per `exec` als Agent-User, der Token steht
 dabei im Env des Kommandos. `githubAuthEnv()` (`sandbox/git-auth.ts`) schaltet dafür einen gehärteten Modus ein: `GIT_CONFIG_GLOBAL=/dev/null`,
 `GIT_CONFIG_NOSYSTEM=1`, `GIT_ASKPASS=/bin/false` und die Shell-Funktion `cgit` mit `-c core.hooksPath=/dev/null`, `core.fsmonitor=false`,

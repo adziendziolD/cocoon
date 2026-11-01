@@ -53,6 +53,11 @@ export interface ServiceRecord extends SharedService {
   desired?: 'running' | 'stopped';
   /** external with container drivers: proxy port relaying to the server. */
   relayPort?: number;
+  /**
+   * Mock services (WireMock, Mailpit) only: the workspace whose sandboxes they serve ('' = sandboxes without a
+   * workspace). Unset until the first sandbox attaches, and for services that were shared across workspaces before.
+   */
+  workspaceId?: string;
 }
 
 export type AgentRecord = Agent;

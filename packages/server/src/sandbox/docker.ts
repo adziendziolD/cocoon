@@ -263,6 +263,42 @@ export class DockerDriver implements SandboxDriver {
     await this.docker.getNetwork(INTERNAL_NETWORK).connect({ Container: handle });
   }
 
+  /** Creates an internal network (no gateway) if it does not exist yet. */
+  async ensureInternalNetwork(name: string): Promise<void> {
+    try {
+      await this.docker.getNetwork(name).inspect();
+    } catch (err) {
+      if (statusOf(err) !== 404) throw err;
+      await this.docker.createNetwork({ Name: name, Internal: true, Labels: { 'cocoon.managed': 'true' } });
+    }
+  }
+
+  /** Connects a container to a network (with a DNS alias), if not already connected. */
+  async connectNetwork(handle: string, network: string, alias?: string): Promise<void> {
+    const info = await this.docker.getContainer(handle).inspect();
+    if (info.NetworkSettings.Networks[network]) return;
+    await this.docker.getNetwork(network).connect({ Container: handle, ...(alias ? { EndpointConfig: { Aliases: [alias] } } : {}) });
+  }
+
+  /** Disconnects a container from a network, if it is connected. */
+  async disconnectNetwork(handle: string, network: string): Promise<void> {
+    const info = await this.docker.getContainer(handle).inspect();
+    if (!info.NetworkSettings.Networks[network]) return;
+    await this.docker.getNetwork(network).disconnect({ Container: handle, Force: true });
+  }
+
+  /** Removes a network, disconnecting whatever is still attached; a missing network is fine. */
+  async removeNetwork(name: string): Promise<void> {
+    const network = this.docker.getNetwork(name);
+    try {
+      const info = await network.inspect();
+      for (const id of Object.keys(info.Containers ?? {})) await network.disconnect({ Container: id, Force: true }).catch(() => undefined);
+      await network.remove();
+    } catch (err) {
+      if (statusOf(err) !== 404) throw err;
+    }
+  }
+
   async imageDetails(ref: string): Promise<ImageDetails | undefined> {
     try {
       const info = await this.docker.getImage(ref).inspect();

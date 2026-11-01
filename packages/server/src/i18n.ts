@@ -108,6 +108,10 @@ export const messages = {
   },
   'error.serviceMockManagedOnly': { de: 'Mock-Dienste startet CoCoon selbst – ein externer Server ist dafür nicht vorgesehen.', en: 'CoCoon runs mock services itself – external servers are not supported for them.' },
   'error.serviceHostRequired': { de: 'Bitte die Adresse des Servers angeben.', en: 'Please enter the server address.' },
+  'error.serviceOtherWorkspace': {
+    de: 'Der Dienst {service} gehört zu einem anderen Workspace. Mock-Dienste (WireMock, Mailpit) sind je Workspace getrennt: Lege für diesen Workspace einen eigenen Dienst an.',
+    en: 'The service {service} belongs to another workspace. Mock services (WireMock, Mailpit) are separate per workspace: add a service of its own for this workspace.',
+  },
   'error.serviceIdTaken': { de: 'Es gibt schon einen Dienst mit der Kennung {id}.', en: 'A service with the id {id} already exists.' },
   'error.invalidImage': { de: 'Ungültiger Image-Name: {image}', en: 'Invalid image name: {image}' },
   'error.serviceConnectFailed': { de: 'Verbindung zum Server fehlgeschlagen: {error}', en: 'Could not connect to the server: {error}' },
