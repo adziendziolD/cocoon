@@ -35,10 +35,10 @@ function StateBadge({ state }: { state: UpdateState }) {
   return <Badge tone={STATE[state].tone}>{t(STATE[state].label)}</Badge>;
 }
 
-/** Starts update.apply for some targets (or everything outdated). */
+/** Starts update.apply for some targets (or everything outdated); `commit` confirms the CoCoon commit the user saw. */
 function useApply() {
   const t = useT();
-  return useAction((targets: UpdateTarget[] | undefined) => rpc('update.apply', { targets }), {
+  return useAction(({ targets, commit }: { targets: UpdateTarget[] | undefined; commit?: string }) => rpc('update.apply', { targets, commit }), {
     success: t('updates.started'),
     error: t('updates.startFailed'),
     invalidate: [qk.updates],
@@ -80,6 +80,7 @@ export function UpdatesSettings() {
   if (!s) return <LoadingState />;
 
   const busy = s.running || s.restarting || apply.isPending;
+  const applyTo = (targets?: UpdateTarget[]) => apply.mutate({ targets, commit: (targets ? targets.includes('cocoon') : s.available.includes('cocoon')) ? s.cocoon.latestCommit : undefined });
 
   return (
     <div className="space-y-6">
@@ -94,7 +95,7 @@ export function UpdatesSettings() {
                 {t('updates.check')}
               </Button>
               {s.available.length > 0 && (
-                <Button size="sm" variant="primary" icon={<ArrowUpCircle className="size-3.5" />} loading={busy} onClick={() => apply.mutate(undefined)}>
+                <Button size="sm" variant="primary" icon={<ArrowUpCircle className="size-3.5" />} loading={busy} onClick={() => applyTo()}>
                   {t('updates.updateAll')}
                 </Button>
               )}
@@ -107,9 +108,9 @@ export function UpdatesSettings() {
         </CardBody>
       </Card>
 
-      <CocoonCard info={s.cocoon} busy={busy} onUpdate={() => apply.mutate(['cocoon'])} />
-      <ToolsCard tools={s.tools} busy={busy} onUpdate={() => apply.mutate(['tools'])} />
-      {s.images.length > 0 && <ImagesCard images={s.images} busy={busy} onUpdate={() => apply.mutate(['images'])} />}
+      <CocoonCard info={s.cocoon} busy={busy} onUpdate={() => applyTo(['cocoon'])} />
+      <ToolsCard tools={s.tools} busy={busy} onUpdate={() => applyTo(['tools'])} />
+      {s.images.length > 0 && <ImagesCard images={s.images} busy={busy} onUpdate={() => applyTo(['images'])} />}
     </div>
   );
 }

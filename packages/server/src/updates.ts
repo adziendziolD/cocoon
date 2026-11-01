@@ -142,6 +142,65 @@ export async function checkCocoon(dir: string, version: string, opts: { fetch: b
   return info;
 }
 
+/** How the target of a CoCoon self-update is verified before it is merged (opt-in, see README). */
+export interface VerifyPolicy {
+  /** `commit`: the target commit must carry a good signature; `tag`: a signed tag must point at it. */
+  mode: 'commit' | 'tag';
+  /** SSH allowed-signers file (the pinned keys); without it git's own gpg configuration and keyring decide. */
+  signers?: string;
+}
+
+/**
+ * COCOON_UPDATE_VERIFY=commit|tag turns signature checks on, COCOON_UPDATE_SIGNERS=<file> pins the SSH keys. Unset (or
+ * "off") keeps the previous behaviour: fast-forward to the upstream branch without checking signatures.
+ * An unknown value throws: a typo must not silently switch the check off.
+ */
+export function verifyPolicyFromEnv(env: NodeJS.ProcessEnv = process.env): VerifyPolicy | undefined {
+  const mode = (env.COCOON_UPDATE_VERIFY ?? '').trim().toLowerCase();
+  if (!mode || mode === 'off' || mode === '0') return undefined;
+  if (mode !== 'commit' && mode !== 'tag') throw new Error(t('update.verifyConfigInvalid', { value: mode.slice(0, 32) }));
+  return { mode, signers: env.COCOON_UPDATE_SIGNERS?.trim() || undefined };
+}
+
+/**
+ * Commit an update would merge (the upstream branch head), after the checks that bind the update to what the user saw:
+ * the confirmed commit (a prefix of at least 7 characters) must match, and with a verify policy the signature must be good.
+ * Throws with a user-readable message otherwise. A policy always needs a confirmed commit.
+ */
+export async function checkUpdateTarget(dir: string, opts: { confirm?: string; policy?: VerifyPolicy }): Promise<string> {
+  const target = (await git(dir, ['rev-parse', '--verify', '@{u}^{commit}'])).toLowerCase();
+  const confirm = opts.confirm?.trim().toLowerCase();
+  if (opts.policy && !confirm) throw new Error(t('update.commitRequired', { commit: target.slice(0, 7) }));
+  if (confirm && (!/^[0-9a-f]{7,40}$/.test(confirm) || !target.startsWith(confirm))) {
+    throw new Error(t('update.commitMismatch', { expected: confirm.slice(0, 40), actual: target.slice(0, 7) }));
+  }
+  if (opts.policy) await verifySignature(dir, target, opts.policy);
+  return target;
+}
+
+async function verifySignature(dir: string, target: string, policy: VerifyPolicy): Promise<void> {
+  const config = policy.signers ? ['-c', 'gpg.format=ssh', '-c', `gpg.ssh.allowedSignersFile=${policy.signers}`] : [];
+  const fail = (err: unknown) => new Error(t('update.verifyFailed', { commit: target.slice(0, 7), error: message(err) }));
+  if (policy.mode === 'commit') {
+    await git(dir, [...config, 'verify-commit', target]).catch((err) => {
+      throw fail(err);
+    });
+    return;
+  }
+  const tags = (await git(dir, ['tag', '--points-at', target])).split('\n').filter(Boolean);
+  if (!tags.length) throw fail(new Error('no tag points at this commit'));
+  let last: unknown;
+  for (const tag of tags) {
+    try {
+      await git(dir, [...config, 'verify-tag', `refs/tags/${tag}`]);
+      return;
+    } catch (err) {
+      last = err;
+    }
+  }
+  throw fail(last);
+}
+
 /** Newest version of an npm package (its "latest" dist-tag, which is what "npm install" picks). */
 export async function latestNpmVersion(pkg: string): Promise<string> {
   const registry = (process.env.npm_config_registry || 'https://registry.npmjs.org/').replace(/\/?$/, '/');
@@ -250,7 +309,7 @@ export class UpdateService {
   }
 
   /** Starts updating the given targets (default: everything outdated) in the background. */
-  async apply(targets?: UpdateTarget[]): Promise<UpdateTarget[]> {
+  async apply(targets?: UpdateTarget[], confirmCommit?: string): Promise<UpdateTarget[]> {
     if (this.running || this.choosing) throw new CocoonError('conflict', t('error.updateRunning'));
     // Choosing can take a while (the first status runs a full check): a second call must not slip in meanwhile.
     this.choosing = true;
@@ -263,7 +322,7 @@ export class UpdateService {
     if (!chosen.length) return [];
     this.running = true;
     this.publish();
-    void this.runUpdate(chosen);
+    void this.runUpdate(chosen, confirmCommit);
     return chosen;
   }
 
@@ -366,11 +425,11 @@ export class UpdateService {
     this.notified = key;
   }
 
-  private async runUpdate(targets: UpdateTarget[]): Promise<void> {
+  private async runUpdate(targets: UpdateTarget[], confirmCommit?: string): Promise<void> {
     let updated = false;
     try {
       // CoCoon first: an update may change the Dockerfiles, so the images are rebuilt from the new ones.
-      if (targets.includes('cocoon')) updated = await this.updateCocoon();
+      if (targets.includes('cocoon')) updated = await this.updateCocoon(confirmCommit);
       if (targets.includes('images')) {
         for (const img of await this.checkImages()) {
           if (img.state === 'current' || img.reason === 'custom') continue;
@@ -395,8 +454,11 @@ export class UpdateService {
     if (updated && this.canRestart) this.restart();
   }
 
-  /** git merge --ff-only, pnpm install, web build; rolls back to the previous commit if a step fails. */
-  private async updateCocoon(): Promise<boolean> {
+  /**
+   * git merge --ff-only, pnpm install, web build; rolls back to the previous commit if a step fails. The commit to merge
+   * is confirmed by the caller (`confirmCommit`) and, if COCOON_UPDATE_VERIFY is set, its signature is verified first.
+   */
+  private async updateCocoon(confirmCommit?: string): Promise<boolean> {
     const dir = this.config.repoDir;
     const buildId = newId('bd');
     const emit = (status: 'running' | 'succeeded' | 'failed', extra: { line?: string; error?: string } = {}) =>
@@ -422,9 +484,20 @@ export class UpdateService {
       return false;
     }
 
+    let target: string;
+    try {
+      emit('running', { line: 'Checking the target commit …' });
+      target = await checkUpdateTarget(dir, { confirm: confirmCommit, policy: verifyPolicyFromEnv() });
+    } catch (err) {
+      const error = message(err);
+      emit('failed', { error });
+      this.activity.add('error', 'activity.cocoonUpdateFailed', { error });
+      return false;
+    }
+
     const previous = await git(dir, ['rev-parse', 'HEAD']);
     try {
-      await gitStep('merge', '--ff-only', '@{u}');
+      await gitStep('merge', '--ff-only', target);
       await pnpm('install', '--frozen-lockfile');
       await pnpm('build:web');
       emit('succeeded', { line: `Updated to ${info.latestVersion ?? info.version} (${info.latestCommit}).` });

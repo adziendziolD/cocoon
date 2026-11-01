@@ -542,11 +542,12 @@ update
   .command('apply [targets...]')
   .description(`update ${UPDATE_TARGETS.join(' | ')} (default: everything outdated) and wait until done`)
   .option('--no-wait', 'return right away')
-  .action(async (targets: string[], o: { wait: boolean }) => {
+  .option('--commit <sha>', 'confirm the CoCoon commit to install (see "update check"); required when the server verifies signatures (COCOON_UPDATE_VERIFY)')
+  .action(async (targets: string[], o: { wait: boolean; commit?: string }) => {
     const unknown = targets.filter((x) => !UPDATE_TARGETS.includes(x as UpdateTarget));
     if (unknown.length) throw new Error(`unknown update target(s): ${unknown.join(', ')} (use ${UPDATE_TARGETS.join(', ')})`);
     const c = client();
-    const started = await c.call('update.apply', { targets: targets.length ? (targets as UpdateTarget[]) : undefined });
+    const started = await c.call('update.apply', { targets: targets.length ? (targets as UpdateTarget[]) : undefined, commit: o.commit });
     if (!started.targets.length) return print(started, () => console.log('Everything is up to date.'));
     if (!o.wait) return print(started, () => console.log(`Updating ${started.targets.join(', ')} …`));
     if (!asJson()) console.log(`Updating ${started.targets.join(', ')} … (this can take a few minutes)`);

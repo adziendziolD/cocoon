@@ -653,6 +653,23 @@ the heuristic takes over. Statuses survive control-plane restarts.
 CoCoon checks once a day by itself (`COCOON_UPDATE_CHECK=0` turns this off) and shows a badge next to *Settings*.
 `pnpm start` runs the server under a small supervisor that restarts it after an update (`pnpm dev` does not – restart by hand).
 
+**Trust in the CoCoon update.** The update merges whatever the upstream branch of your clone points at, and then runs
+`pnpm install` and the web build, so the upstream repository (and the account that can push to it) is trusted with code
+execution on the server. Two protections:
+
+- *Confirmed target commit.* The UI sends the commit it showed (`latest`), `update.apply` accepts `commit`, the CLI has
+  `--commit <sha>`. If upstream moved in between, nothing is installed. The merge uses exactly that commit.
+- *Signature check (opt-in).* `COCOON_UPDATE_VERIFY=commit` requires a good signature on the target commit
+  (`git verify-commit`), `COCOON_UPDATE_VERIFY=tag` a good signed tag on it (`git verify-tag`). Pin the accepted keys with
+  `COCOON_UPDATE_SIGNERS=/path/to/allowed_signers` (SSH signatures, `ssh-keygen -Y` format; the file is yours, not part of the
+  repository). Without it git's own `gpg` configuration and keyring decide; import only the maintainer key and set
+  `gpg.minTrustLevel`. With verification on, the confirmed commit is required (`--commit`), a failed check stops the update before
+  anything changes, and an unknown value of the variable also stops it. Note that commits created by GitHub's web interface
+  (squash merges) are signed with GitHub's key, so `tag` mode with signed release tags is usually the practical choice.
+
+Without `COCOON_UPDATE_VERIFY` there is no signature check; the update behaves as before (plus the commit check when a commit
+is sent).
+
 ## CLI
 
 ```bash
@@ -731,7 +748,7 @@ pnpm cocoon ports close <sandbox-id> 5173
 
 # updates
 pnpm cocoon update                                 # check CoCoon, agent tools and images
-pnpm cocoon update apply [cocoon|tools|images]     # update (default: everything outdated) and wait
+pnpm cocoon update apply [cocoon|tools|images]     # update (default: everything outdated) and wait; --commit <sha> confirms the CoCoon commit
 pnpm cocoon restart
 
 # admin
@@ -816,6 +833,8 @@ Everything is configurable in the UI. Environment variables (all optional, see [
 | `COCOON_TOOLBOX_AUTOINSTALL` | `1` | `0` skips installing the agent CLIs on first start |
 | `COCOON_TOOLBOX_IMAGE` | `docker.io/library/node:24-bookworm-slim` | Docker/Podman: image the agent toolbox is installed with; its Node.js is copied into the toolbox |
 | `COCOON_UPDATE_CHECK` | `1` | `0` turns off the daily update check |
+| `COCOON_UPDATE_VERIFY` | – | `commit` or `tag`: the CoCoon update only installs a target with a good signature (see [Updates](#updates)); unset = no signature check |
+| `COCOON_UPDATE_SIGNERS` | – | SSH allowed-signers file with the keys `COCOON_UPDATE_VERIFY` accepts |
 | `COCOON_PORTS` | `1` | `0` turns off port forwarding (previews and sharing) |
 | `COCOON_PORTS_PREVIEW_RANGE` | `7500-7549` | host ports for previews (published on 127.0.0.1) |
 | `COCOON_PORTS_SHARE_RANGE` | `7550-7599` | host ports for shared ports |

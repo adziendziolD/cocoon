@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { baseImage, contextHash, LABEL_BASE, LABEL_CONTEXT } from './images.ts';
-import { assessImage, availableTargets, checkCocoon, compareVersions } from './updates.ts';
+import { assessImage, availableTargets, checkCocoon, checkUpdateTarget, compareVersions, verifyPolicyFromEnv } from './updates.ts';
 
 describe('compareVersions', () => {
   it('compares numerically, not as text', () => {
@@ -168,5 +168,112 @@ describe('checkCocoon', () => {
     const plain = join(root, 'plain');
     execFileSync('mkdir', [plain]);
     expect(await checkCocoon(plain, '1.0.0', { fetch: false })).toMatchObject({ blocked: 'notGit', state: 'unknown' });
+  });
+});
+
+describe('verifyPolicyFromEnv', () => {
+  it('is off by default and for "off"', () => {
+    expect(verifyPolicyFromEnv({})).toBeUndefined();
+    expect(verifyPolicyFromEnv({ COCOON_UPDATE_VERIFY: '' })).toBeUndefined();
+    expect(verifyPolicyFromEnv({ COCOON_UPDATE_VERIFY: 'off' })).toBeUndefined();
+  });
+
+  it('reads the mode and the pinned signers file', () => {
+    expect(verifyPolicyFromEnv({ COCOON_UPDATE_VERIFY: 'Tag', COCOON_UPDATE_SIGNERS: ' /etc/cocoon/signers ' })).toEqual({ mode: 'tag', signers: '/etc/cocoon/signers' });
+    expect(verifyPolicyFromEnv({ COCOON_UPDATE_VERIFY: 'commit' })).toEqual({ mode: 'commit', signers: undefined });
+  });
+
+  it('rejects typos instead of switching the check off', () => {
+    expect(() => verifyPolicyFromEnv({ COCOON_UPDATE_VERIFY: 'comit' })).toThrow(/COCOON_UPDATE_VERIFY/);
+  });
+});
+
+describe('checkUpdateTarget', () => {
+  const dirs: string[] = [];
+  afterEach(() => dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true })));
+
+  const run = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'init.defaultBranch=main', ...args], { cwd, stdio: 'pipe' }).toString().trim();
+  const keygen = (file: string) => execFileSync('ssh-keygen', ['-t', 'ed25519', '-N', '', '-q', '-C', 't@example.com', '-f', file]);
+  const sign = (key: string) => ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'gpg.format=ssh', '-c', `user.signingkey=${key}.pub`];
+
+  /** Upstream with a signed commit, a signed tag on it, and a clone that has fetched it. */
+  function setup() {
+    const root = mkdtempSync(join(tmpdir(), 'cocoon-verify-'));
+    dirs.push(root);
+    const [good, other] = [join(root, 'good'), join(root, 'other')];
+    keygen(good);
+    keygen(other);
+    const signers = join(root, 'allowed_signers');
+    writeFileSync(signers, `t@example.com ${readFileSync(`${good}.pub`, 'utf8')}`);
+    const upstream = join(root, 'upstream');
+    const clone = join(root, 'clone');
+    execFileSync('mkdir', [upstream]);
+    run(upstream, 'init', '-q');
+    const commit = (file: string, key?: string) => {
+      writeFileSync(join(upstream, file), file);
+      run(upstream, 'add', '.');
+      run(upstream, ...(key ? sign(key) : ['-c', 'user.name=t', '-c', 'user.email=t@example.com']), 'commit', '-q', ...(key ? ['-S'] : []), '-m', file);
+    };
+    commit('first.txt', good);
+    run(root, 'clone', '-q', upstream, clone);
+    const fetch = () => run(clone, 'fetch', '-q', 'origin');
+    const head = () => run(upstream, 'rev-parse', 'HEAD');
+    return { root, upstream, clone, good, other, signers, commit, fetch, head, tag: (name: string, key: string) => run(upstream, ...sign(key), 'tag', '-s', '-m', name, name) };
+  }
+
+  it('without a policy returns the upstream head and needs no confirmation', async () => {
+    const r = setup();
+    r.commit('a.txt');
+    r.fetch();
+    expect(await checkUpdateTarget(r.clone, {})).toBe(r.head());
+  });
+
+  it('binds the update to the confirmed commit', async () => {
+    const r = setup();
+    r.commit('a.txt');
+    r.fetch();
+    const target = r.head();
+    expect(await checkUpdateTarget(r.clone, { confirm: target.slice(0, 7) })).toBe(target);
+    expect(await checkUpdateTarget(r.clone, { confirm: target.toUpperCase() })).toBe(target);
+    // Upstream moved after the user looked at the status.
+    const seen = target.slice(0, 7);
+    r.commit('b.txt');
+    r.fetch();
+    await expect(checkUpdateTarget(r.clone, { confirm: seen })).rejects.toThrow(seen);
+    await expect(checkUpdateTarget(r.clone, { confirm: 'abc' })).rejects.toThrow();
+    await expect(checkUpdateTarget(r.clone, { confirm: '--upload-pack=x' })).rejects.toThrow();
+  });
+
+  it('commit mode: needs a confirmed commit and a good signature of the pinned key', async () => {
+    const r = setup();
+    const policy = { mode: 'commit' as const, signers: r.signers };
+    r.commit('signed.txt', r.good);
+    r.fetch();
+    const target = r.head();
+    await expect(checkUpdateTarget(r.clone, { policy })).rejects.toThrow(/--commit/);
+    expect(await checkUpdateTarget(r.clone, { policy, confirm: target.slice(0, 7) })).toBe(target);
+
+    r.commit('unsigned.txt');
+    r.fetch();
+    await expect(checkUpdateTarget(r.clone, { policy, confirm: r.head().slice(0, 7) })).rejects.toThrow(/signature/);
+
+    r.commit('wrong-key.txt', r.other);
+    r.fetch();
+    await expect(checkUpdateTarget(r.clone, { policy, confirm: r.head().slice(0, 7) })).rejects.toThrow(/signature/);
+  });
+
+  it('tag mode: needs a signed tag of the pinned key on the target commit', async () => {
+    const r = setup();
+    const policy = { mode: 'tag' as const, signers: r.signers };
+    r.commit('release.txt', r.good);
+    r.fetch();
+    const confirm = r.head().slice(0, 7);
+    await expect(checkUpdateTarget(r.clone, { policy, confirm })).rejects.toThrow(/signature/);
+    r.tag('v1.0.0', r.other);
+    r.fetch();
+    await expect(checkUpdateTarget(r.clone, { policy, confirm })).rejects.toThrow(/signature/);
+    r.tag('v1.0.1', r.good);
+    r.fetch();
+    expect(await checkUpdateTarget(r.clone, { policy, confirm })).toBe(r.head());
   });
 });

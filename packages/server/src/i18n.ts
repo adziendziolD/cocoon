@@ -42,6 +42,22 @@ export const messages = {
     en: 'CoCoon cannot restart itself – please restart it by hand (when started with "pnpm start", CoCoon restarts itself).',
   },
   'update.upToDate': { de: 'CoCoon ist aktuell.', en: 'CoCoon is up to date.' },
+  'update.commitMismatch': {
+    de: 'Das Update wurde nicht gestartet: bestätigt war Commit {expected}, der Upstream steht inzwischen auf {actual}. Bitte erneut prüfen.',
+    en: 'The update was not started: commit {expected} was confirmed, but upstream is now at {actual}. Please check again.',
+  },
+  'update.commitRequired': {
+    de: 'Das Update wurde nicht gestartet: bei aktivierter Signaturprüfung muss der Ziel-Commit ({commit}) bestätigt werden (update.apply mit „commit“, CLI: --commit).',
+    en: 'The update was not started: with signature verification enabled the target commit ({commit}) must be confirmed (update.apply with "commit", CLI: --commit).',
+  },
+  'update.verifyFailed': {
+    de: 'Das Update wurde nicht gestartet: die Signatur von {commit} konnte nicht geprüft werden ({error}).',
+    en: 'The update was not started: the signature of {commit} could not be verified ({error}).',
+  },
+  'update.verifyConfigInvalid': {
+    de: 'COCOON_UPDATE_VERIFY hat den ungültigen Wert „{value}“ (erlaubt: commit, tag, off). Das Update wurde nicht gestartet.',
+    en: 'COCOON_UPDATE_VERIFY has the invalid value "{value}" (allowed: commit, tag, off). The update was not started.',
+  },
   'update.blocked.notGit': {
     de: 'CoCoon ist nicht aus einem git-Klon installiert und kann sich nicht selbst aktualisieren.',
     en: 'CoCoon is not installed from a git clone and cannot update itself.',
