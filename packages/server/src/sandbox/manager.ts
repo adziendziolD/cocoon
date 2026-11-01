@@ -11,7 +11,7 @@ import type { SecretsService } from '../secrets.ts';
 import type { SettingsService } from '../settings.ts';
 import { publicSandbox, type SandboxRecord, type Store } from '../store.ts';
 import type { ExecOptions, ExecResult, SandboxDriver } from './driver.ts';
-import { githubAuthEnv } from './git-auth.ts';
+import { GIT_HARDENED_SH, githubAuthEnv } from './git-auth.ts';
 import { t } from '../i18n.ts';
 
 export const BASELINE_TAG = 'cocoon-baseline';
@@ -271,8 +271,9 @@ export class SandboxManager {
       [
         'sh',
         '-c',
-        `{ [ ! -e "$DIR" ] || [ -z "$(ls -A "$DIR" 2>/dev/null)" ]; } || { echo "$EXISTS" >&2; exit 1; }
-         mkdir -p "$(dirname "$DIR")" && git clone --quiet -- "$REPO_URL" "$DIR" && cd "$DIR" && { [ -z "$REPO_REF" ] || git checkout --quiet "$REPO_REF"; } && git tag -f ${BASELINE_TAG} HEAD >/dev/null || exit $?
+        `${GIT_HARDENED_SH}
+         { [ ! -e "$DIR" ] || [ -z "$(ls -A "$DIR" 2>/dev/null)" ]; } || { echo "$EXISTS" >&2; exit 1; }
+         mkdir -p "$(dirname "$DIR")" && cgit clone --quiet -- "$REPO_URL" "$DIR" && cd "$DIR" && { [ -z "$REPO_REF" ] || cgit checkout --quiet "$REPO_REF"; } && git tag -f ${BASELINE_TAG} HEAD >/dev/null || exit $?
          # Keep nested repositories out of a repository in the workspace folder itself.
          if [ -n "$REL" ] && [ -d "$WORKDIR/.git" ]; then grep -qxF "/$REL/" "$WORKDIR/.git/info/exclude" 2>/dev/null || echo "/$REL/" >> "$WORKDIR/.git/info/exclude"; fi`,
       ],

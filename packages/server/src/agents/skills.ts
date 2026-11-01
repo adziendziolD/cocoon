@@ -1,4 +1,5 @@
 import { SKILLS_DIR, type AgentAdapter } from '@cocoon/protocol';
+import { GIT_HARDENED_SH } from '../sandbox/git-auth.ts';
 
 /** Folder below $HOME in which the agent CLI of this adapter looks for skills (undefined = no skill support). */
 export function skillsDirFor(adapter: AgentAdapter): string | undefined {
@@ -17,8 +18,9 @@ bad() { echo "invalid skill name or path" >&2; exit 1; }
 [ -z "$SKILL_PATH" ] || case "/$SKILL_PATH/" in */../*|*//*) bad;; esac
 case "/$SKILLS_DIR/" in */../*|*//*) bad;; esac
 case "$SKILL_NAME" in ''|.|..|*[!A-Za-z0-9._-]*) bad;; esac
+${GIT_HARDENED_SH}
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
-if [ -n "$SKILL_REF" ]; then git clone --quiet --depth 1 --branch "$SKILL_REF" -- "$SKILL_URL" "$TMP/r"; else git clone --quiet --depth 1 -- "$SKILL_URL" "$TMP/r"; fi
+if [ -n "$SKILL_REF" ]; then cgit clone --quiet --depth 1 --branch "$SKILL_REF" -- "$SKILL_URL" "$TMP/r"; else cgit clone --quiet --depth 1 -- "$SKILL_URL" "$TMP/r"; fi
 SRC="$TMP/r"; [ -z "$SKILL_PATH" ] || SRC="$TMP/r/$SKILL_PATH"
 [ -d "$SRC" ] || { echo "folder not found in repository: $SKILL_PATH" >&2; exit 1; }
 DEST="$HOME/$SKILLS_DIR"; mkdir -p "$DEST"

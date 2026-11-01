@@ -6,7 +6,7 @@ import { CocoonError } from '../errors.ts';
 import type { SecretsService } from '../secrets.ts';
 import type { SandboxDriver } from './driver.ts';
 import { STAGING_DIR } from '../agents/tmux.ts';
-import { githubAuthEnv, parseGithubRepo } from './git-auth.ts';
+import { GIT_PUSH_SCRIPT, githubAuthEnv, parseGithubRepo } from './git-auth.ts';
 import { BASELINE_TAG, reposOf, type SandboxManager } from './manager.ts';
 import { singleFileTar } from './tar.ts';
 import { t } from '../i18n.ts';
@@ -221,7 +221,7 @@ export class WorkspaceService {
     if (!token && parseGithubRepo(remoteUrl)) {
       throw new CocoonError('bad_request', t('error.pushNeedsToken'));
     }
-    await this.git(sandboxId, dir, 'git push --quiet origin "HEAD:refs/heads/$BRANCH"', { BRANCH: branch, ...githubAuthEnv(remoteUrl, token) }, 300_000);
+    await this.git(sandboxId, dir, GIT_PUSH_SCRIPT, { BRANCH: branch, REMOTE_URL: remoteUrl, ...githubAuthEnv(remoteUrl, token) }, 300_000);
     const record = this.sandboxes.record(sandboxId);
     const key = repo?.path ?? '';
     this.sandboxes.update(sandboxId, { pushedBranches: { ...record.pushedBranches, [key]: branch }, ...(key ? {} : { pushedBranch: branch }) });

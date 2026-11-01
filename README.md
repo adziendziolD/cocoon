@@ -487,6 +487,14 @@ in the same sandbox** instead of pushing right away. Each reviews the full diff,
 default) get the stored token in their environment, and CoCoon sets up a git credential helper for github.com, so plain
 `git push` works for them. Remove `GITHUB_TOKEN` from an agent type (*Settings → Agent types*) to keep it away from that agent.
 
+**Pushes and clones by CoCoon.** `git push` (UI, CLI, tasks), clones of GitHub repositories and skill installs run inside the sandbox
+as the agent user with the token in the command's environment. CoCoon runs them in a hardened mode: no repository or `~/.gitconfig`
+hooks (`core.hooksPath=/dev/null`, `--no-verify`), no global or system git config, no credential helper, askpass or ssh command,
+TLS verification on, the sandbox's own proxy pinned, and the push goes to the repository URL instead of the editable remote config.
+Remaining risk: while a push runs (seconds), an agent that is already running in the same sandbox can read the token from
+`/proc/<pid>/environ` (same user), and repository-local git settings such as `http.sslCAInfo` cannot be overridden. In sandboxes
+where untrusted code runs, use a fine-grained token limited to the needed repositories, or no `GITHUB_TOKEN` and push yourself.
+
 **Workflows** (*Settings → Workflows*) chain stages, each a fresh agent in the task's sandbox. Prompt templates may use
 `{{task}}`, `{{task.title}}`, `{{task.description}}`, `{{previous.output}}` (last screen of the previous stage),
 `{{diff}}` (changed files) and `{{feedback}}` (review feedback). Stages with `approval` pause in `review` until you approve.

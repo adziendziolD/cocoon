@@ -131,6 +131,17 @@ Agenten bedienen, aber keine Keys auslesen oder Sicherheitseinstellungen ändern
 Der Proxy tauscht den Platzhalter gegen den echten Key und leitet per TLS weiter. **Der echte Key gelangt nie in die Sandbox**
 (getestet: weder in Env, Dateien noch `/proc`). Andere Secrets (z. B. `CLAUDE_CODE_OAUTH_TOKEN`, `GITHUB_TOKEN`) werden direkt injiziert.
 
+**GitHub-Token bei Push/Clone (gehärtet):** `git push`, Klonen und Skill-Installation laufen per `exec` als Agent-User, der Token steht
+dabei im Env des Kommandos. `githubAuthEnv()` (`sandbox/git-auth.ts`) schaltet dafür einen gehärteten Modus ein: `GIT_CONFIG_GLOBAL=/dev/null`,
+`GIT_CONFIG_NOSYSTEM=1`, `GIT_ASKPASS=/bin/false` und die Shell-Funktion `cgit` mit `-c core.hooksPath=/dev/null`, `core.fsmonitor=false`,
+`core.sshCommand=false`, leerem `credential.helper`/`core.askPass`, `http.sslVerify=true`, geleertem `http.curloptResolve` und fest auf den
+`HTTPS_PROXY` der Sandbox gesetztem `http.proxy`. Der Push läuft mit `--no-verify` direkt gegen die URL (nicht über `remote.origin`, dessen
+`pushurl`/`proxy` der Agent ändern kann). Ein Push vom Host aus einem Bundle wurde erwogen und verworfen: Prerequisites und Größe der Bundles,
+Remotes außerhalb von GitHub und fehlende Testbarkeit gegen GitHub. Restrisiko: Ein im selben Container bereits laufender Agent kann den Token
+während des Push (Sekunden) über `/proc/<pid>/environ` lesen. Das gilt bei gleicher UID, und eine andere UID hilft mit bwrap nicht, weil dort
+alle UIDs auf denselben Host-User abgebildet werden. Repo-lokale Einstellungen wie `http.sslCAInfo` lassen sich nicht überschreiben.
+Gegenmaßnahme: feingranularer Token nur für die nötigen Repos.
+
 Der Proxy läuft als eigener Container (`images/egress-proxy`, ohne Abhängigkeiten), read-only, ohne Capabilities, mit der UID von cocoond.
 cocoond schreibt `.data/egress/policy.json`; der Proxy lädt Änderungen sofort und bestätigt die Version (`ack`) – das Klonen eines Repos
 beginnt erst, wenn der Proxy die neue Sandbox kennt.
