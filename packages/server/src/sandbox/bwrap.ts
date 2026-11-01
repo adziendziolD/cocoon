@@ -1,7 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, posix, resolve } from 'node:path';
+import { basename, dirname, join, posix } from 'node:path';
 import { Duplex, type Readable } from 'node:stream';
 import { promisify } from 'node:util';
 import type { DriverCapabilities, NetworkMode } from '@cocoon/protocol';
@@ -132,8 +132,7 @@ export class BwrapDriver implements SandboxDriver {
   }
 
   async exec(handle: string, command: string[], opts: ExecOptions = {}): Promise<ExecResult> {
-    const child = spawn('bwrap', ['--args', '3', '--', ...command], { stdio: ['ignore', 'pipe', 'pipe', 'pipe'] });
-    (child.stdio[3] as NodeJS.WritableStream).end(argsPayload(this.args(handle, opts)));
+    const child = this.spawnIn(handle, command, opts);
     const stdout = collect(child.stdout!);
     const stderr = collect(child.stderr!);
     const exitCode = await new Promise<number>((resolvePromise, reject) => {
@@ -181,20 +180,30 @@ export class BwrapDriver implements SandboxDriver {
     };
   }
 
+  /**
+   * Both archive operations run `tar` inside the sandbox (same mounts, user and namespaces as the agent), never on the
+   * host: the agent owns the writable mounts and can plant symlinks there, which a host-side tar would follow out of the
+   * sandbox (to write or read arbitrary host files with cocoond's privileges). Inside, symlinks can only lead to the
+   * sandbox's own files.
+   */
   async putArchive(handle: string, dir: string, tar: Buffer): Promise<void> {
-    const target = this.hostPath(handle, dir);
-    mkdirSync(target, { recursive: true });
-    const child = spawn('tar', ['-x', '-C', target, '--no-same-owner'], { stdio: ['pipe', 'ignore', 'pipe'] });
-    const stderr = collect(child.stderr);
-    child.stdin.end(tar);
-    const code = await new Promise<number>((r) => child.on('close', (c) => r(c ?? -1)));
+    const target = this.sandboxPath(handle, dir);
+    const child = this.spawnIn(handle, ['sh', '-c', 'mkdir -p -- "$1" && exec tar -x -C "$1" --no-same-owner', 'sh', target], { stdin: true });
+    const stderr = collect(child.stderr!);
+    child.stdin!.on('error', () => undefined); // tar may exit before reading everything; the exit code reports it
+    child.stdin!.end(tar);
+    const code = await new Promise<number>((resolvePromise, reject) => {
+      child.on('error', reject);
+      child.on('close', (c) => resolvePromise(c ?? -1));
+    });
     if (code !== 0) throw new Error(`tar: ${stderr().trim()}`);
   }
 
   async getArchive(handle: string, path: string): Promise<Readable> {
-    const source = this.hostPath(handle, path);
-    if (!existsSync(source)) throw new CocoonError('not_found', t('error.pathNotFound', { path }));
-    return spawn('tar', ['-c', '-C', dirname(source), basename(source)], { stdio: ['ignore', 'pipe', 'ignore'] }).stdout;
+    const source = this.sandboxPath(handle, path);
+    const probe = await this.exec(handle, ['test', '-e', source], { timeoutMs: 10_000 });
+    if (probe.exitCode !== 0) throw new CocoonError('not_found', t('error.pathNotFound', { path }));
+    return this.spawnIn(handle, ['tar', '-c', '-C', posix.dirname(source), posix.basename(source)]).stdout!;
   }
 
   /** Installs the host's Node.js and the agent CLIs into <dataDir>/agents (mounted read-only into sandboxes). */
@@ -262,23 +271,18 @@ export class BwrapDriver implements SandboxDriver {
     return JSON.parse(readFileSync(join(this.dir(handle), 'meta.json'), 'utf8')) as Meta;
   }
 
-  /** Sandbox path → host path (only the writable sandbox mounts are reachable). */
-  private hostPath(handle: string, insidePath: string): string {
-    const dir = this.dir(handle);
+  /** Runs a command in a fresh bwrap of the sandbox; stderr is piped, stdin only if asked for. */
+  private spawnIn(handle: string, command: string[], opts: ExecOptions & { stdin?: boolean } = {}) {
+    const child = spawn('bwrap', ['--args', '3', '--', ...command], { stdio: [opts.stdin ? 'pipe' : 'ignore', 'pipe', 'pipe', 'pipe'] });
+    (child.stdio[3] as NodeJS.WritableStream).end(argsPayload(this.args(handle, opts)));
+    return child;
+  }
+
+  /** Normalised absolute sandbox path; only the writable sandbox mounts are reachable. */
+  private sandboxPath(handle: string, insidePath: string): string {
     const { workdir } = this.meta(handle);
     const normalized = posix.normalize(insidePath.startsWith('/') ? insidePath : posix.join(workdir, insidePath));
-    const mounts: [string, string][] = [
-      [workdir, join(dir, 'workspace')],
-      [HOME, join(dir, 'home')],
-      [COCOON_DIR, join(dir, 'cocoon')],
-      ['/tmp', join(dir, 'tmp')],
-    ];
-    for (const [inside, host] of mounts) {
-      if (normalized === inside || normalized.startsWith(`${inside}/`)) {
-        const target = resolve(host, `.${normalized.slice(inside.length)}`);
-        if (target === host || target.startsWith(`${host}/`)) return target;
-      }
-    }
+    if ([workdir, HOME, COCOON_DIR, '/tmp'].some((mount) => normalized === mount || normalized.startsWith(`${mount}/`))) return normalized;
     throw new CocoonError('bad_request', t('error.pathNotFound', { path: insidePath }));
   }
 

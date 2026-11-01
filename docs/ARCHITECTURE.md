@@ -170,7 +170,7 @@ Der Server spricht Sandboxes nur über `SandboxDriver` an. Implementiert sind:
 |---|---|---|
 | `docker` | Docker Engine API | Images, Ressourcenlimits, erzwungener Egress, Runtimes (gVisor, Kata) |
 | `podman` | Podman über die Docker-kompatible API (rootless, ohne Daemon); Host-Alias `host.containers.internal`, Proxy-Container als Container-root (= Benutzer); der Proxy hängt zusätzlich im Netz `cocoon-egress` (nicht intern, mit DNS), weil Podmans DNS im internen Netz keine externen Namen auflöst, Sandboxes hängen dort nie | wie Docker, zusätzlich z. B. `krun` |
-| `bwrap` | bubblewrap: Sandbox = Ordner unter `.data/sandboxes/<id>`, Host-System schreibgeschützt, eigene User/PID/IPC/UTS-(Netz-)Namespaces, keine Capabilities, tmux-„Keeper“ pro Sandbox, Egress-Proxy als lokaler Prozess, PTY über node-pty, Optionen per `--args FD` (nicht in `ps` sichtbar) | keine Images, keine Ressourcenlimits, Egress nur konfiguriert (nicht erzwungen) |
+| `bwrap` | bubblewrap: Sandbox = Ordner unter `.data/sandboxes/<id>`, Host-System schreibgeschützt, eigene User/PID/IPC/UTS-(Netz-)Namespaces, keine Capabilities, tmux-„Keeper“ pro Sandbox, Egress-Proxy als lokaler Prozess, PTY über node-pty, Optionen per `--args FD` (nicht in `ps` sichtbar), Datei-Transfers (`putArchive`/`getArchive`) laufen mit `tar` **innerhalb** von bwrap (Symlinks des Agenten führen nicht auf Host-Dateien) | keine Images, keine Ressourcenlimits, Egress nur konfiguriert (nicht erzwungen) |
 
 Auswahl über `COCOON_DRIVER` (`auto`: Podman-Socket → Docker → bubblewrap). `system.info` liefert `driverKind` und `capabilities`,
 die UI blendet nicht verfügbare Optionen aus bzw. weist auf Einschränkungen hin.

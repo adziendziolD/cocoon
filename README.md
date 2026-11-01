@@ -171,7 +171,8 @@ Force one with `COCOON_DRIVER=docker|podman|bwrap`. The UI shows the active back
   most distributions). Each sandbox is a directory under `.data/sandboxes/<id>` (workspace, home, tmp); the host system is mounted
   read-only, a long-running *keeper* (tmux server) per sandbox keeps agents alive across cocoond restarts, and the egress proxy runs
   as a local process on `127.0.0.1:7431/7432` (`COCOON_PROXY_PORT`). Sandbox options and secrets are passed to `bwrap` via a file
-  descriptor, so they never show up in the host's process list.
+  descriptor, so they never show up in the host's process list. File transfers (uploads, downloads, staging files) run `tar` inside the
+  sandbox, so symlinks the agent plants in its writable folders cannot lead the server to host files.
 
 **Agent toolbox:** the agent CLIs – and the Node.js runtime they need – are not part of the sandbox image. They are installed once
 (`npm install -g --prefix /opt/agents …`) into a Docker/Podman volume (`cocoon-agents`) or `.data/agents` for bubblewrap, and
