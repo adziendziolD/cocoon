@@ -651,7 +651,7 @@ the heuristic takes over. Statuses survive control-plane restarts.
 | **Images** | CoCoon's Dockerfile (fingerprint stored as image label) and the registry digest of the base image | pulls the base image and rebuilds in the variant of the existing image (`slim`, `db`, `full`); existing sandboxes keep their image. A toolbox without its own Node.js is reinstalled along with it |
 
 CoCoon checks once a day by itself (`COCOON_UPDATE_CHECK=0` turns this off) and shows a badge next to *Settings*.
-`pnpm start` runs the server under a small supervisor that restarts it after an update (`pnpm dev` does not – restart by hand).
+`pnpm start` runs the server under a small supervisor that restarts it after an update (`pnpm dev` does not – restart by hand). A server that keeps exiting with the restart code right after starting is restarted after 1 s, 2 s, 4 s … (at most 60 s) instead of in a tight loop; a run of 30 s or more resets this.
 
 **Trust in the CoCoon update.** The update merges whatever the upstream branch of your clone points at, and then runs
 `pnpm install` and the web build, so the upstream repository (and the account that can push to it) is trusted with code
