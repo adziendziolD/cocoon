@@ -251,7 +251,8 @@ Use your own model endpoint instead of (or in addition to) the default access, o
 Each provider has a base URL, the name of the secret holding its key, an auth mode (`bearer`, `x-api-key`, custom header, none),
 a list of models and a default model. The UI offers templates (OpenRouter, Ollama, LiteLLM, DeepSeek, Groq, Mistral, custom
 Anthropic/OpenAI/HTTP) and a **Test connection** button (`providers.test`) that checks reachability and authentication from the
-server and discovers available models – even before saving.
+server and discovers available models – even before saving. A key is only sent to the base URL stored with the provider
+(or, for an unsaved provider, to the URL you test right after entering the key); testing another URL with a stored key is refused.
 
 How it is wired:
 - In `egress` mode the base URL points to the credential proxy (`http://cocoon-proxy:8080/p-<id>`), which adds the real key.
@@ -515,7 +516,9 @@ Built-in: **Plan → Build → Review** (approve the plan before implementation)
 
 **Notifications** (*Settings → Notifications*): an incoming webhook (Slack, Mattermost, Discord via `/slack`, or any JSON
 endpoint) receives `{ text, content, event, url }` when an agent is waiting for you, a task is ready for review, failed or done.
-Messages use the server's default language; set `COCOON_PUBLIC_URL` to get links.
+Messages use the server's default language; set `COCOON_PUBLIC_URL` to get links. Webhook targets on private networks (loopback,
+LAN, link-local, e.g. cloud metadata endpoints) are refused, also after DNS resolution, and redirects are not followed; for an internal
+receiver set `COCOON_ALLOW_PRIVATE_WEBHOOKS=1`.
 
 ## Cockpit
 
@@ -819,6 +822,7 @@ Everything is configurable in the UI. Environment variables (all optional, see [
 | `COCOON_PORTS_SHARE_BIND` | empty | address shared ports are published on, e.g. `0.0.0.0` for the whole network; shared ports have no authentication. Empty = sharing disabled |
 | `COCOON_PREVIEW_DOMAIN` | – | wildcard domain for previews (`p<port>-<sandbox>.<domain>`, HTTPS); default `*.localhost` on the CoCoon port |
 | `COCOON_PREVIEW_PATH_MODE` | – | `1` enables path-based previews on the admin origin (sandboxed, cookies stripped; see [Servers & ports](#servers--ports-previews-and-sharing)); ignored with `COCOON_PREVIEW_DOMAIN` |
+| `COCOON_ALLOW_PRIVATE_WEBHOOKS` | – | `1` allows notification webhooks to private/loopback/link-local addresses (blocked by default) |
 | `COCOON_SERVICE_IDLE_MINUTES` | `10` | Minutes without a running sandbox before a managed shared service is paused |
 | `DOCKER_SOCKET` | auto-detected | Path to the Docker or Podman API socket |
 | `COCOON_PROXY_PORT` | `7431` | bubblewrap only: port of the local egress proxy (credential proxy = port + 1) |

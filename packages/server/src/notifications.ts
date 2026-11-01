@@ -1,6 +1,7 @@
 import type { AgentStatus, MethodResult, NotificationEvent } from '@cocoon/protocol';
 import type { EventBus } from './events.ts';
 import { t, type MessageKey } from './i18n.ts';
+import { ALLOW_PRIVATE_WEBHOOKS_ENV, BlockedTargetError, postJson } from './outbound.ts';
 import type { SettingsService } from './settings.ts';
 import type { Store } from './store.ts';
 
@@ -47,6 +48,7 @@ export class Notifier {
       const status = await this.post(url, 'test', t('notify.test', {}, this.settings.get().general.language));
       return status < 300 ? { ok: true, status, message: t('notify.sent') } : { ok: false, status, message: t('notify.httpError', { status }) };
     } catch (err) {
+      if (err instanceof BlockedTargetError) return { ok: false, message: t('notify.blockedTarget', { env: ALLOW_PRIVATE_WEBHOOKS_ENV }) };
       return { ok: false, message: t('provider.unreachable', { error: (err as Error).message }) };
     }
   }
@@ -54,12 +56,7 @@ export class Notifier {
   private async post(url: string, event: string, message: string, path?: string): Promise<number> {
     const link = path && this.publicUrl ? `${this.publicUrl.replace(/\/$/, '')}${path}` : undefined;
     const text = link ? `${message}\n${link}` : message;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text, content: text, event, url: link }),
-      signal: AbortSignal.timeout(10_000),
-    });
-    return res.status;
+    // Not fetch: the target is user input, so private addresses are refused and redirects are not followed (see outbound.ts).
+    return postJson(url, { text, content: text, event, url: link });
   }
 }

@@ -28,6 +28,12 @@ export class SecretsService {
     return this.resolve(sandbox.githubToken ?? workspace?.githubToken ?? 'GITHUB_TOKEN');
   }
 
+  /** True if the secret was stored through the API within the last `ms` (a caller that just supplied the value). */
+  storedWithin(name: string, ms: number): boolean {
+    const stored = this.store.secrets()[name];
+    return Boolean(stored) && Date.now() - Date.parse(stored!.updatedAt) <= ms;
+  }
+
   list(): SecretInfo[] {
     const stored = this.store.secrets();
     const names = new Set([...Object.keys(KNOWN_SECRETS), ...Object.keys(stored)]);

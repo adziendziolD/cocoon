@@ -223,6 +223,10 @@ export const messages = {
     en: 'Authentication rejected (HTTP {status}) – please check the API key',
   },
   'provider.httpError': { de: 'Der Server antwortet mit HTTP {status}: {message}', en: 'The server responded with HTTP {status}: {message}' },
+  'provider.keyNotBound': {
+    de: 'Der Key {secret} wird nicht an diese URL gesendet: Speichere den Provider zuerst (der Key ist an die gespeicherte URL gebunden) oder hinterlege den Key neu.',
+    en: 'The key {secret} is not sent to this URL: save the provider first (the key is bound to the stored URL) or store the key again.',
+  },
   'provider.unreachable': { de: 'Nicht erreichbar: {error}', en: 'Not reachable: {error}' },
   'provider.missingKey': { de: 'Kein API-Key hinterlegt ({secret})', en: 'No API key stored ({secret})' },
 
@@ -287,6 +291,10 @@ export const messages = {
   'notify.test': { de: '🐛 Testnachricht von CoCoon – Benachrichtigungen funktionieren.', en: '🐛 Test message from CoCoon – notifications work.' },
   'notify.noWebhook': { de: 'Keine Webhook-URL eingetragen', en: 'No webhook URL configured' },
   'notify.sent': { de: 'Nachricht gesendet', en: 'Message sent' },
+  'notify.blockedTarget': {
+    de: 'Webhook-Ziele in privaten Netzen (Loopback, LAN, Link-Local) sind gesperrt. Für einen internen Empfänger {env}=1 setzen.',
+    en: 'Webhook targets on private networks (loopback, LAN, link-local) are blocked. Set {env}=1 for an internal receiver.',
+  },
   'notify.httpError': { de: 'Der Webhook antwortet mit HTTP {status}', en: 'The webhook responded with HTTP {status}' },
 
   // console

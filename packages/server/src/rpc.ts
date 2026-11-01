@@ -156,7 +156,7 @@ export function createRpc(ctx: RpcContext) {
       return created;
     },
     'tokens.revoke': async (p) => (tokens.revoke(p.id), ok),
-    'providers.test': (p) => ('id' in p ? providers.testAndRemember(p.id) : providers.test(p.provider)),
+    'providers.test': (p) => ('id' in p ? providers.testAndRemember(p.id) : providers.testDraft(p.provider)),
     'models.list': async (p) => providers.defaultModels(p.adapter),
     'egress.denied': async () => egress.denied(),
     'notifications.test': (p) => notifier.test(p.webhookUrl),
