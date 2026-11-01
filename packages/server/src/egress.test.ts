@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EgressManager, providerTargets, proxiedSecret } from './egress.ts';
 import { EventBus } from './events.ts';
 import { SecretsService } from './secrets.ts';
@@ -209,7 +209,21 @@ describe('egress proxy container', () => {
 });
 
 describe('proxied secrets', () => {
-  it('proxies the Claude subscription token and the Gemini key only for adapters that honour a base URL', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('leaves the Claude subscription token and the Gemini key in the sandbox unless opted in', () => {
+    expect(proxiedSecret('CLAUDE_CODE_OAUTH_TOKEN', 'claude-code')).toBeUndefined();
+    expect(proxiedSecret('GEMINI_API_KEY', 'gemini')).toBeUndefined();
+    expect(proxiedSecret('ANTHROPIC_API_KEY', 'claude-code')).toMatchObject({ route: 'anthropic' });
+    const { egress, policy, store } = setup();
+    for (const [name, value] of Object.entries({ ANTHROPIC_API_KEY: 'k', CLAUDE_CODE_OAUTH_TOKEN: 't', GEMINI_API_KEY: 'g' })) store.putSecret(name, { value, updatedAt: '' });
+    egress.writePolicy();
+    expect(policy().routes.anthropic?.secrets).toEqual({ ANTHROPIC_API_KEY: 'k' });
+    expect(policy().routes.gemini).toBeUndefined();
+  });
+
+  it('proxies the Claude subscription token and the Gemini key only for adapters that honour a base URL, when opted in', () => {
+    vi.stubEnv('COCOON_PROXY_EXTRA_SECRETS', '1');
     expect(proxiedSecret('CLAUDE_CODE_OAUTH_TOKEN', 'claude-code')).toMatchObject({ route: 'anthropic', baseUrlEnv: 'ANTHROPIC_BASE_URL' });
     expect(proxiedSecret('CLAUDE_CODE_OAUTH_TOKEN', 'opencode')).toBeUndefined();
     expect(proxiedSecret('GEMINI_API_KEY', 'gemini')).toMatchObject({ route: 'gemini', baseUrlEnv: 'GOOGLE_GEMINI_BASE_URL', upstream: 'https://generativelanguage.googleapis.com' });
@@ -223,6 +237,7 @@ describe('proxied secrets', () => {
   });
 
   it('puts API key and subscription token on one Anthropic route and the Gemini key on its own', () => {
+    vi.stubEnv('COCOON_PROXY_EXTRA_SECRETS', '1');
     const { egress, policy, store } = setup();
     for (const [name, value] of Object.entries({ ANTHROPIC_API_KEY: 'sk-ant-key', CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-token', GEMINI_API_KEY: 'gem-key' })) {
       store.putSecret(name, { value, updatedAt: '' });

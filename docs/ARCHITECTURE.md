@@ -140,8 +140,9 @@ Agenten bedienen, aber keine Keys auslesen oder Sicherheitseinstellungen ändern
   Tunnel nicht mehr inspiziert (kein TLS-Aufbruch). Der Credential-Proxy leitet an feste, vom Admin konfigurierte Upstreams
   weiter und nutzt diese Prüfung nicht.
 
-**Credential-Proxy** (`egress.credentialProxy`, Standard an): Agenten bekommen für `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`
-(nur Claude Code), `OPENAI_API_KEY` und `GEMINI_API_KEY` (nur Gemini CLI) nur einen Platzhalter `cocoon_<sandboxToken>_<NAME>`;
+**Credential-Proxy** (`egress.credentialProxy`, Standard an): Agenten bekommen für `ANTHROPIC_API_KEY` und `OPENAI_API_KEY`
+(experimentell und standardmäßig aus, mit `COCOON_PROXY_EXTRA_SECRETS=1`: auch `CLAUDE_CODE_OAUTH_TOKEN` nur für Claude Code und
+`GEMINI_API_KEY` nur für Gemini CLI; deren Verhalten ist nicht gegen die echten CLIs geprüft) nur einen Platzhalter `cocoon_<sandboxToken>_<NAME>`;
 `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` / `GOOGLE_GEMINI_BASE_URL` zeigt auf den Proxy. Der Proxy tauscht den Platzhalter
 (auch in `Authorization: Bearer` und `x-goog-api-key`) gegen den echten Wert und leitet per TLS weiter. Für diese Secrets gelangt
 der echte Wert nie in die Sandbox (getestet für die API-Keys: weder in Env, Dateien noch `/proc`).
@@ -151,8 +152,8 @@ gegeben. Das gilt vor allem für `GITHUB_TOKEN` (`gh`, `git` und die meisten Git
 direkt per TLS an; es gibt keine Basis-URL, die man umbiegen könnte, und der Proxy terminiert kein TLS). Ein Agent kann dieses Token
 lesen und, solange `github.com` auf der Allowlist steht, darüber exfiltrieren (z. B. per Gist). Gegenmaßnahmen: Token mit minimalen
 Rechten (Fine-grained, einzelne Repositories), `github.com` aus der Allowlist nehmen, wenn kein Push gebraucht wird. Ebenso
-`GEMINI_API_KEY` bei anderen Agenten als Gemini CLI (z. B. Pi) und `CLAUDE_CODE_OAUTH_TOKEN` bei anderen Agenten als Claude Code,
-da deren Base-URL-Verhalten nicht bekannt ist.
+`GEMINI_API_KEY` und `CLAUDE_CODE_OAUTH_TOKEN`, solange `COCOON_PROXY_EXTRA_SECRETS` nicht gesetzt ist, und auch dann bei anderen
+Agenten als Gemini CLI (z. B. Pi) bzw. Claude Code, da deren Base-URL-Verhalten nicht bekannt ist.
 
 **Isolation der Dienste:** Jeder verwaltete Dienst (`cocoon-svc-<id>`) hängt in einem eigenen internen Netz `cocoon-svc-<id>-net`
 (Alias = Dienst-ID), dem nur Sandboxes beitreten, die den Dienst haben (`attach`/`detach`/`started`, Start des Dienstes). Alte

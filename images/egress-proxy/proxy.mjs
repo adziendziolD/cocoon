@@ -15,8 +15,8 @@
 // CREDENTIAL_PORT (8080)  Credential proxy. Sandboxes get placeholder keys ("cocoon_<sandboxToken>_<SECRET>") and
 //                         talk to http://<proxy>/t/<token>/<route>/...; the proxy swaps placeholders for real keys
 //                         (or injects the provider's auth header) and forwards upstream. This covers the secrets cocoond
-//                         routes through here: Anthropic/OpenAI/Gemini keys, the Claude subscription token, provider and
-//                         per-host environment keys. Not covered: GITHUB_TOKEN and any secret handed out as a plain value;
+//                         routes through here: Anthropic/OpenAI keys, provider and per-host environment keys and, when
+//                         COCOON_PROXY_EXTRA_SECRETS=1, the Gemini key and the Claude subscription token. Not covered: GITHUB_TOKEN and any secret handed out as a plain value;
 //                         those are readable inside the sandbox.
 //
 // Sandboxes are identified by their token (Proxy-Authorization: Basic cocoon:<token>, or the /t/<token>/ path prefix)
@@ -217,11 +217,20 @@ forward.on('connect', (req, clientSocket, head) => {
       upstream.destroy();
     };
     const timer = setTimeout(() => reject('not-tls'), HELLO_TIMEOUT_MS);
+    let verified = false;
+    // A client that hangs up, or an upstream that closes, before the ClientHello arrived is not a protocol violation.
+    clientSocket.once('close', () => clearTimeout(timer));
+    upstream.once('close', () => {
+      if (verified) return;
+      clearTimeout(timer);
+      clientSocket.destroy();
+    });
     const check = () => {
       const hello = peekClientHello(buffered);
       if (hello.status === 'more' && buffered.length <= MAX_HELLO_BYTES) return;
       if (hello.status !== 'ok') return reject('not-tls');
       if (!sniMatches(hello.sni, host)) return reject('sni');
+      verified = true;
       clearTimeout(timer);
       clientSocket.off('data', onData);
       clientSocket.pause();

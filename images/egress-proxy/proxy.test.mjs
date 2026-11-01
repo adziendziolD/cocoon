@@ -237,6 +237,20 @@ describe('CONNECT', () => {
     expect(denials()).toMatchObject([{ reason: 'not-tls' }]);
   });
 
+  it('closes the client when the upstream hangs up before any ClientHello and does not log a violation', async () => {
+    const hangup = net.createServer((socket) => socket.end());
+    const port = await listen(hangup);
+    try {
+      await applyPolicy({ allowlist: [], targets: [{ host: 'localhost', port }] });
+      reset();
+      const { socket } = await connect(`localhost:${port}`);
+      await Promise.race([closed(socket), sleep(2000).then(() => Promise.reject(new Error('client socket stayed open')))]);
+      expect(denials()).toEqual([]);
+    } finally {
+      hangup.close();
+    }
+  });
+
   it('handles a ClientHello that arrives in several pieces', async () => {
     await applyPolicy({ allowlist: [], targets: [{ host: 'localhost', port: tcpPort }] });
     reset();

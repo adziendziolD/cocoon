@@ -65,7 +65,7 @@ it too. The design is inspired by [herdr](https://vercel.com/docs/sandbox/ecosys
 | **Sandbox backends** | **Docker**, **Podman** (rootless, no daemon) or **bubblewrap** (lightweight Linux process sandboxes, no images, start in ~0.3 s) – picked automatically. Containers are hardened (non-root, no capabilities, `no-new-privileges`, CPU/RAM/PID limits) with optional gVisor or Kata/Firecracker runtimes |
 | **Small footprint** | Slim base image under 250 MB (Debian, no Node.js); agent CLIs and their Node.js runtime live in a shared, read-only **toolbox** that is installed once and updated without rebuilding images |
 | **Network control** | Per sandbox: no internet, allowlisted domains only (via egress proxy, default), or open internet. Blocked connections are logged and can be allowed with one click |
-| **Credential proxy** | Anthropic, OpenAI and Gemini keys and the Claude subscription token stay on the server – sandboxes only see placeholders, the proxy adds the real value on the way out. The GitHub token is not proxied (see below) |
+| **Credential proxy** | Anthropic and OpenAI keys (optionally also the Gemini key and the Claude subscription token) stay on the server – sandboxes only see placeholders, the proxy adds the real value on the way out. The GitHub token is not proxied (see below) |
 | **Many agents** | Claude Code, OpenAI Codex, OpenCode, Pi, Qwen Code, Gemini CLI and plain shells – switch the agent of a sandbox at any time, with handover of task, changes and last output |
 | **Local LLMs** | Each agent is started with the right parameters for your own model server; CoCoon detects which APIs a server speaks and **translates** Anthropic Messages / OpenAI Responses to Chat Completions, so Claude Code and Codex work with chat-only servers (llama.cpp, vLLM, LM Studio, …) |
 | **Custom APIs** | Bring your own model endpoint (Anthropic- or OpenAI-compatible: company gateway, LiteLLM, OpenRouter, Ollama, DeepSeek, …) or give agents access to any HTTP API, with model selection and connection test |
@@ -215,15 +215,16 @@ never appear in a command line (`ps`/`docker top`).
   (*Settings → Network & security → Internal addresses*) or is the exact host and port of a configured API provider; it connects
   only to the addresses it checked; plain HTTP is forwarded with the checked target as `Host`; and a `CONNECT` tunnel must start
   with a TLS ClientHello whose server name (SNI) equals the `CONNECT` host, otherwise it is closed before anything reaches the
-  upstream (no domain fronting via allowlisted CDN hosts, no plain protocols over 443). Clients that use Encrypted Client Hello
+  upstream (the server name must match the allowlisted host, no plain protocols over 443; what is sent inside the TLS stream is not inspected, so the `Host` header of a tunnel is not checked). Clients that use Encrypted Client Hello
   are refused too, because only the outer name is visible. Such refusals show up under *Blocked connections* with their reason.
 - Sandboxes are identified by a per-sandbox token (`Proxy-Authorization` / `/t/<token>/` path prefix) or, on the internal container
   network, by their IP.
 - `:8080` credential proxy: agents call `http://cocoon-proxy:8080/t/<token>/<route>/…`; the proxy swaps placeholders
   (`cocoon_<sandboxToken>_<SECRET>`) for real keys or injects the provider's auth header, then forwards over TLS.
   A sandbox may only use a route after an agent using it was started there.
-  Proxied: `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` (Claude Code only), `OPENAI_API_KEY`, `GEMINI_API_KEY` (Gemini CLI only),
-  provider keys and per-host environment variables. **Not proxied: `GITHUB_TOKEN`.** `gh`, `git` and other GitHub clients connect to
+  Proxied: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, provider keys and per-host environment variables. Experimental and off by
+  default (`COCOON_PROXY_EXTRA_SECRETS=1`): `CLAUDE_CODE_OAUTH_TOKEN` (Claude Code only) and `GEMINI_API_KEY` (Gemini CLI only);
+  until verified with the real CLIs, those two stay readable inside the sandbox, like `GITHUB_TOKEN`. **Not proxied: `GITHUB_TOKEN`.** `gh`, `git` and other GitHub clients connect to
   `github.com` / `api.github.com` directly over TLS and offer no base URL to redirect, so the token is readable inside the sandbox
   and, while `github.com` is allowlisted, can be exfiltrated (e.g. via a gist). Use a fine-grained token limited to the needed
   repositories and permissions, and remove `github.com` from the allowlist if agents do not need to push. The same applies to
@@ -879,6 +880,7 @@ Everything is configurable in the UI. Environment variables (all optional, see [
 | `COCOON_PORTS` | `1` | `0` turns off port forwarding (previews and sharing) |
 | `COCOON_PORTS_PREVIEW_RANGE` | `7500-7549` | host ports for previews (published on 127.0.0.1) |
 | `COCOON_PORTS_SHARE_RANGE` | `7550-7599` | host ports for shared ports |
+| `COCOON_PROXY_EXTRA_SECRETS` | – | `1` also proxies `CLAUDE_CODE_OAUTH_TOKEN` (Claude Code) and `GEMINI_API_KEY` (Gemini CLI) through the credential proxy; experimental, not verified against the real CLIs |
 | `COCOON_PORTS_SHARE_BIND` | empty | address shared ports are published on, e.g. `0.0.0.0` for the whole network; shared ports have no authentication. Empty = sharing disabled |
 | `COCOON_PREVIEW_DOMAIN` | – | wildcard domain for previews (`p<port>-<sandbox>.<domain>`, HTTPS); default `*.localhost` on the CoCoon port |
 | `COCOON_PREVIEW_PATH_MODE` | – | `1` enables path-based previews on the admin origin (sandboxed, cookies stripped; see [Servers & ports](#servers--ports-previews-and-sharing)); ignored with `COCOON_PREVIEW_DOMAIN` |

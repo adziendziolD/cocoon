@@ -28,19 +28,25 @@ export interface ProxiedSecret {
   baseUrlEnv: string;
   basePath: string;
   adapters?: string[];
+  /** Only proxied with COCOON_PROXY_EXTRA_SECRETS=1: how the agent CLI uses the base URL is not verified against the real CLI. */
+  optIn?: boolean;
 }
+
+/** Turns on proxying of the Claude subscription token and the Gemini key (experimental, see PROXIED_SECRETS). */
+export const EXTRA_SECRETS_ENV = 'COCOON_PROXY_EXTRA_SECRETS';
 export const PROXIED_SECRETS: Record<string, ProxiedSecret> = {
   ANTHROPIC_API_KEY: { route: 'anthropic', upstream: 'https://api.anthropic.com', baseUrlEnv: 'ANTHROPIC_BASE_URL', basePath: '' },
   // Claude subscription token: Claude Code sends it as "Authorization: Bearer <token>", the proxy swaps the placeholder.
-  CLAUDE_CODE_OAUTH_TOKEN: { route: 'anthropic', upstream: 'https://api.anthropic.com', baseUrlEnv: 'ANTHROPIC_BASE_URL', basePath: '', adapters: ['claude-code'] },
+  CLAUDE_CODE_OAUTH_TOKEN: { route: 'anthropic', upstream: 'https://api.anthropic.com', baseUrlEnv: 'ANTHROPIC_BASE_URL', basePath: '', adapters: ['claude-code'], optIn: true },
   OPENAI_API_KEY: { route: 'openai', upstream: 'https://api.openai.com', baseUrlEnv: 'OPENAI_BASE_URL', basePath: '/v1' },
   // Gemini CLI sends the key as "x-goog-api-key" to GOOGLE_GEMINI_BASE_URL and appends /v1beta/... itself.
-  GEMINI_API_KEY: { route: 'gemini', upstream: 'https://generativelanguage.googleapis.com', baseUrlEnv: 'GOOGLE_GEMINI_BASE_URL', basePath: '', adapters: ['gemini'] },
+  GEMINI_API_KEY: { route: 'gemini', upstream: 'https://generativelanguage.googleapis.com', baseUrlEnv: 'GOOGLE_GEMINI_BASE_URL', basePath: '', adapters: ['gemini'], optIn: true },
 };
 
 /** Proxy definition of a secret for an agent adapter, or undefined if the real value has to enter the sandbox. */
 export function proxiedSecret(name: string, adapter: string): ProxiedSecret | undefined {
   const def = Object.hasOwn(PROXIED_SECRETS, name) ? PROXIED_SECRETS[name] : undefined;
+  if (def?.optIn && process.env[EXTRA_SECRETS_ENV] !== '1') return undefined;
   return def && (!def.adapters || def.adapters.includes(adapter)) ? def : undefined;
 }
 
@@ -397,6 +403,7 @@ export class EgressManager {
     const routes: Record<string, Route> = { ...envRoutes };
     if (settings.egress.credentialProxy) {
       for (const [name, def] of Object.entries(PROXIED_SECRETS)) {
+        if (def.optIn && process.env[EXTRA_SECRETS_ENV] !== '1') continue;
         const value = this.secrets.resolve(name);
         // Several secrets can share a route (API key and subscription token both go to Anthropic).
         if (value) (routes[def.route] ??= { upstream: def.upstream, secrets: {} }).secrets[name] = value;
