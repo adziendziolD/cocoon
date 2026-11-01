@@ -361,7 +361,7 @@ listening TCP ports of every running sandbox). From there:
   admin origin (ignored when `COCOON_PREVIEW_DOMAIN` is set). Because the app's pages share the origin of the CoCoon UI, they are
   restricted: responses carry `Content-Security-Policy: sandbox allow-scripts …` (no `allow-same-origin`, so the page runs in
   an opaque origin and cannot read the admin token) and the app's `Set-Cookie` headers are dropped. Many single-page apps
-  (module scripts, fetch to the same origin) do not work in this mode; the prefix is stripped before it reaches the app and sent as
+  (module scripts, fetch to the same origin, sub-requests that need the preview session cookie) do not work in this mode; the prefix is stripped before it reaches the app and sent as
   `X-Forwarded-Prefix`.
 - **Share on the network** – publishes the server on a host port (`http://<host-ip>:7550`) for everyone who can reach the
   machine, without login. Opt-in per port, logged in the activity log, can be turned off entirely.
@@ -886,7 +886,7 @@ deploy/               systemd unit, Caddyfile
 docs/                 Beginner's guides (EN/DE), architecture (DE)
 ```
 
-Requirements for custom sandbox images: `sh`, `git`, `tmux`, a non-root default user and a writable `/workspace`. Node.js comes from
+Requirements for custom sandbox images: `sh`, `git`, `tmux`, a non-root default user with UID 1000 (the agent user; the status directory is owned by it) and a writable `/workspace`. Node.js comes from
 the toolbox; it is a glibc build, so for musl-based images (Alpine) set `COCOON_TOOLBOX_IMAGE` to a matching installer image
 (e.g. `node:24-alpine`).
 

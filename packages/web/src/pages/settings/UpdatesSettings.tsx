@@ -80,7 +80,13 @@ export function UpdatesSettings() {
   if (!s) return <LoadingState />;
 
   const busy = s.running || s.restarting || apply.isPending;
-  const applyTo = (targets?: UpdateTarget[]) => apply.mutate({ targets, commit: (targets ? targets.includes('cocoon') : s.available.includes('cocoon')) ? s.cocoon.latestCommit : undefined });
+  // The status can be a day old: check the remotes first so the commit sent for confirmation is the one that will be installed.
+  const applyTo = async (targets?: UpdateTarget[]) => {
+    const fresh = await rpc('update.status', { refresh: true }).catch(() => s);
+    qc.setQueryData(qk.updates, fresh);
+    const withCocoon = targets ? targets.includes('cocoon') : fresh.available.includes('cocoon');
+    apply.mutate({ targets, commit: withCocoon ? fresh.cocoon.latestCommit : undefined });
+  };
 
   return (
     <div className="space-y-6">

@@ -98,9 +98,15 @@ export function postJson(url: string, body: unknown, options: PostOptions = {}):
       (res) => {
         res.resume();
         res.on('end', () => resolve(res.statusCode ?? 0));
+        res.on('error', reject);
+        res.on('close', () => reject(new Error('connection closed before the response ended')));
       },
     );
     req.on('timeout', () => req.destroy(new Error('timeout')));
+    // The socket timeout only covers idle time; this one also stops a receiver that keeps the response open.
+    const overall = setTimeout(() => req.destroy(new Error('timeout')), (options.timeoutMs ?? 10_000) * 2);
+    overall.unref();
+    req.on('close', () => clearTimeout(overall));
     req.on('error', reject);
     req.end(payload);
   });
