@@ -70,7 +70,7 @@ export function TaskBoard({
   const drop = async (task: Task, to: DropTarget) => {
     const kind = moveKind(task.status, to.status);
     if (kind === 'forbidden') {
-      toast.info(t('board.cannotMove'), t(`board.cannotMove.${to.status === 'review' ? 'review' : 'running'}`));
+      toast.info(t('board.cannotMove'), t(`board.cannotMove.${to.status === 'review' || to.status === 'done' ? to.status : 'running'}`));
       return;
     }
     let column = columns[to.status].filter((x) => x.id !== task.id);

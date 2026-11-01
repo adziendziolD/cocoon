@@ -326,3 +326,61 @@ describe('ProviderService.defaultModels', () => {
     expect(await service({ ANTHROPIC_API_KEY: 'bad' }).defaultModels('claude-code')).toEqual({ models: [...ALIASES], source: 'builtin' });
   });
 });
+
+describe('ProviderService.testDraft (key binding)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const saved = ApiProvider.parse({ label: 'Saved', kind: 'openai', baseUrl: 'https://llm.example.com/v1', secret: 'LLM_KEY' });
+  const draft = (patch: Record<string, unknown> = {}) => ApiProvider.parse({ ...saved, ...patch });
+
+  const service = (stored: Record<string, { value: string; updatedAt: string }>) => {
+    const secrets = {
+      resolve: (name: string) => stored[name]?.value,
+      storedWithin: (name: string, ms: number) => Boolean(stored[name]) && Date.now() - Date.parse(stored[name]!.updatedAt) <= ms,
+    };
+    return new ProviderService({ get: () => ({ providers: { saved } }) } as unknown as SettingsService, secrets as unknown as SecretsService);
+  };
+  const OLD = '2020-01-01T00:00:00.000Z';
+
+  const stubFetch = () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  };
+
+  it('never sends a long-stored secret to a URL other than the saved one', async () => {
+    const fetchMock = stubFetch();
+    const result = await service({ LLM_KEY: { value: 'sk-secret', updatedAt: OLD } }).testDraft(draft({ baseUrl: 'https://attacker.example/v1' }));
+    expect(result.ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not let a draft borrow any other stored secret', async () => {
+    const fetchMock = stubFetch();
+    const stored = { ANTHROPIC_API_KEY: { value: 'sk-ant', updatedAt: OLD } };
+    expect((await service(stored).testDraft(draft({ baseUrl: 'https://attacker.example', secret: 'ANTHROPIC_API_KEY' }))).ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('sends the secret to the saved baseUrl (trailing slash does not matter)', async () => {
+    const fetchMock = stubFetch();
+    expect((await service({ LLM_KEY: { value: 'sk-secret', updatedAt: OLD } }).testDraft(draft({ baseUrl: 'https://llm.example.com/v1/' }))).ok).toBe(true);
+    expect((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].headers).toMatchObject({ authorization: 'Bearer sk-secret' });
+  });
+
+  it('allows a new URL for a secret the caller just stored, and keeps allowing that pair', async () => {
+    const fetchMock = stubFetch();
+    const stored = { LLM_KEY: { value: 'sk-secret', updatedAt: new Date().toISOString() } };
+    const svc = service(stored);
+    expect((await svc.testDraft(draft({ baseUrl: 'https://new.example/v1' }))).ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalled();
+    stored.LLM_KEY.updatedAt = OLD;
+    expect((await svc.testDraft(draft({ baseUrl: 'https://new.example/v1' }))).ok).toBe(true);
+    expect((await svc.testDraft(draft({ baseUrl: 'https://other.example/v1' }))).ok).toBe(false);
+  });
+
+  it('tests providers without authentication freely', async () => {
+    stubFetch();
+    expect((await service({}).testDraft(draft({ baseUrl: 'http://ollama:11434/v1', auth: 'none', secret: undefined }))).ok).toBe(true);
+  });
+});

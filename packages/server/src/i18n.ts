@@ -28,6 +28,11 @@ export const messages = {
     de: 'Freigeben im Netzwerk ist ausgeschaltet (COCOON_PORTS_SHARE_BIND ist leer). Nutze die Vorschau.',
     en: 'Sharing on the network is turned off (COCOON_PORTS_SHARE_BIND is empty). Use the preview instead.',
   },
+  'error.previewPathModeOff': {
+    de: 'Vorschau-Links für den Zugriff von einem anderen Rechner brauchen eine eigene Origin: setze COCOON_PREVIEW_DOMAIN (Wildcard-Domain). Nur im Notfall: {env}=1 aktiviert die pfadbasierte Vorschau auf der Admin-Origin (eingeschränkt, siehe README).',
+    en: 'Preview links for access from another machine need their own origin: set COCOON_PREVIEW_DOMAIN (wildcard domain). As a last resort, {env}=1 enables path-based previews on the admin origin (restricted, see README).',
+  },
+  'error.envKeyInvalid': { de: 'Ungültiger Name der Umgebungsvariable „{key}“ (erlaubt: Buchstaben, Ziffern und _, nicht mit Ziffer beginnend).', en: 'Invalid environment variable name "{key}" (allowed: letters, digits and _, not starting with a digit).' },
   'error.portNotOpen': { de: 'Port {port} ist nicht geöffnet.', en: 'Port {port} is not open.' },
   'error.portRangeFull': { de: 'Alle Host-Ports im Bereich {range} sind belegt. Schließe einen offenen Port.', en: 'All host ports in the range {range} are in use. Close an open port first.' },
   'error.workspaceKeyTaken': { de: 'Das Kürzel „{key}“ ist ungültig oder wird schon von einem anderen Workspace benutzt (2–6 Großbuchstaben/Ziffern).', en: 'The key "{key}" is invalid or already used by another workspace (2–6 capital letters/digits).' },
@@ -37,6 +42,22 @@ export const messages = {
     en: 'CoCoon cannot restart itself – please restart it by hand (when started with "pnpm start", CoCoon restarts itself).',
   },
   'update.upToDate': { de: 'CoCoon ist aktuell.', en: 'CoCoon is up to date.' },
+  'update.commitMismatch': {
+    de: 'Das Update wurde nicht gestartet: bestätigt war Commit {expected}, der Upstream steht inzwischen auf {actual}. Bitte erneut prüfen.',
+    en: 'The update was not started: commit {expected} was confirmed, but upstream is now at {actual}. Please check again.',
+  },
+  'update.commitRequired': {
+    de: 'Das Update wurde nicht gestartet: bei aktivierter Signaturprüfung muss der Ziel-Commit ({commit}) bestätigt werden (update.apply mit „commit“, CLI: --commit).',
+    en: 'The update was not started: with signature verification enabled the target commit ({commit}) must be confirmed (update.apply with "commit", CLI: --commit).',
+  },
+  'update.verifyFailed': {
+    de: 'Das Update wurde nicht gestartet: die Signatur von {commit} konnte nicht geprüft werden ({error}).',
+    en: 'The update was not started: the signature of {commit} could not be verified ({error}).',
+  },
+  'update.verifyConfigInvalid': {
+    de: 'COCOON_UPDATE_VERIFY hat den ungültigen Wert „{value}“ (erlaubt: commit, tag, off). Das Update wurde nicht gestartet.',
+    en: 'COCOON_UPDATE_VERIFY has the invalid value "{value}" (allowed: commit, tag, off). The update was not started.',
+  },
   'update.blocked.notGit': {
     de: 'CoCoon ist nicht aus einem git-Klon installiert und kann sich nicht selbst aktualisieren.',
     en: 'CoCoon is not installed from a git clone and cannot update itself.',
@@ -219,6 +240,10 @@ export const messages = {
     en: 'Authentication rejected (HTTP {status}) – please check the API key',
   },
   'provider.httpError': { de: 'Der Server antwortet mit HTTP {status}: {message}', en: 'The server responded with HTTP {status}: {message}' },
+  'provider.keyNotBound': {
+    de: 'Der Key {secret} wird nicht an diese URL gesendet: Speichere den Provider zuerst (der Key ist an die gespeicherte URL gebunden) oder hinterlege den Key neu.',
+    en: 'The key {secret} is not sent to this URL: save the provider first (the key is bound to the stored URL) or store the key again.',
+  },
   'provider.unreachable': { de: 'Nicht erreichbar: {error}', en: 'Not reachable: {error}' },
   'provider.missingKey': { de: 'Kein API-Key hinterlegt ({secret})', en: 'No API key stored ({secret})' },
 
@@ -230,6 +255,10 @@ export const messages = {
   'error.taskNotInReview': { de: 'Die Aufgabe „{title}“ wartet gerade nicht auf ein Review', en: 'Task "{title}" is not waiting for a review' },
   'error.taskNotFailed': { de: 'Die Aufgabe „{title}“ ist nicht fehlgeschlagen', en: 'Task "{title}" has not failed' },
   'error.taskDependencies': { de: 'Die Aufgabe wartet noch auf: {titles}', en: 'The task is still waiting for: {titles}' },
+  'error.taskUseApprove': {
+    de: 'Die Aufgabe „{title}“ wurde schon gestartet: Sie wird über „Prüfen“ abgeschlossen (fehlgeschlagen: erst „Doch fertig“, dann „Freigeben“), damit Review und Veröffentlichung nicht übersprungen werden.',
+    en: 'The task "{title}" was already started: it is closed through "Review" (failed: "Finished after all" first, then "Approve"), so that review and publishing are not skipped.',
+  },
   'error.taskUseStart': { de: 'Zum Starten bitte „Starten“ verwenden', en: 'Use "Start" to run a task' },
   'error.unknownWorkflow': { de: 'Unbekannter Ablauf „{id}“', en: 'Unknown workflow "{id}"' },
   'error.unknownDependency': { de: 'Abhängigkeit {id} gehört nicht zu diesem Workspace', en: 'Dependency {id} does not belong to this workspace' },
@@ -283,6 +312,10 @@ export const messages = {
   'notify.test': { de: '🐛 Testnachricht von CoCoon – Benachrichtigungen funktionieren.', en: '🐛 Test message from CoCoon – notifications work.' },
   'notify.noWebhook': { de: 'Keine Webhook-URL eingetragen', en: 'No webhook URL configured' },
   'notify.sent': { de: 'Nachricht gesendet', en: 'Message sent' },
+  'notify.blockedTarget': {
+    de: 'Webhook-Ziele in privaten Netzen (Loopback, LAN, Link-Local) sind gesperrt. Für einen internen Empfänger {env}=1 setzen.',
+    en: 'Webhook targets on private networks (loopback, LAN, link-local) are blocked. Set {env}=1 for an internal receiver.',
+  },
   'notify.httpError': { de: 'Der Webhook antwortet mit HTTP {status}', en: 'The webhook responded with HTTP {status}' },
 
   // console

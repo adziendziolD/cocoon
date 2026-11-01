@@ -58,8 +58,21 @@ const CATALOG_TTL_MS = 5 * 60_000;
 /** A failed listing is remembered briefly so an invalid key or an outage doesn't cost a timeout per request. */
 const CATALOG_FAIL_TTL_MS = 30_000;
 
+/** A secret stored this recently counts as "just entered by the caller" when testing an unsaved provider. */
+const FRESH_SECRET_MS = 10 * 60 * 1000;
+
+const normalizeUrl = (url: string): string => {
+  try {
+    return new URL(url).href.replace(/\/$/, '');
+  } catch {
+    return url;
+  }
+};
+
 /** Custom API endpoints (settings.providers) plus their keys (secrets). */
 export class ProviderService {
+  /** (secret, baseUrl) pairs of unsaved providers the caller authorised by storing the secret just before. */
+  private readonly draftBindings = new Set<string>();
   /** Listings per vendor, valid for the key they were fetched with. */
   private readonly catalog = new Map<string, { at: number; key: string; result: MethodResult<'models.list'>; ttl: number }>();
 
@@ -117,6 +130,27 @@ export class ProviderService {
     } catch {
       return remember(fallback, CATALOG_FAIL_TTL_MS);
     }
+  }
+
+  /**
+   * Tests a provider that is not saved (or differs from the saved one) - the form in the UI. The key is only sent where it
+   * is bound: to the stored baseUrl of a provider using this secret, or if the secret was stored moments ago (the caller
+   * supplied it). Otherwise any caller could point a draft at their own server and read a stored key.
+   */
+  async testDraft(provider: ApiProvider): Promise<MethodResult<'providers.test'>> {
+    if (provider.secret && provider.auth !== 'none' && !this.keyBoundTo(provider)) {
+      return { ok: false, message: t('provider.keyNotBound', { secret: provider.secret }), models: [], apis: [], modelInfo: {} };
+    }
+    return this.test(provider);
+  }
+
+  private keyBoundTo(provider: ApiProvider): boolean {
+    const pair = `${provider.secret}\n${normalizeUrl(provider.baseUrl)}`;
+    if (Object.values(this.all()).some((p) => p.secret === provider.secret && normalizeUrl(p.baseUrl) === normalizeUrl(provider.baseUrl))) return true;
+    if (this.draftBindings.has(pair)) return true;
+    // Remembered so that repeated tests of the same form keep working after the freshness window.
+    if (this.secrets.storedWithin(provider.secret!, FRESH_SECRET_MS)) this.draftBindings.add(pair);
+    return this.draftBindings.has(pair);
   }
 
   /** Calls the provider's model list (or base URL for http kind) from the server. */

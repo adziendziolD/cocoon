@@ -23,6 +23,8 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 /** After the first use a link keeps working briefly (reloads, browser prefetch/duplicate navigation) and yields the same session. */
 const LINK_GRACE_MS = 30 * 1000;
 export const PREVIEW_COOKIE = 'cocoon_preview';
+/** Opt-in for path-based previews (/preview/p<port>-<id>/ on the admin origin). Off by default, see README. */
+export const PREVIEW_PATH_MODE_ENV = 'COCOON_PREVIEW_PATH_MODE';
 
 export type Listening = { port: number; address: 'all' | 'loopback' };
 
@@ -145,6 +147,14 @@ export class PortService {
     return this.enabled && this.sharePorts.length > 0;
   }
 
+  /**
+   * Path-based previews share the origin of the admin UI, so they are only served when explicitly enabled and when no
+   * preview domain (separate origin per preview) is configured.
+   */
+  get pathModeEnabled(): boolean {
+    return !this.config.ports.previewDomain && process.env[PREVIEW_PATH_MODE_ENV] === '1';
+  }
+
   get previewSuffix(): string {
     return this.config.ports.previewDomain ?? 'localhost';
   }
@@ -152,6 +162,7 @@ export class PortService {
   /** Starts the gateway and the port detection. */
   async start(): Promise<void> {
     if (!this.enabled) return;
+    if (this.pathModeEnabled) this.log(`${PREVIEW_PATH_MODE_ENV}=1: path-based previews share the admin origin (responses are sandboxed, cookies stripped); prefer COCOON_PREVIEW_DOMAIN`);
     await this.ensureGateway();
     await this.writeMapping();
     this.timer = setInterval(() => void this.poll(), POLL_MS);
@@ -221,6 +232,7 @@ export class PortService {
     this.links.set(token, { sandboxId, port, expires });
     const label = previewLabel(sandboxId, port);
     const remote = origin && !this.config.ports.previewDomain ? remoteOrigin(origin) : undefined;
+    if (remote && !this.pathModeEnabled) throw new CocoonError('bad_request', t('error.previewPathModeOff', { env: PREVIEW_PATH_MODE_ENV }));
     if (remote) return { url: `${remote}/preview/${label}/?cocoon_preview=${token}`, expiresAt: new Date(expires).toISOString() };
     const host = `${label}.${this.previewSuffix}`;
     const base = this.config.ports.previewDomain ? `https://${host}` : `http://${host}:${this.config.port}`;
@@ -283,7 +295,7 @@ export class PortService {
     if (!this.enabled) return undefined;
     const byHost = parsePreviewHost(host, this.previewSuffix);
     if (byHost) return { ...byHost, prefix: '', rest: url ?? '/' };
-    return parsePreviewPath(url);
+    return this.pathModeEnabled ? parsePreviewPath(url) : undefined;
   }
 
   private assertEnabled(): void {

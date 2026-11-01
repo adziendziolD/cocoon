@@ -145,7 +145,7 @@ Everything updates live over a WebSocket. The sidebar and browser tab show how m
   point, so all changes can be exported as a patch. Lifecycle: `creating → running ⇄ stopped`, plus `error` / `missing`.
 - **Agent** – a CLI process in a tmux session inside a sandbox. Several agents can share one sandbox (e.g. planner + implementer).
 - **Agent type (profile)** – how an agent is launched and which credentials/providers it gets (see [Agent types](#agent-types)).
-- **Secret** – an API key or token stored on the server (`.data/state.json`, mode 0600); falls back to environment variables.
+- **Secret** – an API key or token stored on the server (`.data/state.json`, mode 0600, values encrypted with `.data/env.key`, see [Environment variables](#environment-variables-env-injection)); falls back to environment variables.
 - **API provider** – a custom endpoint agents may use (see [below](#credentials-and-custom-api-providers)).
 - **Settings** – all runtime configuration, editable in the UI or via `settings.update`.
 
@@ -251,7 +251,8 @@ Use your own model endpoint instead of (or in addition to) the default access, o
 Each provider has a base URL, the name of the secret holding its key, an auth mode (`bearer`, `x-api-key`, custom header, none),
 a list of models and a default model. The UI offers templates (OpenRouter, Ollama, LiteLLM, DeepSeek, Groq, Mistral, custom
 Anthropic/OpenAI/HTTP) and a **Test connection** button (`providers.test`) that checks reachability and authentication from the
-server and discovers available models – even before saving.
+server and discovers available models – even before saving. A key is only sent to the base URL stored with the provider
+(or, for an unsaved provider, to the URL you test right after entering the key); testing another URL with a stored key is refused.
 
 How it is wired:
 - In `egress` mode the base URL points to the credential proxy (`http://cocoon-proxy:8080/p-<id>`), which adds the real key.
@@ -297,7 +298,7 @@ Changing the file path of a level does not remove the file at the old path.
 per variable), masked in the UI and API (`env.get`, `env.resolve`, `sandbox.get`, the activity log – only variables marked *not secret* show
 their value) and never logged. The `env.*` methods are admin-only and not offered over MCP. Names starting with `COCOON_` and the proxy
 variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, …) are reserved. Back up `env.key` together with `state.json`; without it the stored values
-cannot be decrypted (they are skipped and have to be set again).
+cannot be decrypted (they are skipped and have to be set again). API secrets (*Secrets*) in `state.json` use the same key and are encrypted the same way; a `state.json` from an older version with plaintext secrets is converted on the first start.
 
 **Credential proxy**: mark a variable as *API key for host X* (`proxyHost`, e.g. `api.stripe.com`, optional port, `http://` for internal APIs).
 The sandbox gets a placeholder (`cocoon_<token>_STRIPE_API_KEY`) plus a base URL (`STRIPE_BASE_URL`, or `baseUrlEnv`) pointing at the
@@ -351,12 +352,17 @@ listening TCP ports of every running sandbox). From there:
 
 - **Open preview** – opens the server in the browser, only for people logged in to CoCoon. The preview runs on its own host
   name, `http://p<port>-<sandbox>.localhost:7420/` (browsers resolve `*.localhost` to the local machine), or
-  `https://p<port>-<sandbox>.<COCOON_PREVIEW_DOMAIN>/` with a wildcard domain behind your reverse proxy. When CoCoon is opened
-  from another machine (e.g. via Tailscale Serve, where `*.localhost` would point to your own computer) and no preview domain
-  is set, the link is path-based instead: `<CoCoon URL>/preview/p<port>-<sandbox>/` (cookie scoped to that path, prefix stripped
-  before it reaches the app and sent as `X-Forwarded-Prefix`; apps with absolute asset paths need a base path setting). The link contains a
+  `https://p<port>-<sandbox>.<COCOON_PREVIEW_DOMAIN>/` with a wildcard domain behind your reverse proxy. The link contains a
   one-time token that is exchanged for a cookie valid for that preview only. The app sees `Host: localhost:<port>`, so dev
   servers that only allow localhost (e.g. Vite) work, and WebSockets / hot reload are proxied as well.
+  When CoCoon is opened from another machine (e.g. via Tailscale Serve, where `*.localhost` would point to your own computer),
+  set `COCOON_PREVIEW_DOMAIN`: every preview then has its own origin. Without it, CoCoon refuses to create the link.
+  As a last resort, `COCOON_PREVIEW_PATH_MODE=1` enables path-based previews `<CoCoon URL>/preview/p<port>-<sandbox>/` on the
+  admin origin (ignored when `COCOON_PREVIEW_DOMAIN` is set). Because the app's pages share the origin of the CoCoon UI, they are
+  restricted: responses carry `Content-Security-Policy: sandbox allow-scripts …` (no `allow-same-origin`, so the page runs in
+  an opaque origin and cannot read the admin token) and the app's `Set-Cookie` headers are dropped. Many single-page apps
+  (module scripts, fetch to the same origin, sub-requests that need the preview session cookie) do not work in this mode; the prefix is stripped before it reaches the app and sent as
+  `X-Forwarded-Prefix`.
 - **Share on the network** – publishes the server on a host port (`http://<host-ip>:7550`) for everyone who can reach the
   machine, without login. Opt-in per port, logged in the activity log, can be turned off entirely.
 
@@ -510,7 +516,9 @@ Built-in: **Plan → Build → Review** (approve the plan before implementation)
 
 **Notifications** (*Settings → Notifications*): an incoming webhook (Slack, Mattermost, Discord via `/slack`, or any JSON
 endpoint) receives `{ text, content, event, url }` when an agent is waiting for you, a task is ready for review, failed or done.
-Messages use the server's default language; set `COCOON_PUBLIC_URL` to get links.
+Messages use the server's default language; set `COCOON_PUBLIC_URL` to get links. Webhook targets on private networks (loopback,
+LAN, link-local, e.g. cloud metadata endpoints) are refused, also after DNS resolution, and redirects are not followed; for an internal
+receiver set `COCOON_ALLOW_PRIVATE_WEBHOOKS=1`.
 
 ## Cockpit
 
@@ -643,7 +651,24 @@ the heuristic takes over. Statuses survive control-plane restarts.
 | **Images** | CoCoon's Dockerfile (fingerprint stored as image label) and the registry digest of the base image | pulls the base image and rebuilds in the variant of the existing image (`slim`, `db`, `full`); existing sandboxes keep their image. A toolbox without its own Node.js is reinstalled along with it |
 
 CoCoon checks once a day by itself (`COCOON_UPDATE_CHECK=0` turns this off) and shows a badge next to *Settings*.
-`pnpm start` runs the server under a small supervisor that restarts it after an update (`pnpm dev` does not – restart by hand).
+`pnpm start` runs the server under a small supervisor that restarts it after an update (`pnpm dev` does not – restart by hand). A server that keeps exiting with the restart code right after starting is restarted after 1 s, 2 s, 4 s … (at most 60 s) instead of in a tight loop; a run of 30 s or more resets this.
+
+**Trust in the CoCoon update.** The update merges whatever the upstream branch of your clone points at, and then runs
+`pnpm install` and the web build, so the upstream repository (and the account that can push to it) is trusted with code
+execution on the server. Two protections:
+
+- *Confirmed target commit.* The UI sends the commit it showed (`latest`), `update.apply` accepts `commit`, the CLI has
+  `--commit <sha>`. If upstream moved in between, nothing is installed. The merge uses exactly that commit.
+- *Signature check (opt-in).* `COCOON_UPDATE_VERIFY=commit` requires a good signature on the target commit
+  (`git verify-commit`), `COCOON_UPDATE_VERIFY=tag` a good signed tag on it (`git verify-tag`). Pin the accepted keys with
+  `COCOON_UPDATE_SIGNERS=/path/to/allowed_signers` (SSH signatures, `ssh-keygen -Y` format; the file is yours, not part of the
+  repository). Without it git's own `gpg` configuration and keyring decide; import only the maintainer key and set
+  `gpg.minTrustLevel`. With verification on, the confirmed commit is required (`--commit`), a failed check stops the update before
+  anything changes, and an unknown value of the variable also stops it. Note that commits created by GitHub's web interface
+  (squash merges) are signed with GitHub's key, so `tag` mode with signed release tags is usually the practical choice.
+
+Without `COCOON_UPDATE_VERIFY` there is no signature check; the update behaves as before (plus the commit check when a commit
+is sent).
 
 ## CLI
 
@@ -723,7 +748,7 @@ pnpm cocoon ports close <sandbox-id> 5173
 
 # updates
 pnpm cocoon update                                 # check CoCoon, agent tools and images
-pnpm cocoon update apply [cocoon|tools|images]     # update (default: everything outdated) and wait
+pnpm cocoon update apply [cocoon|tools|images]     # update (default: everything outdated) and wait; --commit <sha> confirms the CoCoon commit
 pnpm cocoon restart
 
 # admin
@@ -808,11 +833,15 @@ Everything is configurable in the UI. Environment variables (all optional, see [
 | `COCOON_TOOLBOX_AUTOINSTALL` | `1` | `0` skips installing the agent CLIs on first start |
 | `COCOON_TOOLBOX_IMAGE` | `docker.io/library/node:24-bookworm-slim` | Docker/Podman: image the agent toolbox is installed with; its Node.js is copied into the toolbox |
 | `COCOON_UPDATE_CHECK` | `1` | `0` turns off the daily update check |
+| `COCOON_UPDATE_VERIFY` | – | `commit` or `tag`: the CoCoon update only installs a target with a good signature (see [Updates](#updates)); unset = no signature check |
+| `COCOON_UPDATE_SIGNERS` | – | SSH allowed-signers file with the keys `COCOON_UPDATE_VERIFY` accepts |
 | `COCOON_PORTS` | `1` | `0` turns off port forwarding (previews and sharing) |
 | `COCOON_PORTS_PREVIEW_RANGE` | `7500-7549` | host ports for previews (published on 127.0.0.1) |
 | `COCOON_PORTS_SHARE_RANGE` | `7550-7599` | host ports for shared ports |
 | `COCOON_PORTS_SHARE_BIND` | empty | address shared ports are published on, e.g. `0.0.0.0` for the whole network; shared ports have no authentication. Empty = sharing disabled |
 | `COCOON_PREVIEW_DOMAIN` | – | wildcard domain for previews (`p<port>-<sandbox>.<domain>`, HTTPS); default `*.localhost` on the CoCoon port |
+| `COCOON_PREVIEW_PATH_MODE` | – | `1` enables path-based previews on the admin origin (sandboxed, cookies stripped; see [Servers & ports](#servers--ports-previews-and-sharing)); ignored with `COCOON_PREVIEW_DOMAIN` |
+| `COCOON_ALLOW_PRIVATE_WEBHOOKS` | – | `1` allows notification webhooks to private/loopback/link-local addresses (blocked by default) |
 | `COCOON_SERVICE_IDLE_MINUTES` | `10` | Minutes without a running sandbox before a managed shared service is paused |
 | `DOCKER_SOCKET` | auto-detected | Path to the Docker or Podman API socket |
 | `COCOON_PROXY_PORT` | `7431` | bubblewrap only: port of the local egress proxy (credential proxy = port + 1) |
@@ -857,7 +886,7 @@ deploy/               systemd unit, Caddyfile
 docs/                 Beginner's guides (EN/DE), architecture (DE)
 ```
 
-Requirements for custom sandbox images: `sh`, `git`, `tmux`, a non-root default user and a writable `/workspace`. Node.js comes from
+Requirements for custom sandbox images: `sh`, `git`, `tmux`, a non-root default user with UID 1000 (the agent user; the status directory is owned by it) and a writable `/workspace`. Node.js comes from
 the toolbox; it is a glibc build, so for musl-based images (Alpine) set `COCOON_TOOLBOX_IMAGE` to a matching installer image
 (e.g. `node:24-alpine`).
 

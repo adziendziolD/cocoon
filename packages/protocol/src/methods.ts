@@ -222,7 +222,13 @@ export const methods = {
   'update.apply': {
     description:
       'Updates the given parts in the background (default: everything outdated): CoCoon via git + pnpm (then restarts), images by rebuilding, agent CLIs by reinstalling. Progress arrives as "update.progress" / "image.build" events.',
-    params: z.object({ targets: z.array(UpdateTarget).optional() }).default({}),
+    params: z
+      .object({
+        targets: z.array(UpdateTarget).optional(),
+        /** Commit (at least 7 hex characters) the caller confirms as the CoCoon target (latestCommit of update.status). Required when COCOON_UPDATE_VERIFY is set. */
+        commit: z.string().regex(/^[0-9a-fA-F]{7,40}$/).optional(),
+      })
+      .default({}),
     result: z.object({ targets: z.array(UpdateTarget) }),
   },
   'system.restart': {

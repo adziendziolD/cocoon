@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, fsyncSync, openSync, readFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 
 const PREFIX = 'v1';
@@ -46,7 +46,14 @@ export class EnvVault {
       this.key = Buffer.from(readFileSync(this.keyFile, 'utf8').trim(), 'base64');
     } else if (create) {
       this.key = randomBytes(32);
-      writeFileSync(this.keyFile, this.key.toString('base64'), { mode: 0o600, flag: 'wx' });
+      // fsync: state.json is rewritten with encrypted values right after, so the key must be on disk first.
+      const fd = openSync(this.keyFile, 'wx', 0o600);
+      try {
+        writeSync(fd, this.key.toString('base64'));
+        fsyncSync(fd);
+      } finally {
+        closeSync(fd);
+      }
       chmodSync(this.keyFile, 0o600);
     } else {
       throw new Error('no key');

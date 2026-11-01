@@ -75,7 +75,9 @@
 1. **Hooks** (`hook`): Beim Erstellen einer Sandbox werden native Hooks installiert, die `/opt/cocoon/bin/cocoon-status <status>` aufrufen:
    Claude Code über `~/.claude/settings.json` (`UserPromptSubmit`/`PreToolUse`/`PostToolUse` → working, `Notification[permission_prompt]` → blocked,
    `Stop` → done), Codex über `notify` in `~/.codex/config.toml` (→ done). Das Skript schreibt in `/opt/cocoon/status/<agentId>` –
-   **kein Netzwerkzugriff zur Control-Plane nötig**.
+   **kein Netzwerkzugriff zur Control-Plane nötig**. Das Verzeichnis gehört dem Agent-User (0755, nicht mehr 1777). Alle Agents einer Sandbox
+   laufen unter derselben UID und können einander weiterhin Status melden; die Snapshot-Ausgabe (Status-Datei, Prozessname, Bildschirm)
+   wird von Steuerzeichen befreit, damit ein Agent keine Records anderer Agents fälschen kann.
 2. **Heuristik** (`heuristic`): Bildschirm ändert sich → working; ruhig + Blocked-Pattern → blocked; ruhig nach Aufgabe → done;
    bei Shell-Agenten zählt ein laufender Vordergrundprozess als working.
 
@@ -184,7 +186,7 @@ löscht – nie über Kommandozeilen.
 - Bindet standardmäßig nur an `127.0.0.1`; von außen nur über TLS-Reverse-Proxy (`deploy/Caddyfile`) oder VPN (WireGuard/Tailscale).
 - Tokens: Beim ersten Start wird ein Admin-Token erzeugt (`.data/admin-token.txt`); weitere Tokens in der UI. Gespeichert werden nur
   SHA-256-Hashes; Vergleich timing-safe. Optional zusätzlich `COCOON_TOKEN` aus der Umgebung.
-- `.data/state.json` enthält Secrets → Datei 0600, Verzeichnis 0700. Für höhere Ansprüche: Festplattenverschlüsselung / Secret-Manager.
+- `.data/state.json` (Datei 0600, Verzeichnis 0700) enthält API-Secrets und Env-Werte nur verschlüsselt (AES-256-GCM, Schlüssel `.data/env.key`, AAD `secret:<name>`); ältere Klartext-Dateien werden beim Start umgeschrieben. `env.key` gehört in jedes Backup. Für höhere Ansprüche: Festplattenverschlüsselung / Secret-Manager.
 - cocoond braucht den Docker-Socket ⇒ root-äquivalent. Eigener System-User, Host nur für CoCoon nutzen.
 
 **Sandboxes**
