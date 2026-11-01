@@ -143,6 +143,7 @@ describe('plain HTTP', () => {
     const res = await viaProxy('http://localhost/', 'localhost');
     expect(res.status).toBe(403);
     expect(res.body).toContain('internal address');
+    await until(() => denials().length >= 1, 'the proxy log');
     expect(denials()).toMatchObject([{ host: 'localhost', port: 80, reason: 'private' }]);
   });
 
@@ -152,6 +153,7 @@ describe('plain HTTP', () => {
     for (const target of ['169.254.169.254', '127.0.0.1', '10.0.0.5', '[::1]']) {
       expect((await viaProxy(`http://${target}/latest/meta-data/`, target)).status).toBe(403);
     }
+    await until(() => denials().length >= 4, 'the proxy log');
     expect(denials().map((d) => d.reason)).toEqual(['private', 'private', 'private', 'private']);
     expect(seenHeaders).toEqual([]);
   });
@@ -161,6 +163,7 @@ describe('plain HTTP', () => {
     reset();
     // Port 80 is not listening, so the request passes the checks and fails at the connection (502), not at the policy (403).
     expect((await viaProxy('http://localhost/', 'localhost')).status).toBe(502);
+    await sleep(150); // the proxy's log lines arrive asynchronously
     expect(denials()).toEqual([]);
   });
 
@@ -169,6 +172,7 @@ describe('plain HTTP', () => {
     reset();
     expect((await viaProxy('http://127.0.0.1:1/', '127.0.0.1')).status).toBe(403);
     expect((await viaProxy(`http://example.com:${httpPort}/`, 'example.com')).status).toBe(403);
+    await until(() => denials().length >= 2, 'the proxy log');
     expect(denials().map((d) => d.reason)).toEqual([undefined, undefined]);
   });
 });
@@ -180,6 +184,7 @@ describe('CONNECT', () => {
     const { status, socket } = await connect('localhost:443');
     expect(status).toBe(403);
     socket.destroy();
+    await until(() => denials().length >= 1, 'the proxy log');
     expect(denials()).toMatchObject([{ host: 'localhost', port: 443, reason: 'private' }]);
   });
 
@@ -189,6 +194,7 @@ describe('CONNECT', () => {
     const { status, socket } = await connect('169.254.169.254:443');
     expect(status).toBe(403);
     socket.destroy();
+    await until(() => denials().length >= 1, 'the proxy log');
     expect(denials()).toMatchObject([{ reason: 'private' }]);
   });
 
@@ -202,6 +208,7 @@ describe('CONNECT', () => {
     await until(() => Buffer.concat(seenBytes).length >= hello.length, 'upstream bytes');
     expect(Buffer.concat(seenBytes).equals(hello)).toBe(true);
     socket.destroy();
+    await sleep(150); // the proxy's log lines arrive asynchronously
     expect(denials()).toEqual([]);
   });
 
@@ -214,6 +221,7 @@ describe('CONNECT', () => {
     await closed(socket);
     await sleep(100);
     expect(seenBytes).toEqual([]);
+    await until(() => denials().length >= 1, 'the proxy log');
     expect(denials()).toMatchObject([{ host: 'localhost', reason: 'sni' }]);
   });
 
@@ -224,6 +232,7 @@ describe('CONNECT', () => {
     socket.write(await clientHello(''));
     await closed(socket);
     expect(seenBytes).toEqual([]);
+    await until(() => denials().length >= 1, 'the proxy log');
     expect(denials()).toMatchObject([{ reason: 'sni' }]);
   });
 
@@ -234,6 +243,7 @@ describe('CONNECT', () => {
     socket.write('GET / HTTP/1.1\r\nHost: localhost\r\n\r\n');
     await closed(socket);
     expect(seenBytes).toEqual([]);
+    await until(() => denials().length >= 1, 'the proxy log');
     expect(denials()).toMatchObject([{ reason: 'not-tls' }]);
   });
 
@@ -245,6 +255,7 @@ describe('CONNECT', () => {
       reset();
       const { socket } = await connect(`localhost:${port}`);
       await Promise.race([closed(socket), sleep(2000).then(() => Promise.reject(new Error('client socket stayed open')))]);
+      await sleep(150); // the proxy's log lines arrive asynchronously
       expect(denials()).toEqual([]);
     } finally {
       hangup.close();
