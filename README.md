@@ -811,7 +811,7 @@ Everything is configurable in the UI. Environment variables (all optional, see [
 | `COCOON_PORTS` | `1` | `0` turns off port forwarding (previews and sharing) |
 | `COCOON_PORTS_PREVIEW_RANGE` | `7500-7549` | host ports for previews (published on 127.0.0.1) |
 | `COCOON_PORTS_SHARE_RANGE` | `7550-7599` | host ports for shared ports |
-| `COCOON_PORTS_SHARE_BIND` | `0.0.0.0` | address shared ports are published on; empty = sharing disabled |
+| `COCOON_PORTS_SHARE_BIND` | empty | address shared ports are published on, e.g. `0.0.0.0` for the whole network; shared ports have no authentication. Empty = sharing disabled |
 | `COCOON_PREVIEW_DOMAIN` | – | wildcard domain for previews (`p<port>-<sandbox>.<domain>`, HTTPS); default `*.localhost` on the CoCoon port |
 | `COCOON_SERVICE_IDLE_MINUTES` | `10` | Minutes without a running sandbox before a managed shared service is paused |
 | `DOCKER_SOCKET` | auto-detected | Path to the Docker or Podman API socket |

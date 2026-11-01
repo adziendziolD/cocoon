@@ -40,11 +40,35 @@ const requestLanguage = (req: FastifyRequest) =>
     req.headers['accept-language'],
   );
 
-const isApi = (url: string) => url.startsWith('/v1/') || url === '/mcp' || url.startsWith('/mcp?');
+/**
+ * Routes that need no token: the health check and the static web UI (including its not-found fallback).
+ * Everything else is authenticated, so a route added later is protected by default.
+ * Decided by the route Fastify matched, not by the raw URL: Fastify routes on the decoded path, so a check on
+ * the raw string is bypassed by percent-encoding (`/%761/rpc/...` reaches `/v1/rpc/...`).
+ */
+export function isPublicRoute(method: string, routeUrl: string | undefined): boolean {
+  if (routeUrl === '/healthz') return method === 'GET' || method === 'HEAD';
+  if (method !== 'GET' && method !== 'HEAD') return false;
+  return routeUrl === undefined || routeUrl === '/' || routeUrl === '/*';
+}
+
+/** Replaces the value of a `token` query parameter, so credentials do not end up in logs. */
+export const redactToken = (url: string | undefined) => url?.replace(/([?&]token=)[^&#]*/gi, '$1[redacted]');
+
+/** WebSocket frames are RPC calls and terminal input, never bulk data (the ws default is 100 MB). */
+export const WS_MAX_PAYLOAD = 8 * 1024 * 1024;
 
 export async function buildHttpServer({ config, rpc, bus, tokens, agents, workspace, ports }: HttpDeps) {
-  const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' }, bodyLimit: 64 * 1024 * 1024 });
-  await app.register(websocket);
+  const app = Fastify({
+    logger: {
+      level: process.env.LOG_LEVEL ?? 'info',
+      serializers: {
+        req: (req) => ({ method: req.method, url: redactToken(req.url), host: req.host, remoteAddress: req.ip, remotePort: req.socket?.remotePort }),
+      },
+    },
+    bodyLimit: 64 * 1024 * 1024,
+  });
+  await app.register(websocket, { options: { maxPayload: WS_MAX_PAYLOAD } });
   routePreviewUpgrades(app.server, ports);
 
   // Previews of sandbox servers (p<port>-<sandbox>.<domain>) have their own login (one-time link → cookie for that host).
@@ -55,7 +79,7 @@ export async function buildHttpServer({ config, rpc, bus, tokens, agents, worksp
   });
 
   app.addHook('onRequest', async (req, reply) => {
-    if (!isApi(req.url)) return;
+    if (isPublicRoute(req.method, req.routeOptions.url)) return;
     const header = req.headers.authorization;
     // Browsers cannot set headers on WebSocket upgrades or downloads, so accept ?token= as a fallback.
     const provided = header?.startsWith('Bearer ') ? header.slice(7) : (req.query as { token?: string })?.token;
@@ -194,7 +218,7 @@ export async function buildHttpServer({ config, rpc, bus, tokens, agents, worksp
     // wildcard (default) serves files dynamically, so a rebuilt UI works without restarting the server.
     await app.register(fastifyStatic, { root: config.webDir });
     app.setNotFoundHandler((req, reply) =>
-      isApi(req.url) || req.method !== 'GET' || req.url.startsWith('/assets/')
+      req.url.startsWith('/v1/') || req.url === '/mcp' || req.url.startsWith('/mcp?') || req.method !== 'GET' || req.url.startsWith('/assets/')
         ? reply.code(404).send({ error: { code: 'not_found', message: 'not found' } })
         : reply.sendFile('index.html'),
     );
