@@ -506,6 +506,7 @@ default) get the stored token in their environment, and CoCoon sets up a git cre
 as the agent user with the token in the command's environment. CoCoon runs them in a hardened mode: no repository or `~/.gitconfig`
 hooks (`core.hooksPath=/dev/null`, `--no-verify`), no global or system git config, no credential helper, askpass or ssh command,
 TLS verification on, the sandbox's own proxy pinned, and the push goes to the repository URL instead of the editable remote config.
+Deliberate limitation: with hooks and global config switched off, pre-push hooks (for example husky) do not run, global git filters and `safe.directory` settings do not apply, and git-lfs objects are not uploaded, so push such repositories yourself from the sandbox.
 Remaining risk: while a push runs (seconds), an agent that is already running in the same sandbox can read the token from
 `/proc/<pid>/environ` (same user), and repository-local git settings such as `http.sslCAInfo` cannot be overridden. In sandboxes
 where untrusted code runs, use a fine-grained token limited to the needed repositories, or no `GITHUB_TOKEN` and push yourself.

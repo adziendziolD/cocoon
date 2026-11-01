@@ -151,7 +151,7 @@ dabei im Env des Kommandos. `githubAuthEnv()` (`sandbox/git-auth.ts`) schaltet d
 `GIT_CONFIG_NOSYSTEM=1`, `GIT_ASKPASS=/bin/false` und die Shell-Funktion `cgit` mit `-c core.hooksPath=/dev/null`, `core.fsmonitor=false`,
 `core.sshCommand=false`, leerem `credential.helper`/`core.askPass`, `http.sslVerify=true`, geleertem `http.curloptResolve` und fest auf den
 `HTTPS_PROXY` der Sandbox gesetztem `http.proxy`. Der Push läuft mit `--no-verify` direkt gegen die URL (nicht über `remote.origin`, dessen
-`pushurl`/`proxy` der Agent ändern kann). Ein Push vom Host aus einem Bundle wurde erwogen und verworfen: Prerequisites und Größe der Bundles,
+`pushurl`/`proxy` der Agent ändern kann). Bewusste Einschränkung: Pre-Push-Hooks (z. B. husky) laufen dabei nicht, globale Filter und `safe.directory` greifen nicht, und git-lfs-Objekte werden nicht hochgeladen; solche Repositories pusht man selbst aus der Sandbox. Ein Push vom Host aus einem Bundle wurde erwogen und verworfen: Prerequisites und Größe der Bundles,
 Remotes außerhalb von GitHub und fehlende Testbarkeit gegen GitHub. Restrisiko: Ein im selben Container bereits laufender Agent kann den Token
 während des Push (Sekunden) über `/proc/<pid>/environ` lesen. Das gilt bei gleicher UID, und eine andere UID hilft mit bwrap nicht, weil dort
 alle UIDs auf denselben Host-User abgebildet werden. Repo-lokale Einstellungen wie `http.sslCAInfo` lassen sich nicht überschreiben.
