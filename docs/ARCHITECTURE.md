@@ -184,7 +184,7 @@ löscht – nie über Kommandozeilen.
 - Bindet standardmäßig nur an `127.0.0.1`; von außen nur über TLS-Reverse-Proxy (`deploy/Caddyfile`) oder VPN (WireGuard/Tailscale).
 - Tokens: Beim ersten Start wird ein Admin-Token erzeugt (`.data/admin-token.txt`); weitere Tokens in der UI. Gespeichert werden nur
   SHA-256-Hashes; Vergleich timing-safe. Optional zusätzlich `COCOON_TOKEN` aus der Umgebung.
-- `.data/state.json` enthält Secrets → Datei 0600, Verzeichnis 0700. Für höhere Ansprüche: Festplattenverschlüsselung / Secret-Manager.
+- `.data/state.json` (Datei 0600, Verzeichnis 0700) enthält API-Secrets und Env-Werte nur verschlüsselt (AES-256-GCM, Schlüssel `.data/env.key`, AAD `secret:<name>`); ältere Klartext-Dateien werden beim Start umgeschrieben. `env.key` gehört in jedes Backup. Für höhere Ansprüche: Festplattenverschlüsselung / Secret-Manager.
 - cocoond braucht den Docker-Socket ⇒ root-äquivalent. Eigener System-User, Host nur für CoCoon nutzen.
 
 **Sandboxes**

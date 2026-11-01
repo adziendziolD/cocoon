@@ -145,7 +145,7 @@ Everything updates live over a WebSocket. The sidebar and browser tab show how m
   point, so all changes can be exported as a patch. Lifecycle: `creating → running ⇄ stopped`, plus `error` / `missing`.
 - **Agent** – a CLI process in a tmux session inside a sandbox. Several agents can share one sandbox (e.g. planner + implementer).
 - **Agent type (profile)** – how an agent is launched and which credentials/providers it gets (see [Agent types](#agent-types)).
-- **Secret** – an API key or token stored on the server (`.data/state.json`, mode 0600); falls back to environment variables.
+- **Secret** – an API key or token stored on the server (`.data/state.json`, mode 0600, values encrypted with `.data/env.key`, see [Environment variables](#environment-variables-env-injection)); falls back to environment variables.
 - **API provider** – a custom endpoint agents may use (see [below](#credentials-and-custom-api-providers)).
 - **Settings** – all runtime configuration, editable in the UI or via `settings.update`.
 
@@ -297,7 +297,7 @@ Changing the file path of a level does not remove the file at the old path.
 per variable), masked in the UI and API (`env.get`, `env.resolve`, `sandbox.get`, the activity log – only variables marked *not secret* show
 their value) and never logged. The `env.*` methods are admin-only and not offered over MCP. Names starting with `COCOON_` and the proxy
 variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, …) are reserved. Back up `env.key` together with `state.json`; without it the stored values
-cannot be decrypted (they are skipped and have to be set again).
+cannot be decrypted (they are skipped and have to be set again). API secrets (*Secrets*) in `state.json` use the same key and are encrypted the same way; a `state.json` from an older version with plaintext secrets is converted on the first start.
 
 **Credential proxy**: mark a variable as *API key for host X* (`proxyHost`, e.g. `api.stripe.com`, optional port, `http://` for internal APIs).
 The sandbox gets a placeholder (`cocoon_<token>_STRIPE_API_KEY`) plus a base URL (`STRIPE_BASE_URL`, or `baseUrlEnv`) pointing at the

@@ -1,5 +1,6 @@
 import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { EnvVault } from './env-vault.ts';
 import type { Agent, CockpitLayout, EnvTarget, Sandbox, Schedule, Settings, ServiceKind, SharedService, Task, Workspace } from '@cocoon/protocol';
 
 export interface SandboxRecord extends Sandbox {
@@ -61,6 +62,16 @@ export interface SecretRecord {
   updatedAt: string;
 }
 
+/** A secret as written to state.json: encrypted (`enc`, see EnvVault). Older files hold the plaintext `value`. */
+interface StoredSecret {
+  enc?: string;
+  value?: string;
+  updatedAt: string;
+}
+
+/** AAD of an encrypted secret: a blob copied to another secret name does not decrypt. */
+const secretContext = (name: string) => `secret:${name}`;
+
 /** One environment variable: the value is encrypted (see EnvVault), the rest is plain metadata. */
 export interface EnvVarRecord {
   enc: string;
@@ -109,17 +120,52 @@ interface State {
 }
 
 /**
- * Minimal persistent state: one JSON file (mode 0600, contains secrets), rewritten atomically on every change.
+ * Minimal persistent state: one JSON file (mode 0600; secrets and env values are encrypted with env.key), rewritten atomically on every change.
  * Good enough for a single control-plane node; swap for SQLite/Postgres when going multi-node.
  */
 export class Store {
   private readonly file: string;
+  private readonly vault: EnvVault;
+  /** Secrets that could not be decrypted (key file missing or changed): kept as they are, never dropped from the file. */
+  private readonly locked: Record<string, StoredSecret> = {};
   private state: State = { sandboxes: {}, agents: {}, secrets: {}, tokens: {}, workspaces: {}, tasks: {}, schedules: {}, layouts: {}, services: {}, envScopes: {} };
 
   constructor(readonly dataDir: string) {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     this.file = join(dataDir, 'state.json');
-    this.state = { ...this.state, ...this.load() };
+    this.vault = EnvVault.in(dataDir);
+    const loaded = this.load();
+    const { secrets, migrated } = this.decodeSecrets((loaded.secrets ?? {}) as Record<string, StoredSecret>);
+    this.state = { ...this.state, ...loaded, secrets };
+    // Plaintext secrets of older versions: rewrite encrypted now; the second write replaces the .bak that still holds them.
+    if (migrated) {
+      this.flush();
+      this.flush();
+    }
+  }
+
+  private decodeSecrets(stored: Record<string, StoredSecret>): { secrets: Record<string, SecretRecord>; migrated: boolean } {
+    const secrets: Record<string, SecretRecord> = {};
+    let migrated = false;
+    for (const [name, entry] of Object.entries(stored)) {
+      if (typeof entry.enc === 'string') {
+        const value = this.vault.decrypt(secretContext(name), entry.enc);
+        if (value === undefined) {
+          console.error(`cocoon: secret ${name} in state.json cannot be decrypted (env.key missing or changed); it is kept but unusable until the key is restored`);
+          this.locked[name] = entry;
+        } else secrets[name] = { value, updatedAt: entry.updatedAt };
+      } else if (typeof entry.value === 'string') {
+        secrets[name] = { value: entry.value, updatedAt: entry.updatedAt };
+        migrated = true;
+      }
+    }
+    return { secrets, migrated };
+  }
+
+  private encodeSecrets(): Record<string, StoredSecret> {
+    const out: Record<string, StoredSecret> = { ...this.locked };
+    for (const [name, { value, updatedAt }] of Object.entries(this.state.secrets)) out[name] = { enc: this.vault.encrypt(secretContext(name), value), updatedAt };
+    return out;
   }
 
   /** Reads state.json; if it is unreadable (e.g. truncated by a power loss), falls back to the previous version, state.json.bak. */
@@ -186,6 +232,7 @@ export class Store {
   }
 
   putSecret(name: string, record: SecretRecord | undefined): void {
+    delete this.locked[name];
     if (record) this.state.secrets[name] = record;
     else delete this.state.secrets[name];
     this.flush();
@@ -322,7 +369,7 @@ export class Store {
     // Data reaches the disk before the rename can, so a power loss leaves the old or the new file, never an empty one.
     const fd = openSync(tmp, 'w', 0o600);
     try {
-      writeFileSync(fd, JSON.stringify(this.state, null, 2));
+      writeFileSync(fd, JSON.stringify({ ...this.state, secrets: this.encodeSecrets() }, null, 2));
       fsyncSync(fd);
     } finally {
       closeSync(fd);
