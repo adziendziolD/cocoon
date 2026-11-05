@@ -15,7 +15,7 @@
   "dependencies": {
     "@cocoon/protocol": "workspace:*",
     "commander": "^15.0.0",
-    "ws": "^8.18.0"
+    "ws": "^8.22.1"
   },
   "devDependencies": {
     "@types/ws": "^8.5.0"
