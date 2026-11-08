@@ -3,9 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { Principal } from './auth/principal.ts';
 import { buildHttpServer, isPublicRoute, redactToken, type HttpDeps } from './http.ts';
 
 const TOKEN = 'secret-token';
+const ADMIN: Principal = { kind: 'token', role: 'admin', credentialId: 'token:test', name: 'test' };
 const auth = { authorization: `Bearer ${TOKEN}` };
 
 let webDir: string;
@@ -27,7 +29,7 @@ async function build(rpc = vi.fn(async () => 'executed')) {
     config: { webDir },
     rpc,
     bus: { subscribe: () => () => undefined },
-    tokens: { verify: (token: string | undefined) => token === TOKEN },
+    auth: { authenticate: (token: string | undefined) => (token === TOKEN ? ADMIN : undefined), onRevoked: () => () => undefined, touch: () => true },
     agents: {},
     workspace: { archive: async () => 'tar' },
     ports: { previewRoute: () => undefined },
@@ -90,6 +92,14 @@ describe('isPublicRoute', () => {
     expect(isPublicRoute('GET', '/v1/ws')).toBe(false);
     expect(isPublicRoute('GET', '/v1/agents/:agentId/attach')).toBe(false);
     expect(isPublicRoute('POST', '/mcp')).toBe(false);
+  });
+
+  it('lets through the sign-in routes, and only those, for POST', () => {
+    for (const route of ['/v1/auth/login', '/v1/auth/setup-info', '/v1/auth/setup']) expect(isPublicRoute('POST', route), route).toBe(true);
+    expect(isPublicRoute('GET', '/v1/auth/login')).toBe(false);
+    expect(isPublicRoute('POST', '/v1/auth/logout')).toBe(false);
+    expect(isPublicRoute('POST', '/v1/rpc/:method')).toBe(false);
+    expect(isPublicRoute('DELETE', '/v1/auth/login')).toBe(false);
   });
 });
 

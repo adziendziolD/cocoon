@@ -18,6 +18,8 @@ export class ApiError extends Error {
 const CODE_LABELS: Record<ApiErrorCode, MessageKey> = {
   bad_request: 'error.bad_request',
   unauthorized: 'error.unauthorized',
+  forbidden: 'error.forbidden',
+  rate_limited: 'error.rate_limited',
   not_found: 'error.not_found',
   conflict: 'error.conflict',
   timeout: 'error.timeout',

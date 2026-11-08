@@ -8,10 +8,12 @@ import type { Store, TokenRecord } from './store.ts';
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest();
 const LAST_USED_RESOLUTION_MS = 60_000;
+const ENV_TOKEN_ID = 'env';
 
 /** API tokens. Only hashes are stored; an optional COCOON_TOKEN from the environment is always accepted too. */
 export class TokenService {
   private readonly envHash?: Buffer;
+  private readonly revokedListeners = new Set<(id: string) => void>();
 
   constructor(
     private readonly store: Store,
@@ -21,17 +23,32 @@ export class TokenService {
   }
 
   verify(provided: string | undefined): boolean {
-    if (!provided) return false;
+    return this.identify(provided) !== undefined;
+  }
+
+  /** Which token this is (id and name), or undefined if the value is no token. The token from COCOON_TOKEN has the id "env". */
+  identify(provided: string | undefined): { id: string; name: string } | undefined {
+    if (!provided) return undefined;
     const hash = sha256(provided);
-    if (this.envHash && timingSafeEqual(hash, this.envHash)) return true;
+    if (this.envHash && timingSafeEqual(hash, this.envHash)) return { id: ENV_TOKEN_ID, name: 'COCOON_TOKEN' };
     const record = this.store.tokens().find((t) => timingSafeEqual(Buffer.from(t.hash, 'hex'), hash));
-    if (!record) return false;
+    if (!record) return undefined;
     const now = Date.now();
     if (!record.lastUsedAt || now - Date.parse(record.lastUsedAt) > LAST_USED_RESOLUTION_MS) {
       record.lastUsedAt = new Date(now).toISOString();
       this.store.putToken(record);
     }
-    return true;
+    return { id: record.id, name: record.name };
+  }
+
+  /** Whether the token with this id (see identify) still works: sockets opened with it check this. */
+  isActive(id: string): boolean {
+    return id === ENV_TOKEN_ID ? this.envHash !== undefined : this.store.tokens().some((t) => t.id === id);
+  }
+
+  /** Called with the id of every token that gets revoked, so open connections made with it can be closed. */
+  onRevoked(listener: (id: string) => void): void {
+    this.revokedListeners.add(listener);
   }
 
   list(): TokenInfo[] {
@@ -55,6 +72,7 @@ export class TokenService {
   revoke(id: string): void {
     if (!this.store.tokens().some((t) => t.id === id)) throw notFound('token', id);
     this.store.putToken({ id, delete: true });
+    for (const listener of this.revokedListeners) listener(id);
   }
 
   /**

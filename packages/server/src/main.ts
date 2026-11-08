@@ -1,6 +1,7 @@
 #!/usr/bin/env -S npx tsx
 import { ActivityLog } from './activity.ts';
 import { AgentManager } from './agents/manager.ts';
+import { AuthService } from './auth/users.ts';
 import { loadConfig } from './config.ts';
 import { setFallbackLanguage, t } from './i18n.ts';
 import { EnvService } from './env.ts';
@@ -50,6 +51,7 @@ setFallbackLanguage(() => settings.get().general.language);
 const secrets = new SecretsService(store);
 const providers = new ProviderService(settings, secrets);
 const tokens = new TokenService(store, config.token);
+const auth = new AuthService(store, tokens, activity, config.auth, { log: logProxy });
 const images = new ImageService(driver, config, settings, store, bus);
 const egress = new EgressManager(driver, store, settings, secrets, providers, images, bus, {
   proxyScript: join(config.imagesDir, 'egress-proxy', 'proxy.mjs'),
@@ -73,11 +75,12 @@ const schedules = new ScheduleService(store, bus, settings, workspaces, tasks, a
 
 const updates = new UpdateService(config, driver, images, store, bus, activity, () => void shutdown(RESTART_EXIT_CODE), logProxy);
 
-const rpc = createRpc({ driver, store, settings, secrets, providers, tokens, images, egress, activity, sandboxes, workspace, agents, workspaces, tasks, notifier, services, updates, ports, envs, issues, schedules });
-const app = await buildHttpServer({ config, rpc, bus, tokens, agents, workspace, ports });
+const rpc = createRpc({ driver, store, settings, secrets, providers, tokens, auth, images, egress, activity, sandboxes, workspace, agents, workspaces, tasks, notifier, services, updates, ports, envs, issues, schedules });
+const app = await buildHttpServer({ config, rpc, bus, auth, agents, workspace, ports });
 log = (msg, err) => app.log.warn({ err }, msg);
 
 await sandboxes.reconcile(logProxy);
+auth.start();
 agents.start();
 tasks.startEngine();
 schedules.start();
@@ -130,6 +133,7 @@ let stopping = false;
 async function shutdown(code: number): Promise<void> {
   if (stopping) return;
   stopping = true;
+  auth.stop();
   agents.stop();
   tasks.stopEngine();
   schedules.stop();

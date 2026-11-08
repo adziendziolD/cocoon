@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { Command, Option } from 'commander';
 import type { Agent, AgentStatus, EnvScopeInfo, Sandbox, UpdateStatus, UpdateTarget } from '@cocoon/protocol';
-import { SCHEDULE_TEMPLATES } from '@cocoon/protocol';
+import { SCHEDULE_TEMPLATES, trimTrailing } from '@cocoon/protocol';
 import { attach } from './attach.ts';
 import { CocoonApiError, CocoonClient } from './client.ts';
 import { parseAssignments, readStdin, scopeFrom } from './env.ts';
@@ -171,6 +171,42 @@ const tokens = program.command('tokens').description('API access tokens');
 tokens.command('ls').action(async () => print(await client().call('tokens.list')));
 tokens.command('create <name>').action(async (name) => print(await client().call('tokens.create', { name })));
 tokens.command('revoke <id>').action(async (id) => print(await client().call('tokens.revoke', { id })));
+
+// ── users (sign-in with username and password) ───────────────────────────────
+const users = program.command('users').description('user accounts: people who sign in with a username and password (admin token needed)');
+/** The link a new user opens to choose a password. The token sits in the fragment, so no server log or Referer header sees it. */
+const setupLink = (token: string) => `${trimTrailing(program.opts<{ url: string }>().url, '/')}/#setup=${token}`;
+const printInvite = (result: { user: { username: string }; setup: { token: string; expiresAt: string } }) =>
+  print({ user: result.user, setupLink: setupLink(result.setup.token), expiresAt: result.setup.expiresAt }, () => {
+    console.log(`Setup link for ${result.user.username}: it works once, until ${result.setup.expiresAt}. Send it only to that person.`);
+    console.log(setupLink(result.setup.token));
+    console.log('(The link uses --url / COCOON_URL; replace the address with the one people use to reach CoCoon.)');
+  });
+users.command('ls').action(async () => {
+  const rows = await client().call('users.list');
+  print(rows, () =>
+    console.table(rows.map((u) => ({ id: u.id, username: u.username, name: u.displayName ?? '', role: u.role, status: u.status, sessions: u.sessions, lastLogin: u.lastLoginAt ?? '' }))),
+  );
+});
+users
+  .command('add <username>')
+  .description('create a user and print a one-time setup link: the person chooses their own password with it')
+  .option('--name <name>', 'display name')
+  .addOption(new Option('--role <role>', 'admin: manages CoCoon. member: works with sandboxes, agents and tasks').choices(['admin', 'member']).default('member'))
+  .action(async (username, opts: { name?: string; role: 'admin' | 'member' }) =>
+    printInvite(await client().call('users.create', { username, displayName: opts.name, role: opts.role })),
+  );
+users
+  .command('reset <id>')
+  .description('end the password and all sessions of a user and print a new setup link')
+  .action(async (id) => printInvite(await client().call('users.reset_password', { userId: id })));
+users
+  .command('role <id> <role>')
+  .description('change the role (admin | member); the user has to sign in again')
+  .action(async (id, role) => print(await client().call('users.update', { userId: id, role })));
+users.command('disable <id>').description('lock the account and end its sessions').action(async (id) => print(await client().call('users.update', { userId: id, disabled: true })));
+users.command('enable <id>').action(async (id) => print(await client().call('users.update', { userId: id, disabled: false })));
+users.command('rm <id>').description('delete the account and end its sessions').action(async (id) => print(await client().call('users.delete', { userId: id })));
 
 // ── environment (.env injection) ─────────────────────────────────────────────
 const envCmd = program

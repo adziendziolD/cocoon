@@ -1,7 +1,7 @@
 import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EnvVault } from './env-vault.ts';
-import type { Agent, CockpitLayout, EnvTarget, Sandbox, Schedule, Settings, ServiceKind, SharedService, Task, Workspace } from '@cocoon/protocol';
+import type { Agent, CockpitLayout, EnvTarget, Sandbox, Schedule, Settings, ServiceKind, SharedService, Task, UserRole, Workspace } from '@cocoon/protocol';
 
 export interface SandboxRecord extends Sandbox {
   /** Driver-specific handle, e.g. Docker container id. */
@@ -102,12 +102,41 @@ export interface TokenRecord {
   lastUsedAt?: string;
 }
 
+/** A user who signs in with a password. API and admin tokens are separate (TokenRecord). */
+export interface UserRecord {
+  id: string;
+  /** Lower case and unique. */
+  username: string;
+  displayName?: string;
+  role: UserRole;
+  /** scrypt hash (PHC string). Missing until the user has chosen a password, and after a reset. */
+  passwordHash?: string;
+  passwordSetAt?: string;
+  /** Link for choosing a password: only the hash of its one-time token is stored. */
+  setup?: { hash: string; expiresAt: string };
+  disabled?: boolean;
+  createdAt: string;
+  lastLoginAt?: string;
+}
+
+export interface SessionRecord {
+  /** SHA-256 of the session token (hex). The token itself is never stored, so a copy of state.json signs nobody in. */
+  id: string;
+  userId: string;
+  createdAt: string;
+  lastUsedAt: string;
+  /** Absolute end of the session, however active it is. */
+  expiresAt: string;
+}
+
 interface State {
   sandboxes: Record<string, SandboxRecord>;
   agents: Record<string, AgentRecord>;
   settings?: Settings;
   secrets: Record<string, SecretRecord>;
   tokens: Record<string, TokenRecord>;
+  users: Record<string, UserRecord>;
+  sessions: Record<string, SessionRecord>;
   workspaces: Record<string, Workspace>;
   tasks: Record<string, Task>;
   /** Scheduled agents. */
@@ -133,7 +162,7 @@ export class Store {
   private readonly vault: EnvVault;
   /** Secrets that could not be decrypted (key file missing or changed): kept as they are, never dropped from the file. */
   private readonly locked: Record<string, StoredSecret> = {};
-  private state: State = { sandboxes: {}, agents: {}, secrets: {}, tokens: {}, workspaces: {}, tasks: {}, schedules: {}, layouts: {}, services: {}, envScopes: {} };
+  private state: State = { sandboxes: {}, agents: {}, secrets: {}, tokens: {}, users: {}, sessions: {}, workspaces: {}, tasks: {}, schedules: {}, layouts: {}, services: {}, envScopes: {} };
 
   constructor(readonly dataDir: string) {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
@@ -250,6 +279,46 @@ export class Store {
   putToken(record: TokenRecord | { id: string; delete: true }): void {
     if ('delete' in record) delete this.state.tokens[record.id];
     else this.state.tokens[record.id] = record;
+    this.flush();
+  }
+
+  users(): UserRecord[] {
+    return Object.values(this.state.users);
+  }
+
+  user(id: string): UserRecord | undefined {
+    return this.state.users[id];
+  }
+
+  putUser(record: UserRecord): void {
+    this.state.users[record.id] = record;
+    this.flush();
+  }
+
+  /** Removes the user together with their sessions. */
+  deleteUser(id: string): void {
+    delete this.state.users[id];
+    for (const session of this.sessions()) if (session.userId === id) delete this.state.sessions[session.id];
+    this.flush();
+  }
+
+  sessions(): SessionRecord[] {
+    return Object.values(this.state.sessions);
+  }
+
+  session(id: string): SessionRecord | undefined {
+    return this.state.sessions[id];
+  }
+
+  putSession(record: SessionRecord): void {
+    this.state.sessions[record.id] = record;
+    this.flush();
+  }
+
+  /** Several sessions at once, with one write. */
+  deleteSessions(ids: string[]): void {
+    if (!ids.length) return;
+    for (const id of ids) delete this.state.sessions[id];
     this.flush();
   }
 

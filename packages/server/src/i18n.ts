@@ -8,6 +8,31 @@ export const messages = {
   // errors
   'error.notFound': { de: '{what} {id} nicht gefunden', en: '{what} {id} not found' },
   'error.unauthorized': { de: 'Ungültiger oder fehlender Zugangs-Token', en: 'Invalid or missing access token' },
+  'error.forbidden': { de: 'Dafür fehlt dir die Berechtigung. Frag einen Admin.', en: 'You do not have permission for this. Ask an admin.' },
+  'error.rateLimited': { de: 'Zu viele Versuche. Bitte in {seconds} Sekunden erneut versuchen.', en: 'Too many attempts. Please try again in {seconds} seconds.' },
+  'error.busy': { de: 'Der Server ist gerade ausgelastet. Bitte gleich noch einmal versuchen.', en: 'The server is busy right now. Please try again in a moment.' },
+  'error.loginFailed': { de: 'Benutzername oder Passwort ist falsch.', en: 'Wrong username or password.' },
+  'error.setupInvalid': {
+    de: 'Der Link ist ungültig oder abgelaufen. Bitte einen Admin um einen neuen Link.',
+    en: 'The link is invalid or has expired. Please ask an admin for a new one.',
+  },
+  'error.passwordTooShort': { de: 'Das Passwort braucht mindestens {min} Zeichen.', en: 'The password needs at least {min} characters.' },
+  'error.passwordTooLong': { de: 'Das Passwort darf höchstens {max} Zeichen lang sein.', en: 'The password can be at most {max} characters long.' },
+  'error.passwordCommon': {
+    de: 'Dieses Passwort ist zu leicht zu erraten. Nimm eine längere, zufällige Wortfolge.',
+    en: 'This password is too easy to guess. Use a longer, random phrase.',
+  },
+  'error.passwordUsername': { de: 'Das Passwort darf den Benutzernamen nicht enthalten.', en: 'The password must not contain the username.' },
+  'error.passwordWrong': { de: 'Das aktuelle Passwort stimmt nicht.', en: 'The current password is wrong.' },
+  'error.noPassword': {
+    de: 'Nur Benutzerkonten haben ein Passwort. Du bist mit einem API-Token angemeldet.',
+    en: 'Only user accounts have a password. You are signed in with an API token.',
+  },
+  'error.usernameTaken': { de: 'Der Benutzername „{name}“ ist schon vergeben.', en: 'The username "{name}" is already taken.' },
+  'error.userSelf': {
+    de: 'Das eigene Konto lässt sich nicht löschen, sperren, herabstufen oder zurücksetzen. Bitte einen anderen Admin darum.',
+    en: 'You cannot delete, disable, demote or reset your own account. Ask another admin.',
+  },
   'error.unknownMethod': { de: 'Unbekannte Methode {method}', en: 'Unknown method {method}' },
   'error.invalidParams': { de: 'Ungültige Eingabe: {details}', en: 'Invalid input: {details}' },
   'error.buildContextMissing': { de: 'Build-Verzeichnis {path} nicht gefunden', en: 'Build directory {path} not found' },
@@ -243,6 +268,13 @@ export const messages = {
   'env.fileForeign': { de: '{path} existiert und stammt nicht von CoCoon – sie wird nicht überschrieben.', en: '{path} exists and was not created by CoCoon – it is not overwritten.' },
   'env.fileNoGit': { de: 'Der Ordner ist kein git-Repository – ohne git-Ausschluss wird keine .env-Datei geschrieben.', en: 'The folder is not a git repository – no .env file is written without a git exclude.' },
   'activity.tokenCreated': { de: 'API-Token „{name}“ erstellt', en: 'API token "{name}" created' },
+  'activity.userCreated': { de: 'Benutzer „{name}“ angelegt', en: 'User "{name}" created' },
+  'activity.userDeleted': { de: 'Benutzer „{name}“ gelöscht', en: 'User "{name}" deleted' },
+  'activity.userDisabled': { de: 'Benutzer „{name}“ gesperrt', en: 'User "{name}" disabled' },
+  'activity.userEnabled': { de: 'Benutzer „{name}“ wieder freigegeben', en: 'User "{name}" enabled again' },
+  'activity.userAdmin': { de: '„{name}“ ist jetzt Admin', en: '"{name}" is now an admin' },
+  'activity.userMember': { de: '„{name}“ ist jetzt Mitglied', en: '"{name}" is now a member' },
+  'activity.userReset': { de: 'Passwort von „{name}“ zurückgesetzt, neuer Einrichtungs-Link erstellt', en: 'Password of "{name}" reset, new setup link created' },
 
   // provider test
   'provider.ok': { de: 'Verbindung erfolgreich', en: 'Connection successful' },

@@ -3,12 +3,14 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { methods } from '@cocoon/protocol';
+import { methods, type MethodName } from '@cocoon/protocol';
+import { mayCall } from './auth/access.ts';
+import type { Principal } from './auth/principal.ts';
 import type { Rpc } from './rpc.ts';
 import { VERSION } from './version.ts';
 
 /** MCP tool name ↔ API method, e.g. "sandbox_create" ↔ "sandbox.create". */
-const tools = Object.entries(methods)
+const tools = (Object.entries(methods) as Array<[MethodName, (typeof methods)[MethodName]]>)
   .filter(([, def]) => 'mcp' in def && def.mcp)
   .map(([method, def]) => ({
     method,
@@ -17,7 +19,9 @@ const tools = Object.entries(methods)
     inputSchema: { type: 'object' as const, ...(z.toJSONSchema(def.params, { io: 'input', unrepresentable: 'any' }) as object) },
   }));
 
-function buildServer(rpc: Rpc): Server {
+function buildServer(rpc: Rpc, caller: Principal): Server {
+  // The list only shows what the caller may use; rpc() checks again on every call.
+  const allowed = tools.filter((tool) => mayCall(caller.role, tool.method));
   const server = new Server(
     { name: 'cocoon', version: VERSION },
     {
@@ -27,13 +31,13 @@ function buildServer(rpc: Rpc): Server {
     },
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
+    tools: allowed.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
   }));
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-    const tool = tools.find((t) => t.name === request.params.name);
+    const tool = allowed.find((t) => t.name === request.params.name);
     if (!tool) return { isError: true, content: [{ type: 'text', text: `unknown tool ${request.params.name}` }] };
     try {
-      const result = await rpc(tool.method, request.params.arguments ?? {}, extra.signal);
+      const result = await rpc(caller, tool.method, request.params.arguments ?? {}, extra.signal);
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     } catch (err) {
       return { isError: true, content: [{ type: 'text', text: (err as Error).message }] };
@@ -43,8 +47,8 @@ function buildServer(rpc: Rpc): Server {
 }
 
 /** Stateless Streamable-HTTP MCP endpoint: a fresh server/transport per request. */
-export async function handleMcp(rpc: Rpc, req: IncomingMessage, res: ServerResponse, body: unknown): Promise<void> {
-  const server = buildServer(rpc);
+export async function handleMcp(rpc: Rpc, caller: Principal, req: IncomingMessage, res: ServerResponse, body: unknown): Promise<void> {
+  const server = buildServer(rpc, caller);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   res.on('close', () => {
     void transport.close();

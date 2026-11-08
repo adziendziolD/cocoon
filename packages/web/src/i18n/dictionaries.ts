@@ -13,6 +13,7 @@ import * as workflows from './messages/workflows';
 import * as ports from './messages/ports';
 import * as env from './messages/env';
 import * as updates from './messages/updates';
+import * as users from './messages/users';
 import * as schedules from './messages/schedules';
 import type { Messages } from './types';
 
@@ -37,6 +38,7 @@ export const de = {
   ...ports.de,
   ...env.de,
   ...schedules.de,
+  ...users.de,
 };
 
 export type MessageKey = keyof typeof de;
@@ -58,4 +60,5 @@ export const en: Messages<typeof de> = {
   ...ports.en,
   ...env.en,
   ...schedules.en,
+  ...users.en,
 };

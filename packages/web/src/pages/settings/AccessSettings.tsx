@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { KeyRound, LogOut, Plus, Trash2, TriangleAlert } from 'lucide-react';
+import { KeyRound, Plus, Trash2, TriangleAlert } from 'lucide-react';
 import { qk } from '../../api/keys';
 import { useTokens } from '../../api/queries';
 import { rpc } from '../../api/rpc';
@@ -11,7 +11,6 @@ import { ConfirmDialog, Dialog } from '../../components/Dialog';
 import { Field, Input } from '../../components/Field';
 import { Callout } from '../../components/HelpText';
 import { ErrorState, LoadingState } from '../../components/States';
-import { clearToken } from '../../lib/auth';
 import { rich, useT } from '../../i18n';
 import { formatDateTime, formatRelative } from '../../lib/format';
 
@@ -20,7 +19,6 @@ export function AccessSettings() {
   const tokens = useTokens();
   const [createOpen, setCreateOpen] = useState(false);
   const [toRevoke, setToRevoke] = useState<{ id: string; name: string } | null>(null);
-  const [confirmLogout, setConfirmLogout] = useState(false);
   const origin = window.location.origin;
 
   const revoke = useAction((id: string) => rpc('tokens.revoke', { id }), {
@@ -100,16 +98,6 @@ pnpm cocoon attach <agent-id>`}
         </CardBody>
       </Card>
 
-      <Card>
-        <CardHeader title={t('access.logout.title')} />
-        <CardBody className="flex flex-wrap items-center gap-4">
-          <p className="flex-1 text-sm text-fg-muted">{t('access.logout.text')}</p>
-          <Button icon={<LogOut className="size-4" />} onClick={() => setConfirmLogout(true)}>
-            {t('access.logout.button')}
-          </Button>
-        </CardBody>
-      </Card>
-
       <CreateTokenDialog open={createOpen} onClose={() => setCreateOpen(false)} />
       <ConfirmDialog
         open={!!toRevoke}
@@ -120,14 +108,6 @@ pnpm cocoon attach <agent-id>`}
         title={t('access.revoke.title')}
         confirmLabel={t('access.tokens.revoke')}
         message={rich(t('access.revoke.message'), { name: <strong className="text-fg">{toRevoke?.name}</strong> })}
-      />
-      <ConfirmDialog
-        open={confirmLogout}
-        onClose={() => setConfirmLogout(false)}
-        onConfirm={() => clearToken()}
-        title={t('access.logout.confirmTitle')}
-        confirmLabel={t('access.logout.button')}
-        message={t('access.logout.confirmMessage')}
       />
     </div>
   );

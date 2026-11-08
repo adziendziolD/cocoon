@@ -17,8 +17,10 @@ export const notFound = (what: string, id: string) => new CocoonError('not_found
 export const httpStatus: Record<ErrorCode, number> = {
   bad_request: 400,
   unauthorized: 401,
+  forbidden: 403,
   not_found: 404,
   conflict: 409,
+  rate_limited: 429,
   timeout: 504,
   internal: 500,
 };

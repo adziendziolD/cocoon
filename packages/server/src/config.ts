@@ -7,6 +7,30 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
 export type Config = ReturnType<typeof loadConfig>;
 
+/** A positive number from the environment, or the default. Anything else is a configuration error. */
+function positive(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
+  const raw = env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a positive number`);
+  return value;
+}
+
+/**
+ * COCOON_TRUST_PROXY: how many reverse proxies stand in front of CoCoon (a number), or the addresses of those proxies.
+ * Only then is X-Forwarded-For believed, which the sign-in throttle needs to tell clients apart. Off by default: without a
+ * proxy, a client could forge the header and escape the throttle. The result is Fastify's `trustProxy` option.
+ */
+export function parseTrustProxy(raw: string | undefined): false | string[] | ((address: string, hop: number) => boolean) {
+  const value = raw?.trim();
+  if (!value || value === '0' || value.toLowerCase() === 'false') return false;
+  if (/^\d{1,2}$/.test(value)) {
+    const hops = Number(value);
+    return (_address, hop) => hop < hops;
+  }
+  return value.split(',').map((address) => address.trim()).filter(Boolean);
+}
+
 /** Process-level configuration from the environment. Everything else lives in editable settings. */
 export function loadConfig(env = process.env) {
   const token = env.COCOON_TOKEN || undefined;
@@ -15,6 +39,14 @@ export function loadConfig(env = process.env) {
   }
   return {
     token,
+    /** Password sign-in of users: how long a session lives. */
+    auth: {
+      /** A session ends after this long without activity ... */
+      sessionIdleMs: positive(env, 'COCOON_SESSION_IDLE_MINUTES', 8 * 60) * 60_000,
+      /** ... and after this long in any case. */
+      sessionMaxMs: positive(env, 'COCOON_SESSION_MAX_HOURS', 7 * 24) * 3_600_000,
+    },
+    trustProxy: parseTrustProxy(env.COCOON_TRUST_PROXY),
     host: env.COCOON_HOST ?? '127.0.0.1',
     port: Number(env.COCOON_PORT ?? 7420),
     publicUrl: env.COCOON_PUBLIC_URL,

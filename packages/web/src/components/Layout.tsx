@@ -1,10 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { NavLink, Outlet, useLocation, useMatch } from 'react-router-dom';
-import { Activity, Bot, Boxes, CalendarClock, KanbanSquare, Layers, LayoutDashboard, Menu, MonitorPlay, Settings, X } from 'lucide-react';
+import { Link, NavLink, Outlet, useLocation, useMatch } from 'react-router-dom';
+import { Activity, Bot, Boxes, CalendarClock, KanbanSquare, Layers, LayoutDashboard, LogOut, Menu, MonitorPlay, Settings, X } from 'lucide-react';
 import { useConnectionState, useEventSync } from '../api/events';
 import { useAgents, useSystemInfo, useTasks, useUpdateStatus } from '../api/queries';
 import { useT, type MessageKey } from '../i18n';
 import { cn } from '../lib/cn';
+import { identityName, useIdentity, useSignOut } from '../lib/identity';
 import { useOnboardingRedirect } from '../pages/onboarding/lifecycle';
 import { AppDialogsProvider, useAppDialogs } from './AppDialogs';
 import { LanguageSwitcher } from './LanguageSwitcher';
@@ -41,7 +42,8 @@ export function Layout() {
 
 function Shell() {
   const t = useT();
-  const redirectPending = useOnboardingRedirect();
+  const { isAdmin } = useIdentity();
+  const redirectPending = useOnboardingRedirect(isAdmin);
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
   const agents = useAgents();
@@ -50,7 +52,7 @@ function Shell() {
   const review = tasks.data?.filter((x) => x.status === 'review').length ?? 0;
   // The cockpit uses the full window (no page padding / max width).
   const fullBleed = !!useMatch('/cockpit');
-  const updates = useUpdateStatus().data?.available.length ?? 0;
+  const updates = useUpdateStatus(isAdmin).data?.available.length ?? 0;
   const badges: Partial<Record<NavId, { count: number; title: string }>> = {
     cockpit: { count: blocked + review, title: t('layout.cockpitBadge') },
     tasks: { count: review, title: t('layout.reviewBadge') },
@@ -144,6 +146,7 @@ function SidebarFooter() {
   }[conn];
   return (
     <div className="border-t border-line px-5 py-3.5 text-xs">
+      <AccountRow />
       <div className="flex items-center gap-2 text-fg-muted" title={meta.hint}>
         <span className={cn('size-2 rounded-full', meta.dot)} />
         {meta.label}
@@ -152,6 +155,30 @@ function SidebarFooter() {
         <span className="text-fg-subtle">{info.data ? t('layout.version', { version: info.data.version }) : ''}</span>
         <LanguageSwitcher />
       </div>
+    </div>
+  );
+}
+
+/** Who is signed in, with a link to the account page and a sign-out button. */
+function AccountRow() {
+  const t = useT();
+  const { identity, isAdmin } = useIdentity();
+  const signOut = useSignOut();
+  const isUser = identity.kind === 'user';
+  const name = isUser ? identityName(identity, '') : (identity.tokenName ?? t('layout.accessKey'));
+  const subtitle = !isUser ? t('layout.accessKey') : isAdmin ? t('users.role.admin') : t('users.role.member');
+  return (
+    <div className="mb-3 flex items-center gap-1">
+      <Link to="/settings/account" title={t('layout.account')} className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg p-1 hover:bg-surface-2">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-sm font-semibold text-accent uppercase">{name.charAt(0)}</span>
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-medium text-fg">{name}</span>
+          <span className="block text-fg-subtle">{subtitle}</span>
+        </span>
+      </Link>
+      <button type="button" onClick={() => signOut()} title={t('layout.signOut')} aria-label={t('layout.signOut')} className="rounded-md p-1.5 text-fg-subtle hover:bg-surface-2 hover:text-fg">
+        <LogOut className="size-4" />
+      </button>
     </div>
   );
 }
