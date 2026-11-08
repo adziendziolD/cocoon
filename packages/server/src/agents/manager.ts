@@ -310,6 +310,8 @@ export class AgentManager {
    * Default Anthropic/OpenAI keys are skipped when a custom provider of that kind is wired in.
    */
   private secretEnv(profile: AgentProfile, sandbox: SandboxRecord, providerKinds: Set<string>, grants: Set<string>): Record<string, string> {
+    // Without a network no credential can be used, and anybody with a shell in the sandbox (see sandbox.exec) could read it.
+    if (sandbox.network === 'none') return {};
     const useProxy = this.viaProxy(sandbox);
     const env: Record<string, string> = {};
     for (const name of profile.secrets) {
@@ -364,7 +366,8 @@ export class AgentManager {
     for (const id of ids) {
       const provider = this.providers.get(id);
       const key = this.providers.key(provider);
-      const keyValue = key && provider.secret ? (useProxy ? placeholderFor(sandbox.proxyToken, provider.secret) : key) : undefined;
+      // No network, no use for the key: leave it out rather than put it where a shell in the sandbox can read it.
+      const keyValue = key && provider.secret && sandbox.network !== 'none' ? (useProxy ? placeholderFor(sandbox.proxyToken, provider.secret) : key) : undefined;
 
       if (provider.kind === 'http') {
         const prefix = envPrefixFor(id, provider);

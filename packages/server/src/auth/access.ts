@@ -3,8 +3,9 @@ import type { Principal } from './principal.ts';
 
 /**
  * admin: sees and changes how CoCoon itself is set up (credentials, settings, services, users, updates).
- * member: works with it: sandboxes, agents, tasks, files, git. Members use the stored credentials through their
- * sandboxes but cannot read or change them.
+ * member: works with it: sandboxes, agents, tasks, files, git. Members cannot read or change the stored credentials
+ * through the API. What reaches a sandbox (the GitHub token, and unless COCOON_PROXY_EXTRA_SECRETS=1 the Claude
+ * subscription token and the Gemini key) can still be read from a terminal there, and a member has one.
  */
 export type Access = 'admin' | 'member';
 

@@ -164,13 +164,17 @@ demote, reset or delete their own account, so an admin cannot lock themselves ou
 | | Admin | Member |
 |---|---|---|
 | Sandboxes, agents, terminals, files, git, tasks, schedules, workspaces, previews, environment variables | yes | yes |
-| Use the stored credentials (API keys, GitHub tokens) through sandboxes | yes | yes, but they can neither read nor change them |
+| Use the stored credentials through sandboxes | yes | yes. They cannot read or change them through the API. Model API keys stay out of sandboxes behind the credential proxy; what does reach a sandbox, notably the GitHub token, can be read from a terminal there |
 | Credentials, API providers, settings, network allowlist, notifications, shared services (add, change, credentials) | yes | no |
 | API tokens, users, updates, restart, image builds | yes | no |
 
 Everyone sees the same sandboxes, agents, tasks and activity: accounts separate who may *configure* CoCoon, not whose work is whose.
 Treat members like colleagues you trust with a shell on the sandboxes: they can run any code there, choose any image and network
-mode, push with a stored GitHub token and see what other users did. Which method a role may call is one table in
+mode, and see what other users did. Whatever reaches a sandbox can be read from a terminal in it: the GitHub token (it cannot go
+through the credential proxy) and, unless `COCOON_PROXY_EXTRA_SECRETS=1`, the Claude subscription token and the Gemini key. Sandboxes
+without a network get no credentials at all. Give CoCoon GitHub tokens with minimal scope and rotate them when a member leaves.
+Secret environment variables stay write-only: a member can replace a value, but cannot make it visible or change its proxy host
+without entering it again. Which method a role may call is one table in
 [`packages/server/src/auth/access.ts`](packages/server/src/auth/access.ts); a method without an entry does not compile.
 API and admin tokens are always admins.
 

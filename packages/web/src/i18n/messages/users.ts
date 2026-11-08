@@ -45,7 +45,7 @@ export const de = {
   'users.empty': 'Noch keine Benutzer. Lege Kolleginnen und Kollegen an: Sie bekommen einen Link und wählen ihr Passwort selbst.',
   'users.rolesTitle': 'Wer darf was?',
   'users.rolesText':
-    'Admins verwalten CoCoon: Zugangsdaten, Einstellungen, Dienste, Benutzer und Updates. Mitglieder arbeiten mit Sandboxes, Agenten und Aufgaben. Sie nutzen die hinterlegten Zugangsdaten, können sie aber weder sehen noch ändern. Alle sehen dieselben Sandboxes, Agenten und Aufgaben.',
+    'Admins verwalten CoCoon: Zugangsdaten, Einstellungen, Dienste, Benutzer und Updates. Mitglieder arbeiten mit Sandboxes, Agenten und Aufgaben. Die hinterlegten Zugangsdaten können sie weder auslesen noch ändern. Was aber in eine Sandbox gelangt (etwa das GitHub-Token), kann ein Mitglied dort in einem Terminal lesen. Alle sehen dieselben Sandboxes, Agenten und Aufgaben.',
   'users.you': 'Du',
   'users.status.active': 'Aktiv',
   'users.status.invited': 'Eingeladen',
@@ -157,7 +157,7 @@ export const en: Messages<typeof de> = {
   'users.empty': 'No users yet. Add your colleagues: they get a link and choose their own password.',
   'users.rolesTitle': 'Who can do what?',
   'users.rolesText':
-    'Admins manage CoCoon: credentials, settings, services, users and updates. Members work with sandboxes, agents and tasks. They use the stored credentials but can neither see nor change them. Everyone sees the same sandboxes, agents and tasks.',
+    'Admins manage CoCoon: credentials, settings, services, users and updates. Members work with sandboxes, agents and tasks. They can neither read nor change the stored credentials. But whatever reaches a sandbox (for example the GitHub token) can be read in a terminal there. Everyone sees the same sandboxes, agents and tasks.',
   'users.you': 'You',
   'users.status.active': 'Active',
   'users.status.invited': 'Invited',

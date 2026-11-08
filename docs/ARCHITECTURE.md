@@ -123,6 +123,9 @@ Agenten bedienen, aber keine Keys auslesen oder Sicherheitseinstellungen ändern
 **Rollen:** `rpc.ts` prüft bei jedem Aufruf (HTTP, WebSocket, MCP) zuerst, ob die Rolle des Aufrufers die Methode darf. Die Tabelle dazu steht
 in `src/auth/access.ts` und ist vollständig typisiert: eine neue Methode ohne Eintrag lässt sich nicht kompilieren. Mitglieder bekommen `secrets.list`
 und `settings.get` reduziert (ohne maskierte Werte und ohne Webhook-URL) und keine Events über Updates und Image-Builds.
+Was in eine Sandbox gelangt (GitHub-Token; ohne `COCOON_PROXY_EXTRA_SECRETS=1` auch Claude-Abo-Token und Gemini-Key), kann ein Mitglied dort per
+Terminal lesen. Sandboxes ohne Netzwerk bekommen keine Zugangsdaten. Secret-Env-Variablen kann ein Mitglied nur mit neuem Wert sichtbar machen
+oder umleiten (`EnvService.set`, Option `restricted`).
 
 ## 6. Netzwerk & Secrets
 

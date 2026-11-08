@@ -261,9 +261,10 @@ export function createRpc(ctx: RpcContext) {
     'services.reset': (p) => services.reset(p.sandboxId, p.serviceId),
 
     'env.get': async (p) => envs.get(p),
-    'env.set': async (p) => envs.set(p, p.vars, p.filePath),
+    // Members may write values but not read them back or redirect them (see EnvService.set).
+    'env.set': async (p, _signal, caller) => envs.set(p, p.vars, p.filePath, { restricted: caller.role !== 'admin' }),
     'env.unset': async (p) => envs.unset(p, p.names),
-    'env.import': async (p) => envs.import(p),
+    'env.import': async (p, _signal, caller) => envs.import(p, { restricted: caller.role !== 'admin' }),
     'env.resolve': async (p) => envs.resolve(p.sandboxId, p.agentKind),
     'env.apply': async (p) => ({ files: await envs.applyFiles(p.sandboxId) }),
 

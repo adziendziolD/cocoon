@@ -124,7 +124,11 @@ export class EnvService implements SandboxHooks {
     return this.info(ref.scope, id, key, label);
   }
 
-  set(ref: EnvScopeRef, vars: EnvVarInput[], filePath?: string | null): EnvScopeInfo {
+  /**
+   * `restricted` (members): a stored value stays hidden. Without a new value in the same call they cannot make a secret
+   * visible, nor clear or change its proxy host: either would hand the old value back, or to a host of their choosing.
+   */
+  set(ref: EnvScopeRef, vars: EnvVarInput[], filePath?: string | null, options: { restricted?: boolean } = {}): EnvScopeInfo {
     const { key, id, label } = this.scopeOf(ref);
     const record: EnvScopeRecord = structuredClone(this.store.envScope(key) ?? { vars: {} });
     if (filePath !== undefined) {
@@ -144,6 +148,10 @@ export class EnvService implements SandboxHooks {
       if (proxyHost && !UPPER_NAME.test(input.name)) throw new CocoonError('bad_request', t('error.envProxyName', { name: input.name }));
       const baseUrlEnv = input.baseUrlEnv === undefined ? existing?.baseUrlEnv : input.baseUrlEnv || undefined;
       if (baseUrlEnv && isReservedEnvName(baseUrlEnv)) throw new CocoonError('bad_request', t('error.envReserved', { name: baseUrlEnv }));
+      if (options.restricted && existing && input.value === undefined) {
+        const reveals = input.secret === false && existing.secret;
+        if (reveals || proxyHost !== existing.proxyHost || baseUrlEnv !== existing.baseUrlEnv) throw new CocoonError('forbidden', t('error.envKeepHidden', { name: input.name }));
+      }
 
       record.vars[input.name] = {
         enc: input.value === undefined ? existing!.enc : this.vault.encrypt(`${key}/${input.name}`, input.value),
@@ -166,13 +174,13 @@ export class EnvService implements SandboxHooks {
     return this.save(ref.scope, id, key, label, record, removed);
   }
 
-  import(params: MethodParams<'env.import'>): MethodResult<'env.import'> {
+  import(params: MethodParams<'env.import'>, options: { restricted?: boolean } = {}): MethodResult<'env.import'> {
     const parsed = parseDotenv(params.content);
     const usable = parsed.vars.filter((v) => !isReservedEnvName(v.name));
     const errors = [...parsed.errors, ...parsed.vars.filter((v) => isReservedEnvName(v.name)).map((v) => ({ line: 0, message: t('error.envReserved', { name: v.name }) }))];
     const ref = { scope: params.scope, id: params.id };
     // Validate and store first; only then drop what the file no longer mentions.
-    let scope = this.set(ref, usable.map((v) => ({ name: v.name, value: v.value, target: params.target, secret: params.secret })));
+    let scope = this.set(ref, usable.map((v) => ({ name: v.name, value: v.value, target: params.target, secret: params.secret })), undefined, options);
     if (params.replace) {
       const keep = new Set(usable.map((v) => v.name));
       const stale = scope.vars.map((v) => v.name).filter((name) => !keep.has(name));

@@ -253,6 +253,10 @@ export const messages = {
     de: 'Ungültiger Pfad „{path}“ für die .env-Datei: erlaubt sind relative Pfade aus Buchstaben, Ziffern, „.“, „_“ und „-“ (ohne „..“ und „.git“).',
     en: 'Invalid .env file path "{path}": only relative paths of letters, digits, ".", "_" and "-" are allowed (no ".." or ".git").',
   },
+  'error.envKeepHidden': {
+    de: 'Nur Admins können „{name}“ sichtbar machen oder den Proxy-Host ändern, ohne den Wert neu einzugeben.',
+    en: 'Only admins can make "{name}" visible or change its proxy host without entering the value again.',
+  },
   'error.envProxyHost': { de: '„{host}“ ist kein gültiger Hostname für den Credential-Proxy (z. B. api.stripe.com).', en: '"{host}" is not a valid host name for the credential proxy (e.g. api.stripe.com).' },
   'error.envProxyName': {
     de: 'Variablen für den Credential-Proxy brauchen einen Namen aus Großbuchstaben, Ziffern und „_“ (z. B. STRIPE_API_KEY): {name}',
