@@ -113,6 +113,9 @@ Ja – der Zeitplan läuft im Server. War der Server zum geplanten Zeitpunkt aus
 Er steht in `.data/admin-token.txt` auf dem Server. Weitere Tokens (z. B. für die CLI) erstellst du unter
 *Einstellungen → Zugriff & Integrationen*.
 
+**Wie lasse ich Kolleginnen und Kollegen rein?**
+Unter *Einstellungen → Benutzer* auf *Neuer Benutzer* klicken, Benutzername und Rolle wählen (*Mitglied* arbeitet mit Sandboxes und Agenten, *Admin* verwaltet zusätzlich Zugangsdaten, Einstellungen und Benutzer). CoCoon zeigt einen Link, der nur einmal funktioniert: den schickst du der Person. Sie öffnet ihn, wählt ein Passwort und ist angemeldet. Du siehst das Passwort nie. Hat jemand es vergessen, klickst du neben dem Namen auf *Neuer Link*. Deine eigene Anmeldung mit dem Token funktioniert weiter.
+
 **Kann ich CoCoon aus Claude Code heraus steuern?**
 Ja – unter *Einstellungen → Zugriff & Integrationen* findest du den fertigen Befehl, um CoCoon als MCP-Server einzubinden.
 

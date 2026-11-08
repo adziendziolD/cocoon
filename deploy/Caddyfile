@@ -1,4 +1,6 @@
 # TLS-terminating reverse proxy in front of cocoond (which only listens on 127.0.0.1).
+# Put COCOON_TRUST_PROXY=1 into cocoond's environment (/etc/cocoon/cocoond.env): Caddy sends X-Forwarded-For, and the sign-in
+# throttle needs it to tell clients apart. Do not set it without a proxy, because clients could then forge the header.
 cocoon.example.com {
   reverse_proxy 127.0.0.1:7420
 }

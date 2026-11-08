@@ -107,6 +107,9 @@ Yes – the schedule runs in the server. If the server was down at the scheduled
 **I lost the login token.**
 It's in `.data/admin-token.txt` on the server. Create more tokens (e.g. for the CLI) under *Settings → Access & integrations*.
 
+**How do I let a colleague in?**
+Under *Settings → Users* click *New user*, enter a username and pick a role (*Member* works with sandboxes and agents; *Admin* also manages credentials, settings and users). CoCoon shows a one-time link: send it to your colleague. They open it, choose a password and are signed in. You never see the password. If someone forgets it, click *New link* next to their name. Your own login with the token keeps working.
+
 **Can I control CoCoon from Claude Code?**
 Yes – *Settings → Access & integrations* shows the ready-made command to add CoCoon as an MCP server.
 
