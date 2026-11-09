@@ -172,7 +172,9 @@ Everyone sees the same sandboxes, agents, tasks and activity: accounts separate 
 Treat members like colleagues you trust with a shell on the sandboxes: they can run any code there, choose any image and network
 mode, and see what other users did. Whatever reaches a sandbox can be read from a terminal in it: the GitHub token (it cannot go
 through the credential proxy) and, unless `COCOON_PROXY_EXTRA_SECRETS=1`, the Claude subscription token and the Gemini key. Sandboxes
-without a network get no credentials at all. Give CoCoon GitHub tokens with minimal scope and rotate them when a member leaves.
+without a network get no credentials at all. Which GitHub token a sandbox or workspace uses is an admin's choice: members stay with
+the default `GITHUB_TOKEN` (or the token an admin set on the workspace) and the server refuses any other name from them. Give CoCoon
+GitHub tokens with minimal scope and rotate them when a member leaves.
 Secret environment variables stay write-only: a member can replace a value, but cannot make it visible or change its proxy host
 without entering it again. Which method a role may call is one table in
 [`packages/server/src/auth/access.ts`](packages/server/src/auth/access.ts); a method without an entry does not compile.
@@ -186,8 +188,9 @@ API and admin tokens are always admins.
 - **Guessing is slowed down.** Five wrong passwords lock an account for 30 seconds, doubling up to 15 minutes. Names that do not
   exist are locked the same way, and a wrong name, a wrong password, a locked account and a pending invitation get the same
   answer and cost the same time, so nobody can find out which accounts exist. One client address gets 20 wrong attempts per
-  10 minutes (an IPv6 network counts as one client). Behind a reverse proxy set `COCOON_TRUST_PROXY=1`: only then is
-  `X-Forwarded-For` believed and clients are told apart; without it the header is ignored, so nobody can forge it.
+  10 minutes (an IPv6 network counts as one client). `X-Forwarded-For` is believed only from a reverse proxy on the same
+  machine (the Caddy setup in `deploy/`), so nobody can forge it; a proxy elsewhere or in a container needs `COCOON_TRUST_PROXY`
+  set to its address. The lock is per account name: whoever knows a name can lock that account for a while, but the admin token always signs in.
 - **Sessions** are random 256-bit tokens that the server keeps only as a SHA-256 hash, so a copy of `state.json` signs nobody in.
   They end after 8 hours without activity or after 7 days in any case (`COCOON_SESSION_IDLE_MINUTES`, `COCOON_SESSION_MAX_HOURS`).
   The browser sends the session like an API token (`Authorization: Bearer`) and keeps it in its local storage, not in a cookie,
@@ -907,7 +910,7 @@ role may not call the method), `rate_limited` (429, with a `Retry-After` header)
 | System | `system.info`, `system.setup_status`, `activity.list` |
 | Images | `image.status`, `image.build` |
 | Environment | `env.get/set/unset/import/resolve/apply` (not in MCP) |
-| Admin | `settings.get/update/reset`, `secrets.list/set/delete`, `tokens.list/create/revoke`, `providers.test`, `notifications.test`, `egress.denied` (admins only, except `settings.get` and `secrets.list`, which members get without webhook URL and without masked values) |
+| Admin | `settings.get/update/reset`, `secrets.list/set/delete`, `tokens.list/create/revoke`, `providers.test`, `notifications.test`, `egress.denied` (admins only, except `settings.get` and `secrets.list`, which members get without webhook URL, without masked values, without the values of agent environment variables and without credentials inside provider URLs) |
 | Account | `auth.me`, `auth.logout`, `auth.change_password` |
 | Users | `users.list/create/update/reset_password/delete` (admins only) |
 | Workspaces | `workspace.list/get/create/update/delete` |
@@ -943,7 +946,7 @@ Everything is configurable in the UI. Environment variables (all optional, see [
 | `COCOON_TOKEN` | – | Additional fixed API token (≥ 16 chars); otherwise an admin token is generated |
 | `COCOON_SESSION_IDLE_MINUTES` | `480` | Minutes without activity until a user's session ends |
 | `COCOON_SESSION_MAX_HOURS` | `168` | Hours until a user's session ends, however active it is |
-| `COCOON_TRUST_PROXY` | – | Number of reverse proxies in front of CoCoon (`1` for Caddy), or their addresses: only then is `X-Forwarded-For` believed, which the sign-in throttle needs to tell clients apart |
+| `COCOON_TRUST_PROXY` | loopback | Number of reverse proxies in front of CoCoon, or their addresses: only then is `X-Forwarded-For` believed, which the sign-in throttle needs to tell clients apart. The default trusts a proxy on the same machine; `0` trusts nobody |
 | `COCOON_CONFIG` | – | JSON with initial settings for the very first start ([example](cocoon.config.example.json)) |
 | `COCOON_DRIVER` | `auto` | Sandbox backend: `auto`, `docker`, `podman`, `bwrap` |
 | `COCOON_INSTANCE` | – | Name suffix for this server's Docker resources (network, proxy, services, toolbox) – lets several servers share one Docker host |

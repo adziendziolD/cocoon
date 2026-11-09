@@ -250,7 +250,7 @@ löscht – nie über Kommandozeilen.
 - Benutzer (`src/auth/`): Anmeldung mit Benutzername und Passwort. Neue Benutzer bekommen einen Einrichtungs-Link (einmalig, 72 Stunden, Token im
   URL-Fragment, nur der Hash wird gespeichert) und wählen ihr Passwort selbst. Passwörter: scrypt (N=2^17, r=8, p=1), timing-safe, mindestens 12 Zeichen,
   höchstens zwei Hashes gleichzeitig. Falsche Versuche werden pro Konto (exponentielle Sperre bis 15 Minuten, auch für unbekannte Namen) und pro
-  Client-Adresse gedrosselt (`COCOON_TRUST_PROXY` für Reverse-Proxys). Sitzungen sind 256-Bit-Tokens, serverseitig nur als SHA-256-Hash gespeichert, mit Leerlauf-
+  Client-Adresse gedrosselt (`X-Forwarded-For` wird nur von Loopback geglaubt, sonst `COCOON_TRUST_PROXY`). Sitzungen sind 256-Bit-Tokens, serverseitig nur als SHA-256-Hash gespeichert, mit Leerlauf-
   und Höchstdauer (8 Stunden / 7 Tage). Abmelden, Sperren, Rollenwechsel, Zurücksetzen und Löschen beenden Sitzungen sofort und schließen offene WebSockets
   (Close-Code 4401). Das Token liegt im Browser im Local Storage, nicht in einem Cookie: kein CSRF, und Previews auf anderen Origins kommen nicht daran.
 - `.data/state.json` (Datei 0600, Verzeichnis 0700) enthält API-Secrets und Env-Werte nur verschlüsselt (AES-256-GCM, Schlüssel `.data/env.key`, AAD `secret:<name>`); ältere Klartext-Dateien werden beim Start umgeschrieben. `env.key` gehört in jedes Backup. Für höhere Ansprüche: Festplattenverschlüsselung / Secret-Manager.

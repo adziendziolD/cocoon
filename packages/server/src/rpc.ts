@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { isMethodName, methods, type MethodName, type MethodResult, type Methods, type SetupStep } from '@cocoon/protocol';
 import type { ActivityLog } from './activity.ts';
 import type { AgentManager } from './agents/manager.ts';
-import { mayCall, redactResult } from './auth/access.ts';
+import { mayCall, mayUseParams, redactResult } from './auth/access.ts';
 import type { Principal } from './auth/principal.ts';
 import type { AuthService } from './auth/users.ts';
 import type { EnvService } from './env.ts';
@@ -280,6 +280,7 @@ export function createRpc(ctx: RpcContext) {
     const schema: z.ZodType = methods[method].params;
     const parsed = schema.safeParse(rawParams ?? {});
     if (!parsed.success) throw new CocoonError('bad_request', t('error.invalidParams', { details: z.prettifyError(parsed.error) }), z.treeifyError(parsed.error));
+    if (!mayUseParams(caller.role, method, parsed.data)) throw new CocoonError('forbidden', t('error.forbiddenToken'));
     const handler = handlers[method] as (params: unknown, signal: AbortSignal | undefined, caller: Principal) => Promise<unknown>;
     return redactResult(method, await handler(parsed.data, signal, caller), caller);
   };

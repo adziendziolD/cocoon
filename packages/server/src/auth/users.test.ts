@@ -256,6 +256,21 @@ describe('signing in', () => {
     await expect(s.auth.login('alice', PASSWORD, '203.0.113.50')).resolves.toBeDefined();
   });
 
+  it('counts attempts that arrive at the same time, so parallel guesses do not get past the lock', async () => {
+    const s = setup();
+    await register(s, 'alice');
+    const attempts = await Promise.all(Array.from({ length: 30 }, (_, i) => asyncCodeOf(s.auth.login('alice', `parallel guess number ${i}`, `203.0.113.${i + 1}`))));
+    expect(attempts.filter((a) => a.code === 'unauthorized')).toHaveLength(5);
+    expect(attempts.filter((a) => a.code === 'rate_limited')).toHaveLength(25);
+  });
+
+  it('does not charge the address for a correct password', async () => {
+    const s = setup();
+    await register(s, 'alice');
+    for (let i = 0; i < 40; i++) await s.auth.login('alice', PASSWORD, '203.0.113.9');
+    await expect(s.auth.login('alice', PASSWORD, '203.0.113.9')).resolves.toBeDefined();
+  });
+
   it('puts the wait into the error, for the Retry-After header', async () => {
     const s = setup();
     await register(s, 'alice');
@@ -531,8 +546,17 @@ describe('changing the own password', () => {
     const mine = s.auth.authenticate(token)!;
     for (let i = 0; i < 5; i++) expect((await asyncCodeOf(s.auth.changePassword(mine, `wrong guess number ${i}`, OTHER_PASSWORD))).code).toBe('bad_request');
     expect((await asyncCodeOf(s.auth.changePassword(mine, PASSWORD, OTHER_PASSWORD))).code).toBe('rate_limited');
-    // The lock covers the sign-in as well.
-    expect((await asyncCodeOf(s.auth.login('alice', PASSWORD, '203.0.113.1'))).code).toBe('rate_limited');
+    // Counted apart from the sign-in: the account holder can still sign in.
+    expect((await asyncCodeOf(s.auth.login('alice', PASSWORD, '203.0.113.1'))).code).toBeUndefined();
+  });
+
+  it('is not blocked by wrong sign-in attempts of others, who only need the name', async () => {
+    const s = setup();
+    const { token } = await register(s);
+    const mine = s.auth.authenticate(token)!;
+    for (let i = 0; i < 6; i++) await asyncCodeOf(s.auth.login('alice', `wrong guess number ${i}`, `203.0.113.${i}`));
+    expect((await asyncCodeOf(s.auth.login('alice', PASSWORD, '203.0.113.50'))).code).toBe('rate_limited');
+    expect((await asyncCodeOf(s.auth.changePassword(mine, PASSWORD, OTHER_PASSWORD))).code).toBeUndefined();
   });
 
   it('applies the password rules to the new password', async () => {
@@ -583,6 +607,10 @@ describe('clientKey', () => {
   it('leaves IPv4 addresses as they are and unwraps IPv4-mapped ones', () => {
     expect(clientKey('203.0.113.7')).toBe('203.0.113.7');
     expect(clientKey('::ffff:203.0.113.7')).toBe('203.0.113.7');
+    // The same address spelled in hex (::ffff:cb00:7107) and in full is the same client.
+    expect(clientKey('::ffff:cb00:7107')).toBe('203.0.113.7');
+    expect(clientKey('0:0:0:0:0:ffff:cb00:7107')).toBe('203.0.113.7');
+    expect(clientKey('0000:0000:0000:0000:0000:FFFF:203.0.113.7')).toBe('203.0.113.7');
     expect(clientKey(undefined)).toBeUndefined();
     expect(clientKey('')).toBeUndefined();
   });

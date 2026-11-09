@@ -17,12 +17,14 @@ import { useT } from '../../i18n';
 import { StartStopButton } from '../../components/StartStopButton';
 import { repoDir } from '../../lib/repos';
 import { GithubTokenSelect } from '../../components/GithubTokenSelect';
+import { useIdentity } from '../../lib/identity';
 import { SandboxReposCard } from './RepoDialogs';
 
 export function ManageTab({ sandbox: s }: { sandbox: Sandbox }) {
   const navigate = useNavigate();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const t = useT();
+  const { isAdmin } = useIdentity();
   const rt = runtimeInfo(t, s.runtime);
   const net = networkModeMeta(t, s.network);
   const backend = useBackend();
@@ -93,6 +95,7 @@ export function ManageTab({ sandbox: s }: { sandbox: Sandbox }) {
             <GithubTokenSelect
               value={s.githubToken ?? ''}
               inheritLabel={t('githubToken.inherit')}
+              disabled={!isAdmin}
               onChange={(githubToken) => setToken.mutate(githubToken)}
             />
           </CardBody>

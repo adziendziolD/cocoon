@@ -66,12 +66,28 @@ export function clientKey(address: string | undefined): string | undefined {
   if (!address) return undefined;
   const ip = address.split('%')[0] ?? address;
   if (!isIPv6(ip)) return ip;
-  if (ip.toLowerCase().startsWith('::ffff:')) return ip.slice(7);
+  const groups = expandIPv6(ip);
+  // ::ffff:a.b.c.d in any spelling (dotted or hex) is plain IPv4.
+  if (groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff) {
+    return `${groups[6]! >> 8}.${groups[6]! & 255}.${groups[7]! >> 8}.${groups[7]! & 255}`;
+  }
+  return `${groups.slice(0, 4).map((group) => group.toString(16)).join(':')}::/64`;
+}
+
+/** The eight 16-bit groups of an IPv6 address (a dotted IPv4 tail counts as two). */
+function expandIPv6(ip: string): number[] {
+  const toGroups = (part: string): number[] =>
+    part
+      ? part.split(':').flatMap((piece) => {
+          if (!piece.includes('.')) return [parseInt(piece, 16)];
+          const [a = 0, b = 0, c = 0, d = 0] = piece.split('.').map(Number);
+          return [(a << 8) | b, (c << 8) | d];
+        })
+      : [];
   const [headPart = '', tailPart] = ip.split('::');
-  const head = headPart ? headPart.split(':') : [];
-  const tail = tailPart ? tailPart.split(':') : [];
-  const groups = tailPart === undefined ? head : [...head, ...Array<string>(Math.max(0, 8 - head.length - tail.length)).fill('0'), ...tail];
-  return `${groups.slice(0, 4).map((group) => group.toLowerCase().replace(/^0+(?=.)/, '')).join(':')}::/64`;
+  const head = toGroups(headPart);
+  const tail = tailPart === undefined ? [] : toGroups(tailPart);
+  return tailPart === undefined ? head : [...head, ...Array<number>(Math.max(0, 8 - head.length - tail.length)).fill(0), ...tail];
 }
 
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -182,6 +198,9 @@ export class AuthService {
     const account = username.trim().toLowerCase();
     const client = clientKey(address);
     this.assertAllowed(account, client);
+    // Charged before the hash is computed (which takes a while): attempts that arrive at the same time would otherwise all
+    // pass the check above. A correct password takes it back below.
+    this.throttle.failure(account, client);
     const user = this.store.users().find((candidate) => candidate.username === account);
     const hash = user?.passwordHash;
     // An unknown name, a pending invitation and a wrong password all cost one hash and end in the same answer.
@@ -191,11 +210,11 @@ export class AuthService {
     // Read the account again: it may have been locked, reset or deleted while the hashes were computed.
     const current = user && this.store.user(user.id);
     if (!valid || !user || !hash || !current || current.disabled || current.passwordHash !== hash) {
-      this.throttle.failure(account, client);
       this.log(`sign-in failed (${user ? `user ${user.id}` : 'unknown name'})`);
       throw new CocoonError('unauthorized', t('error.loginFailed'));
     }
     this.throttle.success(account);
+    this.throttle.refund(client);
     const updated: UserRecord = { ...current, lastLoginAt: iso(this.now()), ...(renewed ? { passwordHash: renewed } : {}) };
     this.store.putUser(updated);
     return this.startSession(updated);
@@ -285,14 +304,14 @@ export class AuthService {
   async changePassword(caller: Principal, currentPassword: string, newPassword: string): Promise<void> {
     if (caller.kind !== 'user') throw new CocoonError('bad_request', t('error.noPassword'));
     const user = this.userById(caller.userId);
-    // A stolen session must not be able to guess the password: the same lock as at sign-in applies.
-    this.assertAllowed(user.username, undefined);
+    // A stolen session must not be able to guess the password: the same kind of lock as at sign-in applies, but counted apart,
+    // so wrong sign-in attempts by others (who only need the name) do not block the account holder here.
+    const key = `password:${user.id}`;
+    this.assertAllowed(key, undefined);
+    this.throttle.failure(key, undefined);
     const hash = user.passwordHash;
-    if (!hash || !(await this.hasher.verify(currentPassword, hash))) {
-      this.throttle.failure(user.username, undefined);
-      throw new CocoonError('bad_request', t('error.passwordWrong'));
-    }
-    this.throttle.success(user.username);
+    if (!hash || !(await this.hasher.verify(currentPassword, hash))) throw new CocoonError('bad_request', t('error.passwordWrong'));
+    this.throttle.success(key);
     this.assertPassword(newPassword, user.username);
     const passwordHash = await this.hasher.hash(newPassword);
     const current = this.userById(user.id);

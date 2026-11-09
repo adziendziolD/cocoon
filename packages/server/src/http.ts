@@ -1,10 +1,10 @@
 import { existsSync } from 'node:fs';
-import Fastify, { type FastifyRequest } from 'fastify';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
 import type { WebSocket } from 'ws';
 import { z } from 'zod';
-import { AttachControl, EventFilter, LoginParams, matchesFilter, SetupInfoParams, SetupParams, WireRequest, type WireError, type WireResponse } from '@cocoon/protocol';
+import { AttachControl, EventFilter, LoginParams, matchesFilter, SetupInfoParams, SetupParams, WireRequest, type Language, type WireError, type WireResponse } from '@cocoon/protocol';
 import { localizeEntry } from './activity.ts';
 import { localizeTask } from './tasks.ts';
 import type { AgentManager } from './agents/manager.ts';
@@ -77,7 +77,7 @@ const SIGNED_OUT = 4401;
 
 export async function buildHttpServer({ config, rpc, bus, auth, agents, workspace, ports }: HttpDeps) {
   const app = Fastify({
-    // Only with COCOON_TRUST_PROXY: otherwise a client could forge X-Forwarded-For and escape the sign-in throttle.
+    // Only a proxy on this machine (or COCOON_TRUST_PROXY) is believed: otherwise a client could forge X-Forwarded-For and escape the sign-in throttle.
     trustProxy: config.trustProxy,
     logger: {
       level: process.env.LOG_LEVEL ?? 'info',
@@ -138,22 +138,34 @@ export async function buildHttpServer({ config, rpc, bus, auth, agents, workspac
   app.get('/healthz', async () => ({ ok: true }));
 
   /** Sign-in and choosing a password need no token. Anyone can send these, so the bodies are small. */
-  const publicPost = <S extends z.ZodType>(path: string, schema: S, run: (input: z.output<S>, req: FastifyRequest) => Promise<unknown> | unknown) =>
-    app.post(path, { bodyLimit: 4 * 1024 }, async (req, reply) => {
-      const lang = requestLanguage(req);
-      try {
-        const parsed = schema.safeParse(req.body);
-        if (!parsed.success) throw new CocoonError('bad_request', t('error.invalidParams', { details: z.prettifyError(parsed.error) }, lang));
-        const result = await withLanguage(lang, () => run(parsed.data, req));
-        return reply.header('cache-control', 'no-store').send({ result });
-      } catch (err) {
-        const error = toWireError(err);
-        if (error.code === 'internal') req.log.error(err);
-        const retry = (error.details as { retryAfterSeconds?: number } | undefined)?.retryAfterSeconds;
-        if (retry) reply.header('retry-after', String(retry));
-        return reply.code(httpStatus[error.code]).header('cache-control', 'no-store').send({ error });
-      }
-    });
+  const publicPost = <S extends z.ZodType>(path: string, schema: S, run: (input: z.output<S>, req: FastifyRequest) => Promise<unknown> | unknown) => {
+    const fail = (err: unknown, req: FastifyRequest, reply: FastifyReply, status?: number) => {
+      const error = toWireError(err);
+      if (error.code === 'internal') req.log.error(err);
+      const retry = (error.details as { retryAfterSeconds?: number } | undefined)?.retryAfterSeconds;
+      if (retry) reply.header('retry-after', String(retry));
+      return reply.code(status ?? httpStatus[error.code]).header('cache-control', 'no-store').send({ error });
+    };
+    app.post(
+      path,
+      {
+        bodyLimit: 4 * 1024,
+        // Errors Fastify raises before the handler runs (a body over the limit, malformed JSON) get the same shape.
+        errorHandler: (err, req, reply) => fail(err instanceof CocoonError ? err : fastifyError(err, requestLanguage(req)), req, reply, err.statusCode === 413 ? 413 : undefined),
+      },
+      async (req, reply) => {
+        const lang = requestLanguage(req);
+        try {
+          const parsed = schema.safeParse(req.body);
+          if (!parsed.success) throw new CocoonError('bad_request', t('error.invalidParams', { details: z.prettifyError(parsed.error) }, lang));
+          const result = await withLanguage(lang, () => run(parsed.data, req));
+          return reply.header('cache-control', 'no-store').send({ result });
+        } catch (err) {
+          return fail(err, req, reply);
+        }
+      },
+    );
+  };
   publicPost('/v1/auth/login', LoginParams, (input, req) => auth.login(input.username, input.password, req.ip));
   publicPost('/v1/auth/setup-info', SetupInfoParams, (input, req) => auth.setupInfo(input.token, req.ip));
   publicPost('/v1/auth/setup', SetupParams, (input, req) => auth.completeSetup(input.token, input.password, req.ip));
@@ -269,25 +281,32 @@ export async function buildHttpServer({ config, rpc, bus, auth, agents, workspac
       const caller = callerOf(req);
       if (!track(caller, socket)) return;
       const size = { cols: Number(req.query.cols ?? 120), rows: Number(req.query.rows ?? 40) };
-      let session;
+      // Registered before the first await: a socket that closes while the attach is being set up would otherwise never be noticed.
+      let closed = false;
+      let session: Awaited<ReturnType<typeof agents.attach>> | undefined;
+      socket.on('close', () => {
+        closed = true;
+        session?.close();
+      });
       try {
         session = await withLanguage(requestLanguage(req), () => agents.attach(req.params.agentId, size));
       } catch (err) {
         socket.close(4000, toWireError(err).message.slice(0, 120));
         return;
       }
-      session.stream.on('data', (chunk: Buffer) => socket.readyState === socket.OPEN && socket.send(chunk));
-      session.stream.on('end', () => socket.close(1000, 'detached'));
-      session.stream.on('error', () => socket.close(1011, 'stream error'));
+      if (closed) return void session.close();
+      const attached = session;
+      attached.stream.on('data', (chunk: Buffer) => socket.readyState === socket.OPEN && socket.send(chunk));
+      attached.stream.on('end', () => socket.close(1000, 'detached'));
+      attached.stream.on('error', () => socket.close(1011, 'stream error'));
       socket.on('message', (data, isBinary) => {
         // Typing counts as activity, so someone working in a terminal is not signed out for being idle.
         if (!auth.touch(caller)) return void socket.close(SIGNED_OUT, 'signed out');
-        if (isBinary) return void session.stream.write(data as Buffer);
+        if (isBinary) return void attached.stream.write(data as Buffer);
         const control = AttachControl.safeParse(safeJson(data.toString()));
-        if (control.success) void session.resize(control.data.cols, control.data.rows);
-        else session.stream.write(data as Buffer);
+        if (control.success) void attached.resize(control.data.cols, control.data.rows);
+        else attached.stream.write(data as Buffer);
       });
-      socket.on('close', () => session.close());
     },
   );
 
@@ -309,6 +328,14 @@ export async function buildHttpServer({ config, rpc, bus, auth, agents, workspac
   }
 
   return app;
+}
+
+/** Request errors of Fastify itself (too large, not JSON) as an error of ours; anything else stays unexpected. */
+function fastifyError(err: unknown, lang: Language): unknown {
+  const code = (err as { code?: string }).code;
+  if (code === 'FST_ERR_CTP_BODY_TOO_LARGE') return new CocoonError('bad_request', t('error.bodyTooLarge', {}, lang));
+  if (typeof code === 'string' && code.startsWith('FST_ERR_CTP_')) return new CocoonError('bad_request', t('error.invalidParams', { details: (err as Error).message }, lang));
+  return err;
 }
 
 function safeJson(text: string): unknown {

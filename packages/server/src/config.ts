@@ -18,12 +18,15 @@ function positive(env: NodeJS.ProcessEnv, name: string, fallback: number): numbe
 
 /**
  * COCOON_TRUST_PROXY: how many reverse proxies stand in front of CoCoon (a number), or the addresses of those proxies.
- * Only then is X-Forwarded-For believed, which the sign-in throttle needs to tell clients apart. Off by default: without a
- * proxy, a client could forge the header and escape the throttle. The result is Fastify's `trustProxy` option.
+ * Only then is X-Forwarded-For believed, which the sign-in throttle needs to tell clients apart. By default only a proxy on
+ * the same machine (loopback) is believed, the documented Caddy setup: a client from elsewhere cannot forge the header,
+ * and without this default every client behind Caddy would share 127.0.0.1 in the throttle, so one attacker could lock
+ * everybody out. "0" or "false" believes nobody. The result is Fastify's `trustProxy` option.
  */
 export function parseTrustProxy(raw: string | undefined): false | string[] | ((address: string, hop: number) => boolean) {
   const value = raw?.trim();
-  if (!value || value === '0' || value.toLowerCase() === 'false') return false;
+  if (!value) return ['loopback'];
+  if (value === '0' || value.toLowerCase() === 'false') return false;
   if (/^\d{1,2}$/.test(value)) {
     const hops = Number(value);
     return (_address, hop) => hop < hops;

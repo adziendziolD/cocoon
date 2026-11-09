@@ -88,6 +88,12 @@ export class LoginThrottle {
   success(account: string): void {
     this.accounts.delete(account);
   }
+
+  /** Takes back the one attempt an address was charged in advance (see `failure`), because it turned out to be right. */
+  refund(address: string | undefined): void {
+    const state = address === undefined ? undefined : this.addresses.get(address);
+    if (state && state.count > 0) state.count--;
+  }
 }
 
 /** Stores the entry as the most recent one and drops the oldest when the map is full. */

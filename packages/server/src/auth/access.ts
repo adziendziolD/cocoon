@@ -31,7 +31,7 @@ export const METHOD_ACCESS: Record<MethodName, Access> = {
   'ports.preview_link': 'member',
 
   // settings, credentials, access. Members read settings and the list of credential names to fill in forms; both are
-  // reduced for them (see redactResult).
+  // reduced for them (see redactResult). Some parameters of open methods are admin-only (see mayUseParams).
   'settings.get': 'member',
   'settings.update': 'admin',
   'settings.reset': 'admin',
@@ -146,8 +146,47 @@ export const METHOD_ACCESS: Record<MethodName, Access> = {
 
 export const mayCall = (role: UserRole, method: MethodName): boolean => role === 'admin' || METHOD_ACCESS[method] === 'member';
 
-/** The webhook URL works as a password for the channel behind it: members do not get to see it. */
-export const redactSettings = (settings: Settings): Settings => ({ ...settings, notifications: { ...settings.notifications, webhookUrl: undefined } });
+/**
+ * Parameters only admins may set, although the method is open to members. The name of a GitHub token chooses which stored
+ * token a sandbox gets, and a member can read what reaches their sandbox, so members stay with the default token (or the one
+ * an admin set on the workspace).
+ */
+export function mayUseParams(role: UserRole, method: MethodName, params: unknown): boolean {
+  if (role === 'admin') return true;
+  if (method !== 'sandbox.create' && method !== 'sandbox.update' && method !== 'workspace.create' && method !== 'workspace.update') return true;
+  const token = (params as { githubToken?: string | null } | undefined)?.githubToken;
+  return token === undefined || token === null || token === DEFAULT_GITHUB_TOKEN;
+}
+
+const DEFAULT_GITHUB_TOKEN = 'GITHUB_TOKEN';
+
+/** The address of a provider without credentials in it (user:password@ or a key in the query). */
+const bareUrl = (value: string): string => {
+  try {
+    const url = new URL(value);
+    url.username = '';
+    url.password = '';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return value;
+  }
+};
+
+/**
+ * Settings as members see them. Everything stays except what works as a credential: the webhook URL (a password for the
+ * channel behind it), the values of agent environment variables (the names stay) and credentials inside provider URLs.
+ * Members never write settings, so what is hidden here cannot be overwritten with the hidden version.
+ */
+export const redactSettings = (settings: Settings): Settings => ({
+  ...settings,
+  notifications: { ...settings.notifications, webhookUrl: undefined },
+  agents: Object.fromEntries(
+    Object.entries(settings.agents).map(([id, profile]) => [id, { ...profile, env: Object.fromEntries(Object.keys(profile.env).map((name) => [name, ''])) }]),
+  ),
+  providers: Object.fromEntries(Object.entries(settings.providers).map(([id, provider]) => [id, { ...provider, baseUrl: bareUrl(provider.baseUrl) }])),
+});
 
 /** Members get the names of the stored credentials (to pick one in a form), not their masked values. */
 const redactSecrets = (secrets: SecretInfo[]): SecretInfo[] => secrets.map(({ name, set, source }) => ({ name, set, source }));

@@ -39,7 +39,7 @@ afterEach(async () => {
 });
 
 /** The real store, token and auth services and the real RPC layer; only the sandbox side is a stub. */
-async function build(trustProxy: string | undefined = undefined) {
+async function build(trustProxy: string | undefined = undefined, agents: unknown = {}) {
   const store = new Store(dir);
   const bus = new EventBus();
   const activity = new ActivityLog(bus);
@@ -56,7 +56,7 @@ async function build(trustProxy: string | undefined = undefined) {
     rpc,
     bus,
     auth,
-    agents: {},
+    agents,
     workspace: { archive: async () => 'tar' },
     ports: { previewRoute: () => undefined },
   } as unknown as HttpDeps);
@@ -135,7 +135,11 @@ describe('signing in over HTTP', () => {
     expect((await post('/v1/auth/login', {})).statusCode).toBe(400);
     expect((await post('/v1/auth/login', { username: 'alice' })).statusCode).toBe(400);
     expect((await post('/v1/auth/login', { username: 'alice', password: 'x'.repeat(2000) })).statusCode).toBe(400);
-    expect((await post('/v1/auth/login', { username: 'alice', password: 'y'.repeat(10_000) })).statusCode).toBe(413);
+    const big = await post('/v1/auth/login', { username: 'alice', password: 'y'.repeat(10_000) });
+    // Fastify refuses this before our handler runs; it still answers in our error format, without caching.
+    expect(big.statusCode).toBe(413);
+    expect(big.json()).toMatchObject({ error: { code: 'bad_request' } });
+    expect(big.headers['cache-control']).toBe('no-store');
     expect((await app.inject({ method: 'POST', url: '/v1/auth/login', headers: { 'content-type': 'application/json' }, payload: '{' })).statusCode).toBe(400);
   });
 
@@ -155,6 +159,23 @@ describe('client addresses behind a proxy', () => {
     const { post } = await build();
     for (let i = 0; i < 20; i++) expect((await guess(post, `192.0.2.${i}`, i)).statusCode).toBe(401);
     expect((await guess(post, '192.0.2.200', 99)).statusCode).toBe(429);
+  });
+
+  it('believes a proxy on the same machine by default (the Caddy setup), so clients behind it are told apart', async () => {
+    const { post } = await build();
+    const viaCaddy = (forwarded: string, n: number) =>
+      post('/v1/auth/login', { username: `user${n}`, password: 'spring2026spring2026' }, { remoteAddress: '127.0.0.1', headers: { 'x-forwarded-for': forwarded } });
+    for (let i = 0; i < 20; i++) expect((await viaCaddy('192.0.2.1', i)).statusCode).toBe(401);
+    expect((await viaCaddy('192.0.2.1', 99)).statusCode).toBe(429);
+    expect((await viaCaddy('192.0.2.2', 99)).statusCode).toBe(401);
+  });
+
+  it('believes nobody with COCOON_TRUST_PROXY=0', async () => {
+    const { post } = await build('0');
+    const viaCaddy = (forwarded: string, n: number) =>
+      post('/v1/auth/login', { username: `user${n}`, password: 'spring2026spring2026' }, { remoteAddress: '127.0.0.1', headers: { 'x-forwarded-for': forwarded } });
+    for (let i = 0; i < 20; i++) expect((await viaCaddy(`192.0.2.${i}`, i)).statusCode).toBe(401);
+    expect((await viaCaddy('192.0.2.200', 99)).statusCode).toBe(429);
   });
 
   it('tells clients apart with COCOON_TRUST_PROXY=1', async () => {
@@ -189,6 +210,15 @@ describe('roles over HTTP', () => {
     }
     // The admin token can still do all of it.
     expect((await call(ADMIN_TOKEN, 'users.list')).status).toBe(200);
+  });
+
+  it('refuses a GitHub token other than the default from members, and lets admins choose', async () => {
+    const { call, signUp } = await build();
+    const { token } = await signUp('alice');
+    const res = await call(token, 'sandbox.update', { sandboxId: 'sb_1', githubToken: 'GITHUB_TOKEN_COMPANY' });
+    expect(res.status).toBe(403);
+    expect(res.error?.code).toBe('forbidden');
+    expect((await call(token, 'workspace.update', { workspaceId: 'w', githubToken: 'GITHUB_TOKEN_COMPANY' })).status).toBe(403);
   });
 
   it('refuses before the parameters are looked at, so a member learns nothing about the method', async () => {
@@ -293,6 +323,25 @@ describe('sockets', () => {
     const { token } = await signUp('alice');
     const ws = await app.injectWS(`/v1/ws?token=${token}`);
     ws.close();
+  });
+
+  it('release a terminal that was still being attached when the socket closed', async () => {
+    let release!: (session: unknown) => void;
+    const attaching = new Promise((resolve) => (release = resolve));
+    let closed = 0;
+    const { app, signUp } = await build(undefined, { attach: () => attaching });
+    await app.ready();
+    const { token } = await signUp('alice');
+    const ws = await app.injectWS(`/v1/agents/ag_1/attach?token=${token}`);
+    const events = listen(ws);
+    ws.terminate();
+    await until(() => events.closed.code !== undefined, 'socket closed');
+    // The server sees the close a moment after the client does.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const stream = Object.assign(new (await import('node:stream')).PassThrough());
+    release({ stream, close: () => closed++, resize: async () => undefined });
+    await until(() => closed > 0, 'terminal released');
+    expect(closed).toBe(1);
   });
 
   it('are closed with 4401 when the session ends', async () => {

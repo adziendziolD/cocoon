@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { methods, Settings, type CocoonEvent, type SecretInfo } from '@cocoon/protocol';
-import { eventFor, mayCall, METHOD_ACCESS, redactResult, redactSettings } from './access.ts';
+import { eventFor, mayCall, mayUseParams, METHOD_ACCESS, redactResult, redactSettings } from './access.ts';
 import type { Principal } from './principal.ts';
 
 const admin: Principal = { kind: 'token', role: 'admin', credentialId: 'token:t', name: 't' };
@@ -96,6 +96,19 @@ describe('what members get to see', () => {
     expect(settings.notifications.webhookUrl).toBeDefined();
   });
 
+  it('hides credentials in the rest of the settings too, and keeps what forms need', () => {
+    const settings = Settings.parse({
+      providers: { gw: { label: 'Gateway', kind: 'openai', baseUrl: 'https://user:pw@gw.example.com/v1?api_key=sk-secret#x', secret: 'GW_KEY', models: ['m1'] } },
+      agents: { custom: { command: ['custom'], env: { CUSTOM_API_KEY: 'sk-live-123', MODE: 'fast' } } },
+    });
+    const seen = redactResult('settings.get', settings, member) as Settings;
+    expect(JSON.stringify(seen)).not.toMatch(/sk-live-123|sk-secret|user:pw/);
+    expect(seen.agents.custom?.env).toEqual({ CUSTOM_API_KEY: '', MODE: '' });
+    expect(seen.providers.gw).toMatchObject({ label: 'Gateway', baseUrl: 'https://gw.example.com/v1', secret: 'GW_KEY', models: ['m1'] });
+    expect(seen.agents.custom?.command).toEqual(['custom']);
+    expect(settings.agents.custom?.env.CUSTOM_API_KEY).toBe('sk-live-123');
+  });
+
   it('leaves the results of other methods alone', () => {
     const list = [{ id: 'sb_1' }];
     expect(redactResult('sandbox.list', list, member)).toBe(list);
@@ -115,5 +128,18 @@ describe('what members get to see', () => {
     expect(shown?.type === 'settings.updated' && shown.settings.notifications.webhookUrl).toBeUndefined();
     const task: CocoonEvent = { type: 'task.deleted', taskId: 't', workspaceId: 'w' };
     expect(eventFor(task, member)).toBe(task);
+  });
+});
+
+describe('parameters only admins may set', () => {
+  it('keeps members with the default GitHub token', () => {
+    for (const method of ['sandbox.create', 'sandbox.update', 'workspace.create', 'workspace.update'] as const) {
+      expect(mayUseParams('member', method, { githubToken: 'GITHUB_TOKEN_COMPANY' }), method).toBe(false);
+      expect(mayUseParams('member', method, { githubToken: 'GITHUB_TOKEN' }), method).toBe(true);
+      expect(mayUseParams('member', method, { githubToken: null }), method).toBe(true);
+      expect(mayUseParams('member', method, {}), method).toBe(true);
+      expect(mayUseParams('admin', method, { githubToken: 'GITHUB_TOKEN_COMPANY' }), method).toBe(true);
+    }
+    expect(mayUseParams('member', 'sandbox.list', { githubToken: 'GITHUB_TOKEN_COMPANY' })).toBe(true);
   });
 });
