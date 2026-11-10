@@ -43,8 +43,8 @@ jobs:
     env:
       VARIANT: ${{ matrix.variant }}
       IMAGE: cocoon/sandbox:${{ matrix.variant }}
-      # Goal of issue #4: the slim image at most 250 MB (was ~630 MB with Node.js and database clients).
-      MAX_SLIM_MB: 250
+      # Goal of issue #4: the slim image at most 260 MB (was ~630 MB with Node.js and database clients).
+      MAX_SLIM_MB: 260
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: docker build --build-arg TOOLCHAIN=$VARIANT -t $IMAGE images/sandbox

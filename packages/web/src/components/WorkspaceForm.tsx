@@ -8,6 +8,7 @@ import { rpc } from '../api/rpc';
 import { useAction } from '../api/useAction';
 import { useLanguage, useT, type TFunction } from '../i18n';
 import { cn } from '../lib/cn';
+import { useIdentity } from '../lib/identity';
 import { profileLabel } from '../lib/profiles';
 import { hasRepoErrors, repoRowsFrom, reposFromRows, validateRepoRows, type RepoRow } from '../lib/repos';
 import { workflowLabel } from '../lib/tasks';
@@ -66,8 +67,11 @@ export function toWorkspaceDraft(w?: Workspace, index = 0): WorkspaceDraft {
   };
 }
 
-/** Params for workspace.create / workspace.update. Empty strings clear optional texts. */
-export function workspaceParams(d: WorkspaceDraft): MethodParams<'workspace.create'> {
+/**
+ * Params for workspace.create / workspace.update. Empty strings clear optional texts.
+ * Only admins choose the GitHub token (the server refuses it from members); for members it is left out and so stays as it is.
+ */
+export function workspaceParams(d: WorkspaceDraft, isAdmin: boolean): MethodParams<'workspace.create'> {
   const repos = reposFromRows(d.repos);
   return {
     name: d.name.trim(),
@@ -85,7 +89,7 @@ export function workspaceParams(d: WorkspaceDraft): MethodParams<'workspace.crea
     repos: repos.length ? repos : null,
     repo: null,
     network: d.network || undefined,
-    githubToken: d.githubToken || null,
+    ...(isAdmin ? { githubToken: d.githubToken || null } : {}),
     sandboxMode: d.sandboxMode,
     defaultAgentKind: d.defaultAgentKind,
     // '' = no default workflow (an omitted field would keep the old value).
@@ -136,6 +140,7 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (c: 
 /** All workspace options. Used in the create/edit dialog and on the workspace's settings tab. */
 export function WorkspaceForm({ value: d, onChange, showErrors = true }: { value: WorkspaceDraft; onChange: (patch: Partial<WorkspaceDraft>) => void; showErrors?: boolean }) {
   const t = useT();
+  const { isAdmin } = useIdentity();
   const { lang } = useLanguage();
   const settings = useSettings();
   const errors = showErrors ? validateWorkspace(t, d) : {};
@@ -173,7 +178,7 @@ export function WorkspaceForm({ value: d, onChange, showErrors = true }: { value
 
       <section className="space-y-3">
         <SectionLabel title={t('workspaceForm.githubToken')} text={t('workspaceForm.githubTokenHint')} />
-        <GithubTokenSelect value={d.githubToken} onChange={(githubToken) => onChange({ githubToken })} />
+        <GithubTokenSelect value={d.githubToken} onChange={(githubToken) => onChange({ githubToken })} disabled={!isAdmin} />
       </section>
 
       <section className="space-y-3">
@@ -311,6 +316,7 @@ function SectionLabel({ title, text }: { title: string; text?: string }) {
 /** Create (no `workspace`) or edit a workspace. After creating, the new workspace becomes the selected scope. */
 export function WorkspaceDialog({ open, onClose, workspace, index = 0 }: { open: boolean; onClose: () => void; workspace?: Workspace; index?: number }) {
   const t = useT();
+  const { isAdmin } = useIdentity();
   const navigate = useNavigate();
   const [draft, setDraft] = useState<WorkspaceDraft>(() => toWorkspaceDraft(workspace, index));
   const [touched, setTouched] = useState(false);
@@ -325,7 +331,7 @@ export function WorkspaceDialog({ open, onClose, workspace, index = 0 }: { open:
 
   const save = useAction(
     (d: WorkspaceDraft) =>
-      workspace ? rpc('workspace.update', { workspaceId: workspace.id, ...workspaceParams(d) }) : rpc('workspace.create', workspaceParams(d)),
+      workspace ? rpc('workspace.update', { workspaceId: workspace.id, ...workspaceParams(d, isAdmin) }) : rpc('workspace.create', workspaceParams(d, isAdmin)),
     {
       success: (w) => (workspace ? t('workspaceForm.saved') : t('workspaceForm.created', { name: w.name })),
       error: t('common.saveFailed'),

@@ -17,9 +17,11 @@ import { SetupChecklist } from '../components/SetupChecklist';
 import { ErrorState, LoadingState } from '../components/States';
 import { useT } from '../i18n';
 import { cn } from '../lib/cn';
+import { useIdentity } from '../lib/identity';
 
 export function DashboardPage() {
   const t = useT();
+  const { isAdmin } = useIdentity();
   const sandboxes = useSandboxes();
   const agents = useAgents();
   const activity = useActivity();
@@ -55,7 +57,8 @@ export function DashboardPage() {
         }
       />
 
-      <SetupChecklist />
+      {/* Its steps lead to admin pages (credentials, images, services). */}
+      {isAdmin && <SetupChecklist />}
 
       {(blocked.length > 0 || broken.length > 0 || review.length > 0) && (
         <section className="mb-8">

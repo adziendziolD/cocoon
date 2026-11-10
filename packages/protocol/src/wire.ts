@@ -14,7 +14,7 @@ export const WireRequest = z.object({
 });
 export type WireRequest = z.infer<typeof WireRequest>;
 
-export type ErrorCode = 'bad_request' | 'unauthorized' | 'not_found' | 'conflict' | 'timeout' | 'internal';
+export type ErrorCode = 'bad_request' | 'unauthorized' | 'forbidden' | 'rate_limited' | 'not_found' | 'conflict' | 'timeout' | 'internal';
 
 export interface WireError {
   code: ErrorCode;

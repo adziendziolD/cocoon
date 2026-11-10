@@ -161,13 +161,13 @@ export const de = {
   'login.welcome': 'Willkommen bei CoCoon',
   'login.tagline': 'Deine Zentrale für KI-Coding-Agenten in sicheren Sandboxes.',
   'login.expiredTitle': 'Du wurdest abgemeldet',
-  'login.expiredText': 'Der gespeicherte Zugangsschlüssel ist nicht mehr gültig. Bitte melde dich erneut an.',
+  'login.expiredText': 'Die Sitzung ist beendet oder der gespeicherte Zugangsschlüssel ist nicht mehr gültig. Bitte melde dich erneut an.',
   'login.tokenLabel': 'Zugangsschlüssel (Token)',
   'login.tokenHint':
     'Der Schlüssel wird beim ersten Start des Servers in der Konsole angezeigt und liegt in der Datei {file}. Am einfachsten öffnest du direkt den Link aus der Konsole – dann bist du automatisch angemeldet.',
   'login.tokenPlaceholder': 'Token einfügen',
   'login.submit': 'Anmelden',
-  'login.storedLocally': 'Der Schlüssel wird nur in diesem Browser gespeichert.',
+  'login.storedLocally': 'Die Anmeldung wird nur in diesem Browser gespeichert.',
 
   // ── NotFoundPage ───────────────────────────────────────────────────────────
   'notFound.title': 'Seite nicht gefunden',
@@ -342,13 +342,13 @@ export const en: Messages<typeof de> = {
   'login.welcome': 'Welcome to CoCoon',
   'login.tagline': 'Your control center for AI coding agents in secure sandboxes.',
   'login.expiredTitle': 'You were signed out',
-  'login.expiredText': 'The saved access key is no longer valid. Please sign in again.',
+  'login.expiredText': 'The session has ended or the saved access key is no longer valid. Please sign in again.',
   'login.tokenLabel': 'Access key (token)',
   'login.tokenHint':
     'The key is printed to the console when the server starts for the first time and is stored in the file {file}. The easiest way is to open the link from the console directly – then you are signed in automatically.',
   'login.tokenPlaceholder': 'Paste token',
   'login.submit': 'Sign in',
-  'login.storedLocally': 'The key is only stored in this browser.',
+  'login.storedLocally': 'Your sign-in is only stored in this browser.',
 
   'notFound.title': 'Page not found',
   'notFound.toDashboard': 'Go to overview',

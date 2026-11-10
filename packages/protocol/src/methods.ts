@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DisplayName, Identity, SetupLink, UserInfo, UserRole, Username } from './auth.ts';
 import { CockpitLayout, GithubIssues, Task, TaskPriority, TaskStatus, Workspace, WORKSPACE_KEY, WorkspaceReview } from './orchestration.ts';
 import {
   ActivityEntry,
@@ -275,6 +276,38 @@ export const methods = {
     result: z.object({ token: z.string(), info: TokenInfo }),
   },
   'tokens.revoke': { description: 'Revokes an API token.', params: z.object({ id: z.string() }), result: Ok },
+
+  // ── account and users ─────────────────────────────────────────────────────
+  // Signing in itself is not a method: POST /v1/auth/login, /v1/auth/setup-info and /v1/auth/setup need no token.
+  'auth.me': { description: 'Who the caller is: the role and, for a signed-in user, the account.', params: Empty, result: Identity },
+  'auth.logout': {
+    description: 'Ends the session of the caller (everywhere: every session of the user). API tokens are not affected.',
+    params: z.object({ everywhere: z.boolean().default(false) }).default({ everywhere: false }),
+    result: Ok,
+  },
+  'auth.change_password': {
+    description: 'Changes the password of the signed-in user. Every other session of the user ends.',
+    params: z.object({ currentPassword: z.string().min(1).max(1024), newPassword: z.string().max(1024) }),
+    result: Ok,
+  },
+  'users.list': { description: 'User accounts (password sign-in).', params: Empty, result: z.array(UserInfo) },
+  'users.create': {
+    description:
+      'Creates a user without a password. The returned setup token is shown only once: the user opens <origin>/#setup=<token> and chooses a password there.',
+    params: z.object({ username: Username, displayName: DisplayName.optional(), role: UserRole.default('member') }),
+    result: z.object({ user: UserInfo, setup: SetupLink }),
+  },
+  'users.update': {
+    description: 'Changes the role or display name of a user, or disables / enables the account. A role change or disabling ends the sessions of the user.',
+    params: z.object({ userId: z.string(), role: UserRole.optional(), displayName: DisplayName.nullable().optional(), disabled: z.boolean().optional() }),
+    result: UserInfo,
+  },
+  'users.reset_password': {
+    description: 'Invalidates the password and all sessions of a user and returns a new one-time setup token.',
+    params: z.object({ userId: z.string() }),
+    result: z.object({ user: UserInfo, setup: SetupLink }),
+  },
+  'users.delete': { description: 'Deletes a user account and ends its sessions.', params: z.object({ userId: z.string() }), result: Ok },
   'providers.test': {
     description: 'Tests an API provider from the server: reachability, authentication, and available models.',
     params: z.union([z.object({ id: z.string().regex(PROVIDER_ID) }), z.object({ provider: ApiProvider })]),

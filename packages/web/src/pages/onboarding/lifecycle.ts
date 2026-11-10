@@ -17,16 +17,18 @@ let redirectChecked = false;
  * on the start page, the wizard was never completed/skipped and the server setup is not complete
  * (existing, fully set-up installations are left alone).
  * Returns true while the decision is pending, so the dashboard doesn't flash before the redirect.
+ * `enabled` is false for members: they are never redirected.
  */
-export function useOnboardingRedirect(): boolean {
+export function useOnboardingRedirect(enabled = true): boolean {
   const settings = useSettings();
   const setup = useSetupStatus();
   const navigate = useNavigate();
   const [, force] = useState(0);
-  const relevant = !redirectChecked && initialPath === '/';
+  const relevant = enabled && !redirectChecked && initialPath === '/';
 
   useEffect(() => {
-    if (redirectChecked) return;
+    // The wizard sets up credentials and settings, which only admins may do: members are never sent there.
+    if (!enabled || redirectChecked) return;
     if (initialPath !== '/') {
       redirectChecked = true;
       return;
@@ -40,7 +42,7 @@ export function useOnboardingRedirect(): boolean {
     redirectChecked = true;
     if (!settings.data.general.onboardingCompletedAt && !setup.data.complete) navigate('/onboarding', { replace: true });
     else force((n) => n + 1);
-  }, [settings.data, settings.error, setup.data, setup.error, navigate]);
+  }, [enabled, settings.data, settings.error, setup.data, setup.error, navigate]);
 
   return relevant;
 }

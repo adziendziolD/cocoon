@@ -23,6 +23,7 @@ import { TaskBoard } from '../components/tasks/TaskBoard';
 import { TaskStatusBadge } from '../components/tasks/TaskBits';
 import { useOpenTask } from '../components/tasks/useTaskActions';
 import { AddSandboxesDialog, DeleteWorkspaceDialog, MoveSandboxDialog } from '../components/WorkspaceDialogs';
+import { useIdentity } from '../lib/identity';
 import { toWorkspaceDraft, validateWorkspace, WorkspaceForm, workspaceParams, type WorkspaceDraft } from '../components/WorkspaceForm';
 import { WorkspaceDot } from '../components/WorkspaceSwitcher';
 import { useLanguage, useT } from '../i18n';
@@ -291,9 +292,10 @@ function Overview({ workspace: ws }: { workspace: Workspace }) {
 
 function SettingsTab({ workspace: ws }: { workspace: Workspace }) {
   const t = useT();
+  const { isAdmin } = useIdentity();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const { draft, setDraft, dirty, reset } = useDraft<WorkspaceDraft>(toWorkspaceDraft(ws));
-  const save = useAction((d: WorkspaceDraft) => rpc('workspace.update', { workspaceId: ws.id, ...workspaceParams(d) }), {
+  const save = useAction((d: WorkspaceDraft) => rpc('workspace.update', { workspaceId: ws.id, ...workspaceParams(d, isAdmin) }), {
     success: t('workspaceForm.saved'),
     error: t('common.saveFailed'),
     invalidate: [qk.workspaces],

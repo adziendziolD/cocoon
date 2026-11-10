@@ -1,4 +1,5 @@
 export * from './models.ts';
+export * from './auth.ts';
 export * from './methods.ts';
 export * from './events.ts';
 export * from './wire.ts';

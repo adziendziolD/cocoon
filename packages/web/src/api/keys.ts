@@ -10,6 +10,8 @@ export const qk = {
   secrets: ['secrets'] as const,
   defaultModels: (adapter: string) => ['models.list', adapter] as const,
   tokens: ['tokens'] as const,
+  me: ['auth.me'] as const,
+  users: ['users'] as const,
   denied: ['egress.denied'] as const,
   sandboxes: ['sandboxes'] as const,
   sandbox: (id: string) => ['sandbox', id] as const,

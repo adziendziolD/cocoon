@@ -11,7 +11,7 @@
 |---|---|
 | Agenten laufen isoliert | Jede Sandbox = eigener gehärteter Container; optional gVisor (`runsc`) oder Kata/Firecracker-microVM (`kata-fc`) |
 | Agenten überleben Disconnects/Restarts | Agent-Prozesse laufen in **tmux im Sandbox-Container**, nicht im Control-Plane-Prozess |
-| Von außen steuerbar | Web-Oberfläche, HTTP-RPC, WebSocket (RPC + Events), Terminal-Attach, MCP-Server, CLI – alles mit Token-Auth |
+| Von außen steuerbar | Web-Oberfläche, HTTP-RPC, WebSocket (RPC + Events), Terminal-Attach, MCP-Server, CLI – alles mit Token-Auth oder Benutzer-Anmeldung (Rollen Admin und Mitglied) |
 | Einsteigerfreundlich | Ersteinrichtung automatisch (Admin-Token, Netzwerk, Proxy, Image), alles in der UI konfigurierbar |
 | Agenten-agnostisch | Agent = beliebige CLI mit TTY; Verhalten über **Profile** konfigurierbar |
 | Maschinenlesbar | Jede Operation liefert JSON → auch andere Agenten/Skripte können orchestrieren |
@@ -101,13 +101,15 @@ GET  /v1/sandboxes/:id/archive?path=   Tar-Download
 POST /mcp                 MCP Streamable HTTP (stateless), Tools = API-Methoden (sandbox_create, agent_spawn, …)
 GET  /healthz             ohne Auth
 ```
-Auth: `Authorization: Bearer <token>` oder `?token=` (für Browser-WebSockets/Downloads).
+Auth: `Authorization: Bearer <token>` oder `?token=` (für Browser-WebSockets/Downloads). Das ist ein API-/Admin-Token oder das Sitzungs-Token eines
+Benutzers. Ohne Token gehen nur `POST /v1/auth/login`, `/v1/auth/setup-info` und `/v1/auth/setup` (Anmelden, Passwort per Einrichtungs-Link festlegen).
 
 | Bereich | Methoden |
 |---|---|
 | System | `system.info`, `system.setup_status`, `activity.list` |
 | Images | `image.status`, `image.build` (Fortschritt als `image.build`-Events) |
 | Verwaltung | `settings.get/update/reset`, `secrets.list/set/delete`, `tokens.list/create/revoke`, `providers.test`, `egress.denied` |
+| Konto, Benutzer | `auth.me/logout/change_password`; `users.list/create/update/reset_password/delete` (nur Admins) |
 | Sandbox | `sandbox.create/list/get/start/stop/delete/exec/diff/apply_patch` |
 | Dateien | `files.list/read/write/mkdir/delete` |
 | Git | `git.status/commit/push/create_pr` (GitHub, via `GITHUB_TOKEN`) |
@@ -117,6 +119,13 @@ Auth: `Authorization: Bearer <token>` oder `?token=` (für Browser-WebSockets/Do
 
 Admin-Methoden (Settings, Secrets, Tokens, Images) sind **nicht** als MCP-Tools verfügbar – ein steuernder Agent kann Sandboxes und
 Agenten bedienen, aber keine Keys auslesen oder Sicherheitseinstellungen ändern.
+
+**Rollen:** `rpc.ts` prüft bei jedem Aufruf (HTTP, WebSocket, MCP) zuerst, ob die Rolle des Aufrufers die Methode darf. Die Tabelle dazu steht
+in `src/auth/access.ts` und ist vollständig typisiert: eine neue Methode ohne Eintrag lässt sich nicht kompilieren. Mitglieder bekommen `secrets.list`
+und `settings.get` reduziert (ohne maskierte Werte und ohne Webhook-URL) und keine Events über Updates und Image-Builds.
+Was in eine Sandbox gelangt (GitHub-Token; ohne `COCOON_PROXY_EXTRA_SECRETS=1` auch Claude-Abo-Token und Gemini-Key), kann ein Mitglied dort per
+Terminal lesen. Sandboxes ohne Netzwerk bekommen keine Zugangsdaten. Secret-Env-Variablen kann ein Mitglied nur mit neuem Wert sichtbar machen
+oder umleiten (`EnvService.set`, Option `restricted`).
 
 ## 6. Netzwerk & Secrets
 
@@ -229,7 +238,7 @@ die UI blendet nicht verfügbare Optionen aus bzw. weist auf Einschränkungen hi
 
 **Werkzeugkiste:** Agent-CLIs (Claude Code, Codex, …) samt Node.js-Laufzeit werden einmal in ein Volume (`cocoon-agents`) bzw.
 `.data/agents` installiert und schreibgeschützt unter `/opt/agents` eingehängt – das Basis-Image (Debian slim, ohne Node.js) bleibt
-unter 250 MB (Variante `db` mit Datenbank-Clients, `full` zusätzlich mit Compilern/Python), Updates brauchen keinen Image-Neubau. **Agent-Secrets** gehen über eine private Env-Datei (0600), die der Agent-Start einliest und
+unter 260 MB (Variante `db` mit Datenbank-Clients, `full` zusätzlich mit Compilern/Python), Updates brauchen keinen Image-Neubau. **Agent-Secrets** gehen über eine private Env-Datei (0600), die der Agent-Start einliest und
 löscht – nie über Kommandozeilen.
 
 ## 7. Sicherheit
@@ -237,7 +246,13 @@ löscht – nie über Kommandozeilen.
 **Control Plane**
 - Bindet standardmäßig nur an `127.0.0.1`; von außen nur über TLS-Reverse-Proxy (`deploy/Caddyfile`) oder VPN (WireGuard/Tailscale).
 - Tokens: Beim ersten Start wird ein Admin-Token erzeugt (`.data/admin-token.txt`); weitere Tokens in der UI. Gespeichert werden nur
-  SHA-256-Hashes; Vergleich timing-safe. Optional zusätzlich `COCOON_TOKEN` aus der Umgebung.
+  SHA-256-Hashes; Vergleich timing-safe. Optional zusätzlich `COCOON_TOKEN` aus der Umgebung. Tokens sind immer Admins.
+- Benutzer (`src/auth/`): Anmeldung mit Benutzername und Passwort. Neue Benutzer bekommen einen Einrichtungs-Link (einmalig, 72 Stunden, Token im
+  URL-Fragment, nur der Hash wird gespeichert) und wählen ihr Passwort selbst. Passwörter: scrypt (N=2^17, r=8, p=1), timing-safe, mindestens 12 Zeichen,
+  höchstens zwei Hashes gleichzeitig. Falsche Versuche werden pro Konto (exponentielle Sperre bis 15 Minuten, auch für unbekannte Namen) und pro
+  Client-Adresse gedrosselt (`X-Forwarded-For` wird nur von Loopback geglaubt, sonst `COCOON_TRUST_PROXY`). Sitzungen sind 256-Bit-Tokens, serverseitig nur als SHA-256-Hash gespeichert, mit Leerlauf-
+  und Höchstdauer (8 Stunden / 7 Tage). Abmelden, Sperren, Rollenwechsel, Zurücksetzen und Löschen beenden Sitzungen sofort und schließen offene WebSockets
+  (Close-Code 4401). Das Token liegt im Browser im Local Storage, nicht in einem Cookie: kein CSRF, und Previews auf anderen Origins kommen nicht daran.
 - `.data/state.json` (Datei 0600, Verzeichnis 0700) enthält API-Secrets und Env-Werte nur verschlüsselt (AES-256-GCM, Schlüssel `.data/env.key`, AAD `secret:<name>`); ältere Klartext-Dateien werden beim Start umgeschrieben. `env.key` gehört in jedes Backup. Für höhere Ansprüche: Festplattenverschlüsselung / Secret-Manager.
 - cocoond braucht den Docker-Socket ⇒ root-äquivalent. Eigener System-User, Host nur für CoCoon nutzen.
 
@@ -264,6 +279,7 @@ packages/server     cocoond
   src/rpc.ts                Methode → Handler (+ Setup-Checkliste)
   src/mcp.ts                MCP-Server (Tools aus der Registry generiert)
   src/settings.ts · secrets.ts · tokens.ts · providers.ts · activity.ts · images.ts · egress.ts · store.ts
+  src/auth/                 Benutzer und Sitzungen, Passwort-Hashing, Anmelde-Drosselung, Zugriffsregeln (access.ts)
   src/i18n.ts               Server-Texte (de/en), Sprache pro Anfrage
   src/sandbox/driver.ts     SandboxDriver-Interface
   src/sandbox/docker.ts     Docker-Implementierung (Netzmodi, Runtimes, exec, TTY, Archive)
@@ -286,11 +302,11 @@ deploy/             systemd-Unit, Caddyfile
 
 Erledigt: Status-Hooks, Egress-Proxy mit Allowlist, Credential-Proxy, Dateien/Patches/Push/PR, Runtime-Auswahl (gVisor, Kata/Firecracker),
 Management-UI mit Browser-Terminal, MCP-Server, Settings/Secrets/Tokens in der UI, automatische Ersteinrichtung,
-Mehrsprachigkeit (de/en), eigene API-Anbieter.
+Mehrsprachigkeit (de/en), eigene API-Anbieter, Benutzer mit Passwort-Anmeldung und Rollen.
 
 Offen:
 1. **Remote-Driver** (Vercel Sandbox, E2B) als weitere `SandboxDriver`-Implementierung.
-2. **Multi-User**: Benutzer/Rollen, Token-Scopes, Quotas, Audit-Log; SQLite/Postgres statt JSON-Store.
+2. **Multi-User, Rest**: Benutzer und Rollen (Admin, Mitglied) gibt es; offen sind Zwei-Faktor/SSO, Besitz je Benutzer, Token-Scopes und Tokens je Benutzer, Quotas, Audit-Log; SQLite/Postgres statt JSON-Store.
 3. **Credential-Proxy für weitere Dienste** (GitHub, OAuth-Token) und kurzlebige Tokens.
 4. **Templates/Snapshots** für schnellen Sandbox-Start; persistente Volumes.
 5. **Benachrichtigungen** (E-Mail/Slack/Push), wenn ein Agent blockiert oder fertig ist.

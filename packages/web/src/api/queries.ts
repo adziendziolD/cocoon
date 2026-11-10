@@ -23,14 +23,19 @@ export const useImages = () =>
 export const useSandboxPorts = (sandboxId: string, enabled = true) =>
   useQuery({ queryKey: qk.ports(sandboxId), queryFn: () => rpc('ports.list', { sandboxId }), enabled });
 
-/** Update status; the server checks the remotes itself (daily), refresh via rpc('update.status', { refresh: true }). */
-export const useUpdateStatus = () =>
+/** Update status; the server checks the remotes itself (daily), refresh via rpc('update.status', { refresh: true }). Admins only. */
+export const useUpdateStatus = (enabled = true) =>
   useQuery({
     queryKey: qk.updates,
     queryFn: () => rpc('update.status', {}),
+    enabled,
     staleTime: 5 * 60_000,
     refetchInterval: (q) => (q.state.data?.running ? 10_000 : false),
   });
+
+/** Who is signed in: the role and, for a user, the account. */
+export const useMe = () => useQuery({ queryKey: qk.me, queryFn: () => rpc('auth.me'), staleTime: 5 * 60_000 });
+export const useUsers = () => useQuery({ queryKey: qk.users, queryFn: () => rpc('users.list') });
 
 export const useSettings = () => useQuery({ queryKey: qk.settings, queryFn: () => rpc('settings.get') });
 export const useSecrets = () => useQuery({ queryKey: qk.secrets, queryFn: () => rpc('secrets.list') });

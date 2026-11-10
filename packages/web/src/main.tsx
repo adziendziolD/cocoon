@@ -5,10 +5,11 @@ import { ApiError } from './api/rpc';
 import { App } from './App';
 import { ToastProvider } from './components/Toast';
 import { LanguageProvider } from './i18n';
-import { consumeTokenFromUrl, getToken, subscribeToken } from './lib/auth';
+import { consumeSetupFromUrl, consumeTokenFromUrl, getToken, subscribeToken } from './lib/auth';
 import './index.css';
 
 consumeTokenFromUrl();
+consumeSetupFromUrl();
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -16,7 +17,7 @@ const queryClient = new QueryClient({
       // Live updates arrive via WebSocket, so data stays fresh without aggressive refetching.
       staleTime: 10_000,
       refetchOnWindowFocus: true,
-      retry: (count, err) => !(err instanceof ApiError && ['unauthorized', 'not_found', 'bad_request'].includes(err.code)) && count < 2,
+      retry: (count, err) => !(err instanceof ApiError && ['unauthorized', 'forbidden', 'not_found', 'bad_request'].includes(err.code)) && count < 2,
     },
   },
 });

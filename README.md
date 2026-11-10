@@ -28,6 +28,7 @@ it too. The design is inspired by [herdr](https://vercel.com/docs/sandbox/ecosys
 - [Features](#features)
 - [Quickstart](#quickstart)
 - [Using the web UI](#using-the-web-ui)
+- [Users and roles](#users-and-roles)
 - [Core concepts](#core-concepts)
 - [Sandbox backends](#sandbox-backends)
 - [Network modes & security](#network-modes--security)
@@ -63,7 +64,7 @@ it too. The design is inspired by [herdr](https://vercel.com/docs/sandbox/ecosys
 | **Orchestration** | Workspaces, a task board (backlog → queued → running → review → done), multi-stage workflows (e.g. plan → build → review) with approvals, review feedback loop, dependencies, auto-run with parallelism limits, webhook notifications |
 | **Web UI** | Setup checklist, sandbox wizard, live in-browser terminals, file browser/editor, diff viewer, commit/push/pull request, activity log, every setting – written for non-technical users |
 | **Sandbox backends** | **Docker**, **Podman** (rootless, no daemon) or **bubblewrap** (lightweight Linux process sandboxes, no images, start in ~0.3 s) – picked automatically. Containers are hardened (non-root, no capabilities, `no-new-privileges`, CPU/RAM/PID limits) with optional gVisor or Kata/Firecracker runtimes |
-| **Small footprint** | Slim base image under 250 MB (Debian, no Node.js); agent CLIs and their Node.js runtime live in a shared, read-only **toolbox** that is installed once and updated without rebuilding images |
+| **Small footprint** | Slim base image under 260 MB (Debian, no Node.js); agent CLIs and their Node.js runtime live in a shared, read-only **toolbox** that is installed once and updated without rebuilding images |
 | **Network control** | Per sandbox: no internet, allowlisted domains only (via egress proxy, default), or open internet. Blocked connections are logged and can be allowed with one click |
 | **Credential proxy** | Anthropic and OpenAI keys (optionally also the Gemini key and the Claude subscription token) stay on the server – sandboxes only see placeholders, the proxy adds the real value on the way out. The GitHub token is not proxied (see below) |
 | **Many agents** | Claude Code, OpenAI Codex, OpenCode, Pi, Qwen Code, Gemini CLI and plain shells – switch the agent of a sandbox at any time, with handover of task, changes and last output |
@@ -76,6 +77,7 @@ it too. The design is inspired by [herdr](https://vercel.com/docs/sandbox/ecosys
 | **Results** | Changes leave the sandbox only as a git patch, a download, or a pushed branch + GitHub pull request |
 | **Integrations** | CLI, typed TypeScript client, REST/RPC, WebSocket events, MCP server |
 | **Languages** | UI, server messages and CLI in English and German (browser language, English fallback) |
+| **Users and roles** | Colleagues sign in with a username and password: you invite them with a one-time link and never see their password. Admins manage CoCoon, members work with sandboxes, agents and tasks. Passwords are hashed with scrypt, guessing is throttled, sessions live on the server and end at once when you lock a user |
 | **Zero-config start** | Admin token, internal network, egress proxy and sandbox image are set up automatically on first start |
 
 ## Quickstart
@@ -120,6 +122,9 @@ again anytime from *Settings → General* or the dashboard checklist.
 Remote access: cocoond only listens on localhost. Use an SSH tunnel (`ssh -L 7420:127.0.0.1:7420 user@server`), a VPN, or a
 TLS reverse proxy (see [Deployment](#deployment)).
 
+More people: the admin token is for you. Colleagues get their own accounts under *Settings → Users*
+(see [Users and roles](#users-and-roles)).
+
 Step-by-step guides for beginners: [English](docs/GUIDE.md) · [Deutsch](docs/ANLEITUNG.md).
 Architecture and design details (German): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -134,9 +139,70 @@ Architecture and design details (German): [docs/ARCHITECTURE.md](docs/ARCHITECTU
 | **Agent detail** | Live terminal (type directly), status with plain-language explanation, "waiting for your decision" banner with Yes/No buttons, send messages, quick keys (Enter, Esc, Ctrl+C, arrows, Tab), stop |
 | **Agents** | All agents across sandboxes, blocked ones first |
 | **Activity** | Live log of everything that happened |
-| **Settings** | *General* (language), *Credentials / API keys*, *API providers*, *Agent types*, *Sandbox defaults* (incl. image builds), *Network & security* (allowlist, credential proxy, blocked connections), *Access & integrations* (API tokens, MCP and CLI snippets), *Advanced* (status timings, git author) |
+| **Settings** | *General* (language), *Credentials / API keys*, *API providers*, *Agent types*, *Sandbox defaults* (incl. image builds), *Network & security* (allowlist, credential proxy, blocked connections), *Users* (accounts, roles, setup links), *Access & integrations* (API tokens, MCP and CLI snippets), *Advanced* (status timings, git author), *My account* (password, sign out; every user sees only this page) |
 
 Everything updates live over a WebSocket. The sidebar and browser tab show how many agents are waiting for you.
+
+## Users and roles
+
+The admin token printed at the first start keeps working and always has full access. Everybody else gets an account under
+*Settings → Users* (or with `pnpm cocoon users add`) and signs in with a username and password.
+
+**Inviting someone**
+
+1. *Settings → Users → New user*: username, optional display name and a role.
+2. CoCoon shows a one-time setup link (`https://…/#setup=…`). It works once and for 72 hours. Send it to the person over a
+   channel you trust. Only a hash of it is stored, and you cannot show it again; *New link* creates another one.
+3. The person opens the link, chooses a password (at least 12 characters) and is signed in. You never see or set the password.
+
+*New link* also resets a forgotten password: the old password and every session of that user end at once. Locking, changing the
+role, resetting and deleting a user also end their sessions at once, including open terminals and event streams. Nobody can lock,
+demote, reset or delete their own account, so an admin cannot lock themselves out. Users change their own password under *My account*.
+
+**Roles**
+
+| | Admin | Member |
+|---|---|---|
+| Sandboxes, agents, terminals, files, git, tasks, schedules, workspaces, previews, environment variables | yes | yes |
+| Use the stored credentials through sandboxes | yes | yes. They cannot read or change them through the API. Model API keys stay out of sandboxes behind the credential proxy; what does reach a sandbox, notably the GitHub token, can be read from a terminal there |
+| Credentials, API providers, settings, network allowlist, notifications, shared services (add, change, credentials) | yes | no |
+| API tokens, users, updates, restart, image builds | yes | no |
+
+Everyone sees the same sandboxes, agents, tasks and activity: accounts separate who may *configure* CoCoon, not whose work is whose.
+Treat members like colleagues you trust with a shell on the sandboxes: they can run any code there, choose the network
+mode, and see what other users did. The image and the runtime (gVisor, Kata) of a sandbox are an admin's choice: members get the
+defaults from the settings and the server refuses both from them. Whatever reaches a sandbox can be read from a terminal in it: the GitHub token (it cannot go
+through the credential proxy) and, unless `COCOON_PROXY_EXTRA_SECRETS=1`, the Claude subscription token and the Gemini key. Sandboxes
+without a network get no credentials at all. Which GitHub token a sandbox or workspace uses is an admin's choice: members stay with
+the default `GITHUB_TOKEN` (or the token an admin set on the workspace) and the server refuses any other name from them. Give CoCoon
+GitHub tokens with minimal scope and rotate them when a member leaves.
+Secret environment variables stay write-only: a member can replace a value, but cannot make it visible or change its proxy host
+without entering it again. Which method a role may call is one table in
+[`packages/server/src/auth/access.ts`](packages/server/src/auth/access.ts); a method without an entry does not compile.
+API and admin tokens are always admins.
+
+**How sign-in is protected**
+
+- **Passwords** are hashed with scrypt (N = 2^17, r = 8, p = 1, own salt per user) and compared in constant time. The minimum is 12
+  characters, there are no composition rules, and a short list of the worst passwords, repetitions and keyboard runs is refused. Hashes
+  made with weaker parameters are renewed at the next sign-in. At most two hashes run at once, so a flood of attempts cannot use up the memory.
+- **Guessing is slowed down.** Five wrong passwords lock an account for 30 seconds, doubling up to 15 minutes. Names that do not
+  exist are locked the same way, and a wrong name, a wrong password, a locked account and a pending invitation get the same
+  answer and cost the same time, so nobody can find out which accounts exist. One client address gets 20 wrong attempts per
+  10 minutes (an IPv6 network counts as one client). `X-Forwarded-For` is believed only from a reverse proxy on the same
+  machine (the Caddy setup in `deploy/`), so nobody can forge it; a proxy elsewhere or in a container needs `COCOON_TRUST_PROXY`
+  set to its address. The lock is per account name: whoever knows a name can lock that account for a while, but the admin token always signs in.
+- **Sessions** are random 256-bit tokens that the server keeps only as a SHA-256 hash, so a copy of `state.json` signs nobody in.
+  They end after 8 hours without activity or after 7 days in any case (`COCOON_SESSION_IDLE_MINUTES`, `COCOON_SESSION_MAX_HOURS`).
+  The browser sends the session like an API token (`Authorization: Bearer`) and keeps it in its local storage, not in a cookie,
+  so a foreign website cannot make requests in your name. A user has at most ten sessions.
+- **The setup link** carries its token in the URL fragment, which reaches neither server logs nor `Referer` headers, and the page
+  removes it from the address bar at once.
+- Sign-in and password setup are the only requests that need no token; their bodies are limited to 4 KB. Failed sign-ins are logged
+  without the typed name, which is often a password in the wrong field.
+- Passwords and sessions cross the network, so expose CoCoon only through HTTPS (see [Deployment](#deployment)), a VPN or an SSH tunnel.
+
+Not included yet: two-factor authentication, single sign-on, per-user ownership and quotas, API tokens that belong to a user.
 
 ## Core concepts
 
@@ -188,12 +254,12 @@ automatically on the next start.
 
 | Variant | Contents | Size |
 | --- | --- | --- |
-| `slim` *(default)* | bash, git, tmux, ripgrep, curl, jq, less, procps, CA certificates | < 250 MB (checked in CI) |
+| `slim` *(default)* | bash, git, tmux, ripgrep, curl, jq, less, procps, CA certificates | < 260 MB (checked in CI) |
 | `db` | `slim` + database clients: `psql`, `mysql`/MariaDB, `redis-cli` – handy with [shared services](#shared-services-databases--mocks) | + ~100 MB |
 | `full` | `db` + compilers (`build-essential`) and Python 3 for projects that build native code | + ~400 MB |
 
 Debian rather than Alpine on purpose: the agent CLIs ship glibc binaries (Claude Code, Codex, OpenCode) and most projects' prebuilt
-native modules assume glibc too. CI builds every variant, checks its contents and fails if `slim` reaches 250 MB; multi-arch
+native modules assume glibc too. CI builds every variant, checks its contents and fails if `slim` reaches 260 MB; multi-arch
 (amd64/arm64) builds are published as `ghcr.io/<owner>/cocoon-sandbox:{slim,db,full}` (`.github/workflows/images.yml`).
 
 **Agent secrets** are written to a private file (mode 0600) that the agent's session sources and deletes immediately, so API keys
@@ -237,6 +303,7 @@ never appear in a command line (`ps`/`docker top`).
 available ones): `runsc` = gVisor user-space kernel, `kata-fc` = Kata Containers with Firecracker microVMs.
 
 **Control plane:** binds to `127.0.0.1` by default. API tokens are stored as SHA-256 hashes and compared in constant time.
+Users sign in with passwords and get server-side sessions, see [Users and roles](#users-and-roles).
 Admin methods (settings, secrets, tokens, images) are not exposed via MCP. Git credentials are passed per command as `GIT_CONFIG_*`
 variables and never written into the sandbox. Note: with Docker, cocoond needs the Docker socket, which is root-equivalent – run
 it as a dedicated user on a dedicated host, or prefer rootless Podman / bubblewrap, which need no root at all.
@@ -795,6 +862,8 @@ pnpm cocoon restart
 
 # admin
 pnpm cocoon tokens create ci | ls | revoke <id>
+pnpm cocoon users add anna --name "Anna" [--role admin]   # prints a one-time setup link: Anna chooses her own password
+pnpm cocoon users ls | reset <id> | role <id> admin|member | disable <id> | enable <id> | rm <id>
 pnpm cocoon settings
 pnpm cocoon events [--sandbox <id>] [--agent <id>]  # live event stream
 pnpm cocoon rpc <method> '<json params>'            # call any API method
@@ -829,15 +898,22 @@ WS   /v1/ws                          { id, method, params } → { id, result } |
 WS   /v1/agents/:id/attach?cols&rows binary frames = terminal bytes; text {"type":"resize","cols","rows"}
 GET  /v1/sandboxes/:id/archive?path= tar download of a file or folder
 POST /mcp                            MCP endpoint
+POST /v1/auth/login                  { username, password } → { result: { token, expiresAt, identity } }   (no token needed)
+POST /v1/auth/setup-info | setup     choosing a password with a setup link                                  (no token needed)
 GET  /healthz                        health check (no auth)
 ```
+
+The session token from `/v1/auth/login` is used like an API token. Errors carry a `code`: `unauthorized` (401), `forbidden` (403, the
+role may not call the method), `rate_limited` (429, with a `Retry-After` header) and the usual `bad_request`, `not_found`, `conflict`.
 
 | Area | Methods |
 |---|---|
 | System | `system.info`, `system.setup_status`, `activity.list` |
 | Images | `image.status`, `image.build` |
-| Environment | `env.get/set/unset/import/resolve/apply` (admin only, not in MCP) |
-| Admin | `settings.get/update/reset`, `secrets.list/set/delete`, `tokens.list/create/revoke`, `providers.test`, `notifications.test`, `egress.denied` |
+| Environment | `env.get/set/unset/import/resolve/apply` (not in MCP) |
+| Admin | `settings.get/update/reset`, `secrets.list/set/delete`, `tokens.list/create/revoke`, `providers.test`, `notifications.test`, `egress.denied` (admins only, except `settings.get` and `secrets.list`, which members get without webhook URL, without masked values, without the values of agent environment variables and without credentials inside provider URLs) |
+| Account | `auth.me`, `auth.logout`, `auth.change_password` |
+| Users | `users.list/create/update/reset_password/delete` (admins only) |
 | Workspaces | `workspace.list/get/create/update/delete` |
 | Tasks | `task.list/get/create/update/delete/start/approve/reject/stop` |
 | Scheduled agents | `schedule.list/get/create/update/delete/run/preview` |
@@ -869,6 +945,9 @@ Everything is configurable in the UI. Environment variables (all optional, see [
 | `COCOON_PUBLIC_URL` | – | Public URL used in the printed login link |
 | `COCOON_DATA_DIR` | `<repo>/.data` | State, secrets, admin token, egress policy |
 | `COCOON_TOKEN` | – | Additional fixed API token (≥ 16 chars); otherwise an admin token is generated |
+| `COCOON_SESSION_IDLE_MINUTES` | `480` | Minutes without activity until a user's session ends |
+| `COCOON_SESSION_MAX_HOURS` | `168` | Hours until a user's session ends, however active it is |
+| `COCOON_TRUST_PROXY` | loopback | Number of reverse proxies in front of CoCoon, or their addresses: only then is `X-Forwarded-For` believed, which the sign-in throttle needs to tell clients apart. The default trusts a proxy on the same machine; `0` trusts nobody |
 | `COCOON_CONFIG` | – | JSON with initial settings for the very first start ([example](cocoon.config.example.json)) |
 | `COCOON_DRIVER` | `auto` | Sandbox backend: `auto`, `docker`, `podman`, `bwrap` |
 | `COCOON_INSTANCE` | – | Name suffix for this server's Docker resources (network, proxy, services, toolbox) – lets several servers share one Docker host |
@@ -917,6 +996,7 @@ packages/server       cocoond
   src/schedules.ts        scheduled agents (cron engine: due runs → tasks, overlap, catch-up, pruning)
   src/workspaces.ts · notifications.ts
   src/settings.ts · secrets.ts · tokens.ts · providers.ts · activity.ts · images.ts · egress.ts · store.ts
+  src/auth/               users and sessions, password hashing, sign-in throttle, access rules (who may call which method)
   src/sandbox/            driver interface + drivers (docker.ts: Docker/Podman, bwrap.ts: bubblewrap, select.ts: auto-selection),
                           lifecycle/bootstrap, files & git, tar helper
   src/agents/             agent manager, status detection, hooks, tmux helpers
@@ -968,8 +1048,8 @@ integration tests on every push and pull request.
   there. bubblewrap was tested end to end on Fedora (sandboxes, agents, terminals, egress proxy, toolbox, restart survival).
 - Planned: a Firecracker driver for maximum isolation (own kernel per sandbox) and enforced egress for bubblewrap (e.g. via pasta).
 - Each cockpit terminal is a separate attach connection; a shared output stream per agent for many viewers is planned.
-- Planned: desktop app (Tauri) for the cockpit with native notifications, remote drivers (Vercel Sandbox, E2B), multi-user with
-  roles and quotas, SQLite/Postgres instead of the JSON store, sandbox templates/snapshots, conditional workflow branches.
+- Planned: desktop app (Tauri) for the cockpit with native notifications, remote drivers (Vercel Sandbox, E2B), per-user ownership
+  and quotas, two-factor authentication and single sign-on, SQLite/Postgres instead of the JSON store, sandbox templates/snapshots, conditional workflow branches.
 
 ## Support
 

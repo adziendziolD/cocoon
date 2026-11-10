@@ -2,6 +2,9 @@ import { z } from 'zod';
 import { isMethodName, methods, type MethodName, type MethodResult, type Methods, type SetupStep } from '@cocoon/protocol';
 import type { ActivityLog } from './activity.ts';
 import type { AgentManager } from './agents/manager.ts';
+import { mayCall, mayUseParams, redactResult } from './auth/access.ts';
+import type { Principal } from './auth/principal.ts';
+import type { AuthService } from './auth/users.ts';
 import type { EnvService } from './env.ts';
 import type { EgressManager } from './egress.ts';
 import { CocoonError } from './errors.ts';
@@ -26,8 +29,8 @@ import { currentLanguage, t } from './i18n.ts';
 import { STARTED_AT, VERSION } from './version.ts';
 
 type Handlers = {
-  /** `signal` aborts when the caller disconnected (long waits can stop then). */
-  [M in MethodName]: (params: z.output<Methods[M]['params']>, signal?: AbortSignal) => Promise<MethodResult<M>>;
+  /** `signal` aborts when the caller disconnected (long waits can stop then). `caller` is who asked; the access check has passed. */
+  [M in MethodName]: (params: z.output<Methods[M]['params']>, signal: AbortSignal | undefined, caller: Principal) => Promise<MethodResult<M>>;
 };
 
 export interface RpcContext {
@@ -37,6 +40,7 @@ export interface RpcContext {
   secrets: SecretsService;
   providers: ProviderService;
   tokens: TokenService;
+  auth: AuthService;
   images: ImageService;
   egress: EgressManager;
   activity: ActivityLog;
@@ -57,7 +61,7 @@ export interface RpcContext {
 const CREDENTIAL_SECRETS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'OPENAI_API_KEY', 'GEMINI_API_KEY'];
 
 export function createRpc(ctx: RpcContext) {
-  const { driver, store, settings, secrets, providers, tokens, images, egress, activity, sandboxes, workspace, agents, workspaces, tasks, notifier, services, updates, ports, envs, issues, schedules } = ctx;
+  const { driver, store, settings, secrets, providers, tokens, auth, images, egress, activity, sandboxes, workspace, agents, workspaces, tasks, notifier, services, updates, ports, envs, issues, schedules } = ctx;
   const ok = { ok: true as const };
 
   const handlers: Handlers = {
@@ -156,6 +160,14 @@ export function createRpc(ctx: RpcContext) {
       return created;
     },
     'tokens.revoke': async (p) => (tokens.revoke(p.id), ok),
+    'auth.me': async (_p, _signal, caller) => auth.identity(caller),
+    'auth.logout': async (p, _signal, caller) => (auth.logout(caller, p.everywhere), ok),
+    'auth.change_password': async (p, _signal, caller) => (await auth.changePassword(caller, p.currentPassword, p.newPassword), ok),
+    'users.list': async () => auth.listUsers(),
+    'users.create': async (p) => auth.createUser(p),
+    'users.update': async (p, _signal, caller) => auth.updateUser(caller, p),
+    'users.reset_password': async (p, _signal, caller) => auth.resetPassword(caller, p.userId),
+    'users.delete': async (p, _signal, caller) => (auth.deleteUser(caller, p.userId), ok),
     'providers.test': (p) => ('id' in p ? providers.testAndRemember(p.id) : providers.testDraft(p.provider)),
     'models.list': async (p) => providers.defaultModels(p.adapter),
     'egress.denied': async () => egress.denied(),
@@ -249,9 +261,10 @@ export function createRpc(ctx: RpcContext) {
     'services.reset': (p) => services.reset(p.sandboxId, p.serviceId),
 
     'env.get': async (p) => envs.get(p),
-    'env.set': async (p) => envs.set(p, p.vars, p.filePath),
+    // Members may write values but not read them back or redirect them (see EnvService.set).
+    'env.set': async (p, _signal, caller) => envs.set(p, p.vars, p.filePath, { restricted: caller.role !== 'admin' }),
     'env.unset': async (p) => envs.unset(p, p.names),
-    'env.import': async (p) => envs.import(p),
+    'env.import': async (p, _signal, caller) => envs.import(p, { restricted: caller.role !== 'admin' }),
     'env.resolve': async (p) => envs.resolve(p.sandboxId, p.agentKind),
     'env.apply': async (p) => ({ files: await envs.applyFiles(p.sandboxId) }),
 
@@ -259,13 +272,17 @@ export function createRpc(ctx: RpcContext) {
     'layout.save': async (p) => (store.putLayout(p.workspaceId ?? '_global', { ...p.layout, updatedAt: new Date().toISOString() }), ok),
   };
 
-  return async function call(method: string, rawParams: unknown, signal?: AbortSignal): Promise<unknown> {
+  /** Every way in (HTTP, WebSocket, MCP) ends here, with the caller, so the access check cannot be skipped. */
+  return async function call(caller: Principal, method: string, rawParams: unknown, signal?: AbortSignal): Promise<unknown> {
     if (!isMethodName(method)) throw new CocoonError('not_found', t('error.unknownMethod', { method }));
+    // Before the parameters are looked at: a caller without permission learns nothing about the method.
+    if (!mayCall(caller.role, method)) throw new CocoonError('forbidden', t('error.forbidden'));
     const schema: z.ZodType = methods[method].params;
     const parsed = schema.safeParse(rawParams ?? {});
     if (!parsed.success) throw new CocoonError('bad_request', t('error.invalidParams', { details: z.prettifyError(parsed.error) }), z.treeifyError(parsed.error));
-    const handler = handlers[method] as (params: unknown, signal?: AbortSignal) => Promise<unknown>;
-    return handler(parsed.data, signal);
+    if (!mayUseParams(caller.role, method, parsed.data)) throw new CocoonError('forbidden', t('error.forbiddenToken'));
+    const handler = handlers[method] as (params: unknown, signal: AbortSignal | undefined, caller: Principal) => Promise<unknown>;
+    return redactResult(method, await handler(parsed.data, signal, caller), caller);
   };
 }
 

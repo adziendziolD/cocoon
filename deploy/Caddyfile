@@ -1,4 +1,7 @@
 # TLS-terminating reverse proxy in front of cocoond (which only listens on 127.0.0.1).
+# Caddy runs on the same machine and sends X-Forwarded-For; cocoond believes that header from loopback by default, and the
+# sign-in throttle needs it to tell clients apart. If the proxy runs elsewhere (another host, a container), set
+# COCOON_TRUST_PROXY to its address in /etc/cocoon/cocoond.env.
 cocoon.example.com {
   reverse_proxy 127.0.0.1:7420
 }

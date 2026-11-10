@@ -8,6 +8,7 @@ import { serviceLabel, serviceStatusMeta } from '../lib/services';
 import { rpc } from '../api/rpc';
 import { useAction } from '../api/useAction';
 import { useT, type MessageKey } from '../i18n';
+import { useIdentity } from '../lib/identity';
 import { cn } from '../lib/cn';
 import { runtimeInfo, SIZE_PRESETS, sizePresetLabel, type SizePresetId } from '../lib/runtimes';
 import { nameFromRepo, presetFor, SANDBOX_NAME_RE } from '../lib/sandboxForm';
@@ -104,6 +105,8 @@ export function CreateSandboxWizard({ open, onClose, defaultWorkspaceId }: { ope
   const maxReached = settings.data && sandboxes.data && sandboxes.data.length >= settings.data.sandbox.maxSandboxes;
   const runtimes = info.data?.runtimes ?? [];
   const capabilities = info.data?.capabilities;
+  // Image and runtime are the admins' choice (the server refuses them from members).
+  const { isAdmin } = useIdentity();
   const preset = SIZE_PRESETS.find((p) => p.id === form.size)!;
   const defaultRuntime = settings.data?.sandbox.runtime ?? null;
 
@@ -122,8 +125,8 @@ export function CreateSandboxWizard({ open, onClose, defaultWorkspaceId }: { ope
       ...(repos.length === 1 ? { repo: repos[0] } : repos.length > 1 ? { repos } : {}),
       network: form.network,
       resources: { cpus: preset.cpus, memoryMb: preset.memoryMb },
-      image: capabilities?.images === false ? undefined : form.image.trim() || undefined,
-      runtime: capabilities?.runtimes === false || form.runtime === '' ? undefined : form.runtime === '__default' ? null : form.runtime,
+      image: !isAdmin || capabilities?.images === false ? undefined : form.image.trim() || undefined,
+      runtime: !isAdmin || capabilities?.runtimes === false || form.runtime === '' ? undefined : form.runtime === '__default' ? null : form.runtime,
       env: Object.keys(env).length ? env : undefined,
       workspaceId: form.workspaceId || undefined,
       services: allServices.length ? chosenServices.map((x) => x.id) : undefined,
@@ -288,12 +291,12 @@ export function CreateSandboxWizard({ open, onClose, defaultWorkspaceId }: { ope
             </button>
             {advanced && (
               <div className="space-y-4 border-t border-line px-4 py-4">
-                {capabilities?.images !== false && (
+                {isAdmin && capabilities?.images !== false && (
                   <Field label={t('wizard.imageLabel')} optional hint={t('wizard.imageHint', { image: settings.data?.sandbox.image ?? 'cocoon/sandbox:latest' })}>
                     <Input value={form.image} onChange={(e) => set('image', e.target.value)} placeholder={settings.data?.sandbox.image} />
                   </Field>
                 )}
-                {capabilities?.runtimes !== false && (
+                {isAdmin && capabilities?.runtimes !== false && (
                   <Field label={t('wizard.runtimeLabel')} hint={runtimeInfo(t, form.runtime === '' ? defaultRuntime : form.runtime === '__default' ? null : form.runtime).description}>
                     <Select value={form.runtime} onChange={(e) => set('runtime', e.target.value)}>
                       <option value="">{t('wizard.runtimeServerDefault', { runtime: runtimeInfo(t, defaultRuntime).label })}</option>
