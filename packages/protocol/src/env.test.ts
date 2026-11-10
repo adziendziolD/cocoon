@@ -9,7 +9,7 @@ describe('parseDotenv', () => {
   });
 
   it('trims whitespace after the equals sign', () => {
-    expect(parseDotenv('A =   b').vars.A).toBe('b');
+    expect(parseDotenv('A =   b').vars).toEqual([{ name: 'A', value: 'b' }]);
   });
 
   it('parses plain, exported, quoted and commented values', () => {
