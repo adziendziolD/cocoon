@@ -106,6 +106,7 @@ export class TaskService {
       runs: [],
       attention: false,
       reviews: [],
+      fixRounds: 0,
       pullRequests: [],
       issue: origin.issue,
       scheduleId: origin.scheduleId,
@@ -141,6 +142,8 @@ export class TaskService {
       if (status === 'backlog' || status === 'queued') {
         // Moving back means starting over with the first stage next time.
         task.stage = 0;
+        task.fixRounds = 0;
+        task.autoReview = undefined;
         clearNote(task);
       }
       if (patch.order === undefined) task.order = this.nextOrder(task.workspaceId, status);
@@ -173,6 +176,8 @@ export class TaskService {
     const open = task.dependsOn.map((id) => this.store.task(id)).filter((dep): dep is Task => !!dep && dep.status !== 'done');
     if (open.length) throw new CocoonError('conflict', t('error.taskDependencies', { titles: open.map((d) => `„${d.title}“`).join(', ') }));
     if (task.status === 'done' || task.status === 'failed') task.stage = 0;
+    task.fixRounds = 0;
+    task.autoReview = undefined;
     // A task in review or failed may still have a live agent: do not leave it running next to the new one.
     this.stopAgent(task);
     this.launch(task);
@@ -191,6 +196,8 @@ export class TaskService {
       // Code review first; pushing and the pull request follow when all review agents approve.
       task.reviewStep = 0;
       task.reviews = [];
+      task.fixRounds = 0;
+      task.autoReview = undefined;
       this.launchReview(task);
     } else {
       // Fails (task stays in review) if the work cannot be pushed, e.g. without a GitHub token.
@@ -349,9 +356,22 @@ export class TaskService {
       const stages = this.stagesOrFail(task);
       if (!stages) return;
       task.stage = stages.length - 1;
+      const rounds = task.fixRounds ?? 0;
+      const maxRounds = review?.maxFixRounds ?? 0;
+      if (result.verdict === 'changes_requested' && rounds < maxRounds) {
+        // Review-fix loop: a fresh working agent gets the findings, then the review starts again (see finishStage).
+        // A missing verdict does not loop: nothing is known about what to fix.
+        task.fixRounds = rounds + 1;
+        task.autoReview = true;
+        this.stopTaskAgents(task);
+        this.launch(task, fixFeedback(result));
+        return;
+      }
       task.status = 'review';
       task.attention = false;
-      setNote(task, result.verdict === 'missing' ? 'note.reviewNoResult' : 'note.reviewChanges', { summary: result.summary ?? '' });
+      const exhausted = result.verdict === 'changes_requested' && maxRounds > 0;
+      const noteKey = result.verdict === 'missing' ? 'note.reviewNoResult' : exhausted ? 'note.reviewFixExhausted' : 'note.reviewChanges';
+      setNote(task, noteKey, { summary: result.summary ?? '', rounds });
       task.order = this.nextOrder(task.workspaceId, 'review');
       this.save(task);
       this.notifier.notify('task.review', 'notify.taskReview', { title: task.title }, `/tasks?task=${task.id}`);
@@ -436,6 +456,8 @@ export class TaskService {
     if (task.status !== 'review' && task.status !== 'running') {
       throw new CocoonError('conflict', t('error.taskNotInReview', { title: task.title }));
     }
+    // Your feedback replaces the automatic loop: the task waits for you again when the agent is done.
+    task.autoReview = undefined;
     if (task.reviewStep !== undefined) {
       // Feedback during the code review goes to the working agent, not the reviewer.
       if (task.status === 'running') this.stopAgent(task);
@@ -475,6 +497,7 @@ export class TaskService {
     task.status = 'review';
     task.attention = false;
     task.reviewStep = undefined;
+    task.autoReview = undefined;
     setNote(task, 'note.markedFinished');
     task.order = this.nextOrder(task.workspaceId, 'review');
     this.save(task);
@@ -488,6 +511,8 @@ export class TaskService {
     task.reviewStep = undefined;
     task.status = 'backlog';
     task.stage = 0;
+    task.fixRounds = 0;
+    task.autoReview = undefined;
     task.attention = false;
     clearNote(task);
     task.order = this.nextOrder(task.workspaceId, 'backlog');
@@ -612,6 +637,15 @@ export class TaskService {
       task.stage += 1;
       this.launch(task);
       return;
+    }
+    if (last && task.autoReview) {
+      // Review-fix loop: the working agent fixed the findings, so the review runs again without waiting for you.
+      task.autoReview = undefined;
+      if (this.reviewConfig(task)) {
+        task.reviewStep = 0;
+        task.reviews = [];
+        return this.launchReview(task);
+      }
     }
     if (task.scheduleId && last) return this.background(this.finishScheduledRun(task), `finishing scheduled task ${task.id}`);
     task.status = 'review';
@@ -1014,9 +1048,19 @@ function clearNote(task: Task): void {
 export function localizeTask(task: Task, lang: Language): Task {
   const note = task.noteKey && isMessageKey(task.noteKey) ? t(task.noteKey, task.noteParams, lang) : task.note;
   // Tasks saved before reviews/pull requests existed have no such fields.
-  return { ...task, runs: [...task.runs], reviews: task.reviews ?? [], pullRequests: task.pullRequests ?? [], note };
+  return { ...task, runs: [...task.runs], reviews: task.reviews ?? [], fixRounds: task.fixRounds ?? 0, pullRequests: task.pullRequests ?? [], note };
 }
 
+
+/** What the working agent gets when the review-fix loop sends the review findings back to it. */
+function fixFeedback(result: ReviewResult): string {
+  return [
+    `The code review (${result.agentKind}) requested changes:`,
+    result.summary?.trim() || '(no details given – check the changes with `git diff cocoon-baseline`)',
+    '',
+    'Fix these findings and commit your changes. When you are done, the review runs again automatically.',
+  ].join('\n');
+}
 
 /** What a review agent has to do at the end: the verdict file, and pushing + the pull request when it may. */
 function reviewResultInstructions(file: string, publish: boolean, task: Task, baseBranch: string | undefined): string {

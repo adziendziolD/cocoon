@@ -34,6 +34,8 @@ function engine() {
   // Tests can hold back spawning an agent and reading a result file to provoke the races of slow starts.
   let spawnGate: Promise<void> = Promise.resolve();
   let shGate: Promise<void> = Promise.resolve();
+  // What shell commands in the sandbox print: the verdict file of a review agent in the review tests.
+  let shOutput = '';
   const hold = (which: 'spawn' | 'sh') => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
@@ -51,10 +53,10 @@ function engine() {
     delete: async (id: string) => store.deleteSandbox(id),
     sh: async () => {
       await shGate;
-      return '';
+      return shOutput;
     },
   } as unknown as SandboxManager;
-  const files = { checkoutBranch: async () => undefined, diff: async () => ({ files: [] }) } as unknown as FilesService;
+  const files = { checkoutBranch: async () => undefined, diff: async () => ({ files: [] }), publish: async () => ({ pushed: [] }) } as unknown as FilesService;
   const agents = {
     spawn: async (p: { sandboxId: string; kind: string }) => {
       await spawnGate;
@@ -66,6 +68,7 @@ function engine() {
       killed.push(id);
     },
     read: async () => '',
+    sendInput: async () => undefined,
   } as unknown as AgentManager;
   const notifier = { notify: () => undefined } as unknown as Notifier;
   const tasks = new TaskService(store, bus, settings, workspaces, sandboxes, files, agents, notifier, () => undefined);
@@ -75,7 +78,10 @@ function engine() {
     bus.publish({ type: 'agent.updated', agent });
   };
   const status = (taskId: string) => store.task(taskId)?.status;
-  return { store, tasks, settings, workspaces, ws, report, status, killed, hold };
+  const verdict = (value: 'approved' | 'changes_requested' | 'missing', summary = 'Add a test for the empty case') => {
+    shOutput = value === 'missing' ? '' : JSON.stringify({ verdict: value, summary });
+  };
+  return { store, tasks, settings, workspaces, ws, report, status, killed, hold, verdict };
 }
 
 /** Starts a task and waits until its agent is spawned. */
@@ -330,5 +336,93 @@ describe('TaskService: dependencies', () => {
     expect(e.store.task(a.id)?.dependsOn).toEqual([]);
     // Other shapes stay allowed: diamonds and chains.
     expect(() => e.tasks.update({ taskId: c.id, dependsOn: [a.id, b.id] })).not.toThrow();
+  });
+});
+
+describe('TaskService: review-fix loop', () => {
+  /** A task whose working agent is done and approved, so that the (single) review agent is running. */
+  async function reviewing(e: ReturnType<typeof engine>, maxFixRounds: number) {
+    e.workspaces.update({ workspaceId: e.ws.id, review: { enabled: true, agentKinds: ['shell'], agentPushes: false, maxFixRounds } });
+    const task = await running(e);
+    e.report(task.agentId!, 'done');
+    await e.tasks.approve(task.id);
+    await vi.waitFor(() => expect(e.store.task(task.id)?.runs).toHaveLength(2));
+    return task.id;
+  }
+  /** The agent of the task's latest run reports "done" and the task follows. */
+  const finishLatest = (e: ReturnType<typeof engine>, taskId: string) => e.report(e.store.task(taskId)!.agentId!, 'done');
+
+  it('sends the findings to a new working agent, reviews again and finishes when the review approves', async () => {
+    const e = engine();
+    const id = await reviewing(e, 2);
+    const reviewer = e.store.task(id)!.agentId!;
+
+    e.verdict('changes_requested');
+    finishLatest(e, id);
+    await vi.waitFor(() => expect(e.store.task(id)?.runs).toHaveLength(3));
+    let task = e.store.task(id)!;
+    expect(task).toMatchObject({ status: 'running', fixRounds: 1, autoReview: true, reviewStep: undefined });
+    expect(task.agentId).not.toBe(reviewer);
+    expect(e.killed).toContain(reviewer);
+
+    // The fixing agent is done: the review starts again without anybody approving.
+    e.verdict('approved');
+    finishLatest(e, id);
+    await vi.waitFor(() => expect(e.store.task(id)?.runs).toHaveLength(4));
+    task = e.store.task(id)!;
+    expect(task).toMatchObject({ status: 'running', reviewStep: 0, autoReview: undefined, reviews: [] });
+
+    finishLatest(e, id);
+    await vi.waitFor(() => expect(e.status(id)).toBe('done'));
+  });
+
+  it('stops after the maximum number of rounds and hands the task to you', async () => {
+    const e = engine();
+    const id = await reviewing(e, 1);
+
+    e.verdict('changes_requested', 'First finding');
+    finishLatest(e, id);
+    await vi.waitFor(() => expect(e.store.task(id)?.runs).toHaveLength(3));
+    finishLatest(e, id);
+    await vi.waitFor(() => expect(e.store.task(id)?.runs).toHaveLength(4));
+
+    e.verdict('changes_requested', 'Second finding');
+    finishLatest(e, id);
+    await vi.waitFor(() => expect(e.status(id)).toBe('review'));
+    expect(e.store.task(id)).toMatchObject({ fixRounds: 1, noteKey: 'note.reviewFixExhausted', autoReview: undefined });
+    expect(e.store.task(id)?.runs).toHaveLength(4);
+  });
+
+  it('does not loop when the maximum is 0 (default) or when the review left no verdict', async () => {
+    const off = engine();
+    const offId = await reviewing(off, 0);
+    off.verdict('changes_requested');
+    finishLatest(off, offId);
+    await vi.waitFor(() => expect(off.status(offId)).toBe('review'));
+    expect(off.store.task(offId)).toMatchObject({ fixRounds: 0, noteKey: 'note.reviewChanges' });
+
+    const missing = engine();
+    const missingId = await reviewing(missing, 3);
+    missing.verdict('missing');
+    finishLatest(missing, missingId);
+    await vi.waitFor(() => expect(missing.status(missingId)).toBe('review'));
+    expect(missing.store.task(missingId)).toMatchObject({ fixRounds: 0, noteKey: 'note.reviewNoResult' });
+  });
+
+  it('gives a manual approval a fresh round budget and lets your feedback end the automatic loop', async () => {
+    const e = engine();
+    const id = await reviewing(e, 1);
+    e.verdict('changes_requested');
+    finishLatest(e, id);
+    await vi.waitFor(() => expect(e.store.task(id)?.runs).toHaveLength(3));
+
+    // Your own feedback takes over: when the agent is done, the task waits for you instead of reviewing by itself.
+    await e.tasks.reject(id, 'Please also update the docs');
+    expect(e.store.task(id)?.autoReview).toBeUndefined();
+    finishLatest(e, id);
+    await vi.waitFor(() => expect(e.status(id)).toBe('review'));
+
+    await e.tasks.approve(id);
+    expect(e.store.task(id)).toMatchObject({ status: 'running', reviewStep: 0, fixRounds: 0 });
   });
 });

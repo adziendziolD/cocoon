@@ -572,6 +572,11 @@ in the same sandbox** instead of pushing right away. Each reviews the full diff,
 (`approved` / `changes_requested` + summary) in a file outside the repositories.
 - *Changes requested* (or no result) → the task goes back to *Review* with the summary; *Request changes* sends it to the
   working agent, *Approve* runs the review again.
+- **Automatic fix rounds** (*Review-fix loop*, default `0` = off). With a maximum above 0, *changes requested* does not wait for you:
+  a fresh working agent of the last stage gets the reviewer's findings, the review runs again when it is done, and so on until the
+  reviewers approve. After the maximum (1 to 10) the task goes back to *Review* with the note "changes still requested after N
+  automatic fix rounds". A review without a result file never loops. Your own *Request changes* ends the loop, and every manual
+  *Approve* starts with a fresh round budget. The drawer shows the rounds used (`fixRounds`).
 - *All approved* → CoCoon commits, pushes the task branch and opens a **pull request** per changed repository (target: the
   configured base branch or the repository default; repositories outside GitHub are only pushed). A sandbox that belonged to
   the task alone is removed. The drawer shows the reviews and the pull request links.

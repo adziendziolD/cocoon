@@ -4,6 +4,9 @@ import { GITHUB_TOKEN_NAME, NetworkMode, RepoSource } from './models.ts';
 /** Short workspace key for task handles and branch names, e.g. "FD" → task FD-12, branch FD-12-add-apple-pay. */
 export const WORKSPACE_KEY = /^[A-Z][A-Z0-9]{1,5}$/;
 
+/** Upper limit for the review-fix loop: every round costs a working agent and the review agents. */
+export const MAX_FIX_ROUNDS = 10;
+
 /** Code review that runs when a finished task is approved (review agents in the same sandbox, then push + pull request). */
 export const WorkspaceReview = z.object({
   enabled: z.boolean().default(false),
@@ -15,6 +18,11 @@ export const WorkspaceReview = z.object({
   agentPushes: z.boolean().default(false),
   /** Target branch of the pull request (default: the repository's default branch). */
   baseBranch: z.string().max(200).optional(),
+  /**
+   * Review-fix loop: how often "changes requested" goes back to the working agent automatically, which then gets the
+   * review again, before the task waits for you. 0 = off (you decide every time).
+   */
+  maxFixRounds: z.number().int().min(0).max(MAX_FIX_ROUNDS).default(0),
 });
 export type WorkspaceReview = z.infer<typeof WorkspaceReview>;
 
@@ -168,6 +176,10 @@ export const Task = z.object({
   /** Code review after approval: index of the running review agent (undefined = not reviewing). */
   reviewStep: z.number().int().optional(),
   reviews: z.array(ReviewResult).default([]),
+  /** Review-fix loop: rounds the working agent was sent back automatically since the last manual approval or start. */
+  fixRounds: z.number().int().min(0).default(0),
+  /** Review-fix loop: the working agent is fixing review findings; when it finishes, the review starts again by itself. */
+  autoReview: z.boolean().optional(),
   /** Pull requests opened for the task (one per repository). */
   pullRequests: z.array(z.object({ repo: z.string(), url: z.string() })).default([]),
   /** Set when the task was imported from a GitHub issue. */

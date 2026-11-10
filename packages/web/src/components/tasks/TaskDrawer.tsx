@@ -342,11 +342,12 @@ function TaskDetail({ task, allTasks, onClose }: { task: Task; allTasks: Task[];
                 </dd>
               </>
             )}
-            {((task.reviews ?? []).length > 0 || task.reviewStep !== undefined) && (
+            {((task.reviews ?? []).length > 0 || task.reviewStep !== undefined || task.fixRounds > 0) && (
               <>
                 <dt className="text-fg-muted">{t('taskDrawer.reviews')}</dt>
                 <dd className="space-y-2">
                   {task.reviewStep !== undefined && <p className="text-xs text-fg-muted">{t('taskDrawer.reviewRunning')}</p>}
+                  {task.fixRounds > 0 && <p className="text-xs text-fg-muted">{t('taskDrawer.fixRounds', { count: task.fixRounds })}</p>}
                   {(task.reviews ?? []).map((r) => (
                     <div key={r.agentId} className="text-xs">
                       <span className="flex items-center gap-1.5">
