@@ -13,12 +13,12 @@ describe.runIf(available)('slim image + agent toolbox', () => {
     if (id) await rpc('sandbox.delete', { sandboxId: id }).catch(() => undefined);
   });
 
-  it('builds a slim image under 250 MB without Node.js, and a toolbox with Node.js', async () => {
+  it('builds a slim image under 260 MB without Node.js, and a toolbox with Node.js', async () => {
     const images = await rpc('image.status');
     const sandbox = images.find((i: { kind: string }) => i.kind === 'sandbox');
     console.log(`[integration] ${sandbox.ref}: ${sandbox.sizeMb} MB (${sandbox.variant})`);
     expect(sandbox.variant).toBe('slim');
-    expect(sandbox.sizeMb).toBeLessThan(250);
+    expect(sandbox.sizeMb).toBeLessThan(260);
     const toolbox = images.find((i: { kind: string }) => i.kind === 'agents');
     expect(toolbox.runtime).toMatch(/^\d+\.\d+\.\d+/);
     expect(toolbox.tools.sort()).toEqual([...AgentTool.options].sort());

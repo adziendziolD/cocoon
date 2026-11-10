@@ -64,7 +64,7 @@ it too. The design is inspired by [herdr](https://vercel.com/docs/sandbox/ecosys
 | **Orchestration** | Workspaces, a task board (backlog → queued → running → review → done), multi-stage workflows (e.g. plan → build → review) with approvals, review feedback loop, dependencies, auto-run with parallelism limits, webhook notifications |
 | **Web UI** | Setup checklist, sandbox wizard, live in-browser terminals, file browser/editor, diff viewer, commit/push/pull request, activity log, every setting – written for non-technical users |
 | **Sandbox backends** | **Docker**, **Podman** (rootless, no daemon) or **bubblewrap** (lightweight Linux process sandboxes, no images, start in ~0.3 s) – picked automatically. Containers are hardened (non-root, no capabilities, `no-new-privileges`, CPU/RAM/PID limits) with optional gVisor or Kata/Firecracker runtimes |
-| **Small footprint** | Slim base image under 250 MB (Debian, no Node.js); agent CLIs and their Node.js runtime live in a shared, read-only **toolbox** that is installed once and updated without rebuilding images |
+| **Small footprint** | Slim base image under 260 MB (Debian, no Node.js); agent CLIs and their Node.js runtime live in a shared, read-only **toolbox** that is installed once and updated without rebuilding images |
 | **Network control** | Per sandbox: no internet, allowlisted domains only (via egress proxy, default), or open internet. Blocked connections are logged and can be allowed with one click |
 | **Credential proxy** | Anthropic and OpenAI keys (optionally also the Gemini key and the Claude subscription token) stay on the server – sandboxes only see placeholders, the proxy adds the real value on the way out. The GitHub token is not proxied (see below) |
 | **Many agents** | Claude Code, OpenAI Codex, OpenCode, Pi, Qwen Code, Gemini CLI and plain shells – switch the agent of a sandbox at any time, with handover of task, changes and last output |
@@ -253,12 +253,12 @@ automatically on the next start.
 
 | Variant | Contents | Size |
 | --- | --- | --- |
-| `slim` *(default)* | bash, git, tmux, ripgrep, curl, jq, less, procps, CA certificates | < 250 MB (checked in CI) |
+| `slim` *(default)* | bash, git, tmux, ripgrep, curl, jq, less, procps, CA certificates | < 260 MB (checked in CI) |
 | `db` | `slim` + database clients: `psql`, `mysql`/MariaDB, `redis-cli` – handy with [shared services](#shared-services-databases--mocks) | + ~100 MB |
 | `full` | `db` + compilers (`build-essential`) and Python 3 for projects that build native code | + ~400 MB |
 
 Debian rather than Alpine on purpose: the agent CLIs ship glibc binaries (Claude Code, Codex, OpenCode) and most projects' prebuilt
-native modules assume glibc too. CI builds every variant, checks its contents and fails if `slim` reaches 250 MB; multi-arch
+native modules assume glibc too. CI builds every variant, checks its contents and fails if `slim` reaches 260 MB; multi-arch
 (amd64/arm64) builds are published as `ghcr.io/<owner>/cocoon-sandbox:{slim,db,full}` (`.github/workflows/images.yml`).
 
 **Agent secrets** are written to a private file (mode 0600) that the agent's session sources and deletes immediately, so API keys

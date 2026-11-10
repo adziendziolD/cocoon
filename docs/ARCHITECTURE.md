@@ -238,7 +238,7 @@ die UI blendet nicht verfügbare Optionen aus bzw. weist auf Einschränkungen hi
 
 **Werkzeugkiste:** Agent-CLIs (Claude Code, Codex, …) samt Node.js-Laufzeit werden einmal in ein Volume (`cocoon-agents`) bzw.
 `.data/agents` installiert und schreibgeschützt unter `/opt/agents` eingehängt – das Basis-Image (Debian slim, ohne Node.js) bleibt
-unter 250 MB (Variante `db` mit Datenbank-Clients, `full` zusätzlich mit Compilern/Python), Updates brauchen keinen Image-Neubau. **Agent-Secrets** gehen über eine private Env-Datei (0600), die der Agent-Start einliest und
+unter 260 MB (Variante `db` mit Datenbank-Clients, `full` zusätzlich mit Compilern/Python), Updates brauchen keinen Image-Neubau. **Agent-Secrets** gehen über eine private Env-Datei (0600), die der Agent-Start einliest und
 löscht – nie über Kommandozeilen.
 
 ## 7. Sicherheit
