@@ -39,6 +39,7 @@ export const de = {
 
   'workflows.flow.title': 'So läuft es ab',
   'workflows.flow.pauses': 'Wartet auf deine Freigabe',
+  'workflows.flow.loops': 'Läuft in einer Schleife, bis die Anforderung erfüllt ist',
   'workflows.flow.review': 'Du prüfst',
 
   'workflows.stage.name': 'Name der Stufe',
@@ -56,6 +57,19 @@ export const de = {
   'workflows.stage.approval': 'Danach auf meine Freigabe warten',
   'workflows.stage.approvalHint': 'Die Aufgabe hält nach dieser Stufe an und erscheint unter „Prüfen“. Erst wenn du freigibst, geht es weiter.',
   'workflows.stage.approvalLast': 'Die letzte Stufe endet immer mit deiner Prüfung.',
+  'workflows.stage.loop': 'Wiederholen, bis eine Anforderung erfüllt ist',
+  'workflows.stage.loopHint': 'Wenn der Agent fertig ist, führt CoCoon einen Befehl in der Sandbox aus. Schlägt er fehl, bekommt der Agent die Ausgabe und arbeitet weiter, bis der Befehl klappt oder eine Grenze erreicht ist. Dann entscheidest du.',
+  'workflows.loop.requirement': 'Anforderung (Befehl)',
+  'workflows.loop.requirementHint': 'Läuft im Arbeitsordner der Sandbox. Exit-Code 0 heißt erfüllt, zum Beispiel pnpm test. Der Befehl sollte selbst nichts verändern.',
+  'workflows.loop.requirementMissing': 'Gib einen Befehl an.',
+  'workflows.loop.maxIterations': 'Höchstens so viele Durchläufe',
+  'workflows.loop.maxIterationsHint': 'Harte Grenze von 1 bis {max}. Der erste Durchlauf zählt mit.',
+  'workflows.loop.maxMinutes': 'Zeitlimit in Minuten',
+  'workflows.loop.maxMinutesHint': 'Leer heißt kein Zeitlimit.',
+  'workflows.loop.mode': 'Wie geht es nach einem Fehlschlag weiter?',
+  'workflows.loop.modeFresh': 'Neuer Agent pro Durchlauf (frischer Kontext)',
+  'workflows.loop.modeContinue': 'Derselbe Agent macht weiter (günstiger, der Kontext wächst)',
+  'workflows.loop.stuckHint': 'CoCoon stoppt außerdem, wenn die Prüfung zweimal hintereinander mit exakt derselben Ausgabe scheitert.',
 
   'workflows.ph.heading': 'Platzhalter im Auftrag',
   'workflows.ph.intro': 'Diese Platzhalter werden beim Start jeder Stufe durch echte Inhalte ersetzt:',
@@ -72,6 +86,7 @@ export const de = {
   'workflows.err.stageName': 'Stufe {n} braucht einen Namen.',
   'workflows.err.stageAgent': 'Stufe {n} braucht einen Agententyp.',
   'workflows.err.stagePrompt': 'Stufe {n} braucht einen Auftrag.',
+  'workflows.err.stageLoop': 'Stufe {n}: Die Anforderung braucht einen Befehl.',
 
   'workflows.add.id': 'Kennung',
   'workflows.add.idHint': 'Kurz und eindeutig, nur Kleinbuchstaben, Ziffern und Bindestriche (z. B. „bugfix“). Lässt sich später nicht ändern.',
@@ -160,6 +175,7 @@ export const en: Messages<typeof de> = {
 
   'workflows.flow.title': 'How it runs',
   'workflows.flow.pauses': 'Waits for your approval',
+  'workflows.flow.loops': 'Runs in a loop until the requirement is met',
   'workflows.flow.review': 'You review',
 
   'workflows.stage.name': 'Stage name',
@@ -177,6 +193,19 @@ export const en: Messages<typeof de> = {
   'workflows.stage.approval': 'Wait for my approval afterwards',
   'workflows.stage.approvalHint': 'The task pauses after this stage and shows up under “Review”. It only continues once you approve.',
   'workflows.stage.approvalLast': 'The last stage always ends with your review.',
+  'workflows.stage.loop': 'Repeat until a requirement is met',
+  'workflows.stage.loopHint': 'When the agent is done, CoCoon runs a command in the sandbox. If it fails, the agent gets the output and works on until the command passes or a limit is reached. Then you decide.',
+  'workflows.loop.requirement': 'Requirement (command)',
+  'workflows.loop.requirementHint': 'Runs in the sandbox workspace folder. Exit code 0 means met, for example pnpm test. The command should not change anything itself.',
+  'workflows.loop.requirementMissing': 'Enter a command.',
+  'workflows.loop.maxIterations': 'At most this many iterations',
+  'workflows.loop.maxIterationsHint': 'Hard limit from 1 to {max}. The first run counts.',
+  'workflows.loop.maxMinutes': 'Time limit in minutes',
+  'workflows.loop.maxMinutesHint': 'Empty means no time limit.',
+  'workflows.loop.mode': 'What happens after a failure?',
+  'workflows.loop.modeFresh': 'A new agent per iteration (clean context)',
+  'workflows.loop.modeContinue': 'The same agent carries on (cheaper, the context grows)',
+  'workflows.loop.stuckHint': 'CoCoon also stops when the check fails with exactly the same output twice in a row.',
 
   'workflows.ph.heading': 'Placeholders in the instructions',
   'workflows.ph.intro': 'These placeholders are replaced with real content when each stage starts:',
@@ -193,6 +222,7 @@ export const en: Messages<typeof de> = {
   'workflows.err.stageName': 'Stage {n} needs a name.',
   'workflows.err.stageAgent': 'Stage {n} needs an agent type.',
   'workflows.err.stagePrompt': 'Stage {n} needs instructions.',
+  'workflows.err.stageLoop': 'Stage {n}: the requirement needs a command.',
 
   'workflows.add.id': 'ID',
   'workflows.add.idHint': 'Short and unique, only lowercase letters, digits and hyphens (e.g. “bugfix”). Cannot be changed later.',

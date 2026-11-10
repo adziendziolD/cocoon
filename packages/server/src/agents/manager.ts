@@ -24,6 +24,9 @@ import { githubAuthEnv } from '../sandbox/git-auth.ts';
 const SANDBOX_UID = 1000;
 import { StatusDetector, type Observation } from './status.ts';
 import * as tmux from './tmux.ts';
+
+/** Runs $COCOON_CHECK_COMMAND with a time limit where `timeout` exists; stderr goes to stdout. */
+const CHECK_SCRIPT = `if command -v timeout >/dev/null 2>&1; then timeout -k 10 "$COCOON_CHECK_SECONDS" sh -c "$COCOON_CHECK_COMMAND" 2>&1; else sh -c "$COCOON_CHECK_COMMAND" 2>&1; fi`;
 import { t } from '../i18n.ts';
 
 const SNAPSHOT_LINES = 60;
@@ -149,6 +152,20 @@ export class AgentManager {
       await this.sendInput({ agentId: id, text: params.prompt, submit: true });
     }
     return publicAgent(record);
+  }
+
+  /**
+   * Runs a shell command in the sandbox's workspace folder the way an agent would see it: project variables (.env files) and
+   * shared services, but no API keys or tokens. Used to check the requirement of a looping workflow stage.
+   * Output is stdout and stderr together; the command is stopped after `seconds` (exit code 124).
+   */
+  async runCheck(sandboxId: string, command: string, seconds: number): Promise<{ exitCode: number; output: string }> {
+    const handle = this.sandboxes.runningHandle(sandboxId);
+    const sandbox = this.sandboxes.record(sandboxId);
+    await this.envs.prepare(sandbox.id);
+    const env = { ...this.envs.injectedEnv(sandbox), ...(await this.services.agentEnv(sandbox.id)), COCOON_CHECK_COMMAND: command, COCOON_CHECK_SECONDS: String(seconds) };
+    const res = await this.driver.exec(handle, ['sh', '-c', CHECK_SCRIPT], { env, workdir: sandbox.workdir, timeoutMs: (seconds + 30) * 1000 });
+    return { exitCode: res.exitCode, output: res.stdout + res.stderr };
   }
 
   async sendInput({ agentId, text, submit = true }: MethodParams<'agent.send_input'>): Promise<void> {

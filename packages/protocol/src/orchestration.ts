@@ -180,6 +180,12 @@ export const Task = z.object({
   fixRounds: z.number().int().min(0).default(0),
   /** Review-fix loop: the working agent is fixing review findings; when it finishes, the review starts again by itself. */
   autoReview: z.boolean().optional(),
+  /** Iteration loop of the current stage: number of the running iteration (1 = first run); unset when the stage has no loop. */
+  loopIteration: z.number().int().min(1).optional(),
+  /** When the first iteration of the current loop started (for the time limit). */
+  loopStartedAt: z.string().optional(),
+  /** Hash of the output of the last failed requirement check: the same failure twice in a row means no progress. */
+  loopLastFailure: z.string().optional(),
   /** Pull requests opened for the task (one per repository). */
   pullRequests: z.array(z.object({ repo: z.string(), url: z.string() })).default([]),
   /** Set when the task was imported from a GitHub issue. */

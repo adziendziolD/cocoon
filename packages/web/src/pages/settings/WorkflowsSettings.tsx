@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { localize, WORKFLOW_ID, type AgentProfile, type Language, type LocalizedText, type Workflow } from '@cocoon/protocol';
-import { ArrowDown, ArrowRight, ArrowUp, Copy, GitBranch, Hand, Plus, RotateCcw, Save, Trash2, Undo2, UserCheck } from 'lucide-react';
+import { localize, MAX_LOOP_ITERATIONS, WORKFLOW_ID, type AgentProfile, type Language, type LocalizedText, type Workflow } from '@cocoon/protocol';
+import { ArrowDown, ArrowRight, ArrowUp, Copy, GitBranch, Hand, Plus, Repeat, RotateCcw, Save, Trash2, Undo2, UserCheck } from 'lucide-react';
 import { useSettings } from '../../api/queries';
 import { Badge } from '../../components/Badge';
 import { Button } from '../../components/Button';
@@ -22,7 +22,19 @@ interface StageDraft {
   agentKind: string;
   prompt: string;
   approval: boolean;
+  /** Iteration loop (null = the stage runs once). */
+  loop: LoopDraft | null;
 }
+
+interface LoopDraft {
+  requirement: string;
+  maxIterations: number;
+  /** '' = no time limit. */
+  maxMinutes: number | '';
+  mode: 'fresh' | 'continue';
+}
+
+const NEW_LOOP: LoopDraft = { requirement: '', maxIterations: 5, maxMinutes: '', mode: 'fresh' };
 
 interface WorkflowDraft {
   label: LocalizedText;
@@ -51,7 +63,7 @@ function toDraft(w: Workflow): WorkflowDraft {
   return {
     label: w.label,
     description: w.description ?? '',
-    stages: w.stages.map((s) => ({ uid: nextUid(), name: s.name, agentKind: s.agentKind, prompt: s.prompt, approval: s.approval })),
+    stages: w.stages.map((s) => ({ uid: nextUid(), name: s.name, agentKind: s.agentKind, prompt: s.prompt, approval: s.approval, loop: s.loop ? { requirement: s.loop.requirement, maxIterations: s.loop.maxIterations, maxMinutes: s.loop.maxMinutes ?? '', mode: s.loop.mode } : null })),
   };
 }
 
@@ -59,7 +71,7 @@ function fromDraft(d: WorkflowDraft): Workflow {
   return {
     label: trimText(d.label),
     description: typeof d.description === 'string' ? d.description.trim() || undefined : d.description,
-    stages: d.stages.map((s) => ({ name: trimText(s.name), agentKind: s.agentKind, prompt: s.prompt, approval: s.approval })),
+    stages: d.stages.map((s) => ({ name: trimText(s.name), agentKind: s.agentKind, prompt: s.prompt, approval: s.approval, ...(s.loop ? { loop: { requirement: s.loop.requirement.trim(), maxIterations: Math.min(MAX_LOOP_ITERATIONS, Math.max(1, Math.trunc(s.loop.maxIterations) || 1)), maxMinutes: s.loop.maxMinutes === '' ? undefined : Math.max(1, Math.trunc(s.loop.maxMinutes) || 1), mode: s.loop.mode } } : {}) })),
   };
 }
 
@@ -75,6 +87,7 @@ function validate(t: TFunction, d: WorkflowDraft, lang: Language): string | unde
     if (!text(s.name, lang).trim()) return t('workflows.err.stageName', { n });
     if (!s.agentKind) return t('workflows.err.stageAgent', { n });
     if (!s.prompt.trim()) return t('workflows.err.stagePrompt', { n });
+    if (s.loop && !s.loop.requirement.trim()) return t('workflows.err.stageLoop', { n });
   }
   return undefined;
 }
@@ -264,6 +277,33 @@ export function WorkflowsSettings() {
   );
 }
 
+/** Requirement, limits and mode of a looping stage. */
+function LoopFields({ value: l, onChange }: { value: LoopDraft; onChange: (patch: Partial<LoopDraft>) => void }) {
+  const t = useT();
+  return (
+    <div className="space-y-4 rounded-xl border border-line p-4">
+      <Field label={t('workflows.loop.requirement')} hint={t('workflows.loop.requirementHint')} error={!l.requirement.trim() ? t('workflows.loop.requirementMissing') : undefined}>
+        <Input value={l.requirement} onChange={(e) => onChange({ requirement: e.target.value })} placeholder="pnpm test" className="font-mono" invalid={!l.requirement.trim()} spellCheck={false} />
+      </Field>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Field label={t('workflows.loop.maxIterations')} hint={t('workflows.loop.maxIterationsHint', { max: MAX_LOOP_ITERATIONS })}>
+          <Input type="number" min={1} max={MAX_LOOP_ITERATIONS} value={l.maxIterations} onChange={(e) => onChange({ maxIterations: Number(e.target.value) })} />
+        </Field>
+        <Field label={t('workflows.loop.maxMinutes')} optional hint={t('workflows.loop.maxMinutesHint')}>
+          <Input type="number" min={1} value={l.maxMinutes} onChange={(e) => onChange({ maxMinutes: e.target.value === '' ? '' : Number(e.target.value) })} />
+        </Field>
+      </div>
+      <Field label={t('workflows.loop.mode')}>
+        <Select value={l.mode} onChange={(e) => onChange({ mode: e.target.value as LoopDraft['mode'] })}>
+          <option value="fresh">{t('workflows.loop.modeFresh')}</option>
+          <option value="continue">{t('workflows.loop.modeContinue')}</option>
+        </Select>
+      </Field>
+      <p className="text-xs text-fg-muted">{t('workflows.loop.stuckHint')}</p>
+    </div>
+  );
+}
+
 /** "Plan → Build → Review → you" preview; stages that wait for approval get a small hand icon. */
 function FlowPreview({ stages }: { stages: StageDraft[] }) {
   const t = useT();
@@ -275,6 +315,7 @@ function FlowPreview({ stages }: { stages: StageDraft[] }) {
           <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2.5 py-1 text-xs font-medium text-fg ring-1 ring-inset ring-line">
             <span className="text-fg-subtle">{i + 1}</span>
             {text(s.name, lang) || t('workflows.stageFallback', { n: i + 1 })}
+            {s.loop && <Repeat className="size-3 text-accent" aria-label={t('workflows.flow.loops')} />}
             {s.approval && i < stages.length - 1 && <Hand className="size-3 text-amber-600 dark:text-amber-400" aria-label={t('workflows.flow.pauses')} />}
           </span>
           <ArrowRight className="size-3.5 text-fg-subtle" />
@@ -318,7 +359,7 @@ function WorkflowForm({
   };
   const addStage = () => {
     const kind = d.stages.at(-1)?.agentKind ?? (agents['claude-code'] ? 'claude-code' : (Object.keys(agents)[0] ?? ''));
-    onChange({ stages: [...d.stages, { uid: nextUid(), name: '', agentKind: kind, prompt: '{{task}}', approval: false }] });
+    onChange({ stages: [...d.stages, { uid: nextUid(), name: '', agentKind: kind, prompt: '{{task}}', approval: false, loop: null }] });
   };
 
   const insert = (stage: StageDraft, token: string) => {
@@ -462,6 +503,13 @@ function WorkflowForm({
                       ))}
                     </div>
                     <Toggle
+                      checked={s.loop !== null}
+                      onChange={(on) => setStage(s.uid, { loop: on ? { ...NEW_LOOP } : null })}
+                      label={t('workflows.stage.loop')}
+                      description={t('workflows.stage.loopHint')}
+                    />
+                    {s.loop && <LoopFields value={s.loop} onChange={(patch) => setStage(s.uid, { loop: { ...s.loop!, ...patch } })} />}
+                    <Toggle
                       checked={last || s.approval}
                       disabled={last}
                       onChange={(approval) => setStage(s.uid, { approval })}
@@ -522,6 +570,7 @@ function AddWorkflowDialog({
               agentKind: agents['claude-code'] ? 'claude-code' : (Object.keys(agents)[0] ?? 'claude-code'),
               prompt: '{{task}}{{feedback}}',
               approval: false,
+              loop: null,
             },
           ],
         };

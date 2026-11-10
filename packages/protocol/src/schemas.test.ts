@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ApiProvider, defaultMaxOutput, methods, ModelInfo, PROVIDER_PRESETS, Settings, SharedService } from './index.ts';
+import { ApiProvider, defaultMaxOutput, MAX_FIX_ROUNDS, MAX_LOOP_ITERATIONS, methods, ModelInfo, PROVIDER_PRESETS, Settings, SharedService, StageLoop, WorkflowStage, WorkspaceReview } from './index.ts';
 
 describe('defaultMaxOutput', () => {
   it('is a quarter of the context window', () => {
@@ -118,5 +118,24 @@ describe('settings.update params (patch schemas)', () => {
     const parsed = params.parse({ providers: { local: { label: 'L', kind: 'openai', baseUrl: 'http://localhost:1234/v1' } } });
     expect(parsed.providers?.local).toMatchObject({ auth: 'bearer', models: [] });
     expect(parsed).not.toHaveProperty('agents');
+  });
+});
+
+describe('loops', () => {
+  it('needs a requirement and a maximum number of iterations, and caps both', () => {
+    expect(StageLoop.parse({ requirement: ' pnpm test ', maxIterations: 3 })).toEqual({ requirement: 'pnpm test', maxIterations: 3, mode: 'fresh' });
+    expect(StageLoop.safeParse({ requirement: 'pnpm test' }).success).toBe(false);
+    expect(StageLoop.safeParse({ requirement: '  ', maxIterations: 3 }).success).toBe(false);
+    expect(StageLoop.safeParse({ requirement: 'x', maxIterations: 0 }).success).toBe(false);
+    expect(StageLoop.safeParse({ requirement: 'x', maxIterations: MAX_LOOP_ITERATIONS + 1 }).success).toBe(false);
+  });
+
+  it('keeps stages without a loop as they are', () => {
+    expect(WorkflowStage.parse({ name: 'Build', agentKind: 'shell', prompt: 'x' }).loop).toBeUndefined();
+  });
+
+  it('keeps the review-fix loop off by default and capped', () => {
+    expect(WorkspaceReview.parse({}).maxFixRounds).toBe(0);
+    expect(WorkspaceReview.safeParse({ maxFixRounds: MAX_FIX_ROUNDS + 1 }).success).toBe(false);
   });
 });

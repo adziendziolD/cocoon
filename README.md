@@ -604,6 +604,19 @@ where untrusted code runs, use a fine-grained token limited to the needed reposi
 `{{diff}}` (changed files) and `{{feedback}}` (review feedback). Stages with `approval` pause in `review` until you approve.
 Built-in: **Plan → Build → Review** (approve the plan before implementation) and **Build → Review**.
 
+**Iteration loop** (per workflow stage, *Settings → Workflows → Repeat until a requirement is met*). A stage can repeat until a
+**requirement** holds, for example "all tests pass":
+
+- When the agent says it is done, CoCoon runs the requirement command in the sandbox's workspace folder (with the project's `.env`
+  variables and shared services, without API keys or tokens; stopped after 15 minutes). Exit code `0` = met, the workflow goes on.
+- Not met → the agent gets the command's last lines as feedback and runs again. *Fresh* mode (default) starts a new agent per
+  iteration (clean context, the work lives in the files), *continue* sends the output to the same agent (cheaper, the context grows).
+  The agent is told up front how it is judged.
+- **Limits are mandatory**: `maxIterations` (1 to 20, the first run counts), optionally `maxMinutes` for the whole loop. CoCoon also
+  stops when the check fails with exactly the same output twice in a row (no progress). Then the task waits in *Review* with the
+  reason and the last output (and a notification); *Request changes* gives the loop a fresh budget, *Approve* accepts the result as it is.
+- The check command should not change anything. The loop also applies to the fix agents of the review-fix loop when the last stage loops.
+
 **Scheduled agents** (*Schedules* in the navigation, or the *Schedules* tab of a workspace) start a task on a schedule:
 "run all checks every night at 03:00", "look for dependency updates every Monday", or anything you write yourself.
 
