@@ -153,8 +153,11 @@ export const mayCall = (role: UserRole, method: MethodName): boolean => role ===
  */
 export function mayUseParams(role: UserRole, method: MethodName, params: unknown): boolean {
   if (role === 'admin') return true;
+  const given = (params ?? {}) as { githubToken?: string | null; runtime?: string | null; image?: string };
+  // Members may not pick the runtime (null means plain runc, which weakens an isolation the admin chose) nor an image.
+  if (method === 'sandbox.create' && (given.runtime !== undefined || given.image !== undefined)) return false;
   if (method !== 'sandbox.create' && method !== 'sandbox.update' && method !== 'workspace.create' && method !== 'workspace.update') return true;
-  const token = (params as { githubToken?: string | null } | undefined)?.githubToken;
+  const token = given.githubToken;
   return token === undefined || token === null || token === DEFAULT_GITHUB_TOKEN;
 }
 

@@ -140,8 +140,12 @@ export async function buildHttpServer({ config, rpc, bus, auth, agents, workspac
   /** Sign-in and choosing a password need no token. Anyone can send these, so the bodies are small. */
   const publicPost = <S extends z.ZodType>(path: string, schema: S, run: (input: z.output<S>, req: FastifyRequest) => Promise<unknown> | unknown) => {
     const fail = (err: unknown, req: FastifyRequest, reply: FastifyReply, status?: number) => {
-      const error = toWireError(err);
-      if (error.code === 'internal') req.log.error(err);
+      let error = toWireError(err);
+      if (error.code === 'internal') {
+        // Unauthenticated callers get no internal error text; it stays in the log.
+        req.log.error(err);
+        error = { code: 'internal', message: t('error.internal', {}, requestLanguage(req)) };
+      }
       const retry = (error.details as { retryAfterSeconds?: number } | undefined)?.retryAfterSeconds;
       if (retry) reply.header('retry-after', String(retry));
       return reply.code(status ?? httpStatus[error.code]).header('cache-control', 'no-store').send({ error });

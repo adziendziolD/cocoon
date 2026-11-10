@@ -169,8 +169,9 @@ demote, reset or delete their own account, so an admin cannot lock themselves ou
 | API tokens, users, updates, restart, image builds | yes | no |
 
 Everyone sees the same sandboxes, agents, tasks and activity: accounts separate who may *configure* CoCoon, not whose work is whose.
-Treat members like colleagues you trust with a shell on the sandboxes: they can run any code there, choose any image and network
-mode, and see what other users did. Whatever reaches a sandbox can be read from a terminal in it: the GitHub token (it cannot go
+Treat members like colleagues you trust with a shell on the sandboxes: they can run any code there, choose the network
+mode, and see what other users did. The image and the runtime (gVisor, Kata) of a sandbox are an admin's choice: members get the
+defaults from the settings and the server refuses both from them. Whatever reaches a sandbox can be read from a terminal in it: the GitHub token (it cannot go
 through the credential proxy) and, unless `COCOON_PROXY_EXTRA_SECRETS=1`, the Claude subscription token and the Gemini key. Sandboxes
 without a network get no credentials at all. Which GitHub token a sandbox or workspace uses is an admin's choice: members stay with
 the default `GITHUB_TOKEN` (or the token an admin set on the workspace) and the server refuses any other name from them. Give CoCoon

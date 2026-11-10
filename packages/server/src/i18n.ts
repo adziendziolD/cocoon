@@ -9,6 +9,7 @@ export const messages = {
   'error.notFound': { de: '{what} {id} nicht gefunden', en: '{what} {id} not found' },
   'error.unauthorized': { de: 'Ungültiger oder fehlender Zugangs-Token', en: 'Invalid or missing access token' },
   'error.forbidden': { de: 'Dafür fehlt dir die Berechtigung. Frag einen Admin.', en: 'You do not have permission for this. Ask an admin.' },
+  'error.internal': { de: 'Unerwarteter Fehler. Bitte später erneut versuchen.', en: 'Unexpected error. Please try again later.' },
   'error.bodyTooLarge': { de: 'Die Anfrage ist zu groß.', en: 'The request is too large.' },
   'error.forbiddenToken': { de: 'Nur Admins dürfen ein anderes GitHub-Token als das Standard-Token wählen.', en: 'Only admins may choose a GitHub token other than the default one.' },
   'error.rateLimited': { de: 'Zu viele Versuche. Bitte in {seconds} Sekunden erneut versuchen.', en: 'Too many attempts. Please try again in {seconds} seconds.' },

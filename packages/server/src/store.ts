@@ -287,7 +287,8 @@ export class Store {
   }
 
   user(id: string): UserRecord | undefined {
-    return this.state.users[id];
+    // Own entries only: an id such as "__proto__" or "constructor" must not reach Object.prototype.
+    return Object.hasOwn(this.state.users, id) ? this.state.users[id] : undefined;
   }
 
   putUser(record: UserRecord): void {
@@ -307,7 +308,7 @@ export class Store {
   }
 
   session(id: string): SessionRecord | undefined {
-    return this.state.sessions[id];
+    return Object.hasOwn(this.state.sessions, id) ? this.state.sessions[id] : undefined;
   }
 
   putSession(record: SessionRecord): void {

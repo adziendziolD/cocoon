@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ActivityLog } from './activity.ts';
 import { PasswordHasher } from './auth/password.ts';
 import { AuthService } from './auth/users.ts';
@@ -86,6 +86,16 @@ describe('signing in over HTTP', () => {
     expect(unknown.statusCode).toBe(401);
     expect(wrong.json()).toEqual(unknown.json());
     expect(wrong.headers['cache-control']).toBe('no-store');
+  });
+
+  it('keeps the text of unexpected errors away from callers who are not signed in', async () => {
+    const { auth, post } = await build();
+    vi.spyOn(auth, 'login').mockRejectedValue(new Error('scrypt failed in /srv/cocoon/internal/path'));
+    const res = await post('/v1/auth/login', { username: 'alice', password: 'not my password at all' });
+    expect(res.statusCode).toBe(500);
+    const error = (res.json() as { error: { code: string; message: string } }).error;
+    expect(error.code).toBe('internal');
+    expect(error.message).not.toContain('/srv/cocoon');
   });
 
   it('invites, sets the password with the link, signs in and uses the session like a token', async () => {

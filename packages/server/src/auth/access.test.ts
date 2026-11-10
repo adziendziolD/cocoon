@@ -142,4 +142,12 @@ describe('parameters only admins may set', () => {
     }
     expect(mayUseParams('member', 'sandbox.list', { githubToken: 'GITHUB_TOKEN_COMPANY' })).toBe(true);
   });
+
+  it('keeps the runtime and the image of a sandbox with the admins', () => {
+    for (const params of [{ runtime: null }, { runtime: 'runc' }, { runtime: 'runsc' }, { image: 'alpine' }]) {
+      expect(mayUseParams('member', 'sandbox.create', params), JSON.stringify(params)).toBe(false);
+      expect(mayUseParams('admin', 'sandbox.create', params), JSON.stringify(params)).toBe(true);
+    }
+    expect(mayUseParams('member', 'sandbox.create', { name: 'a', network: 'egress' })).toBe(true);
+  });
 });

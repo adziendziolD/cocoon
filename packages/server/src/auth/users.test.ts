@@ -603,6 +603,18 @@ describe('API tokens next to users', () => {
   });
 });
 
+describe('user ids that are not ids', () => {
+  it('finds no user for names that exist on every object', () => {
+    const { auth, store } = setup();
+    for (const id of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
+      expect(store.user(id), id).toBeUndefined();
+      expect(codeOf(() => auth.updateUser(admin, { userId: id, role: 'admin' })), id).toBe('not_found');
+      expect(codeOf(() => auth.resetPassword(admin, id)), id).toBe('not_found');
+      expect(codeOf(() => auth.deleteUser(admin, id)), id).toBe('not_found');
+    }
+  });
+});
+
 describe('clientKey', () => {
   it('leaves IPv4 addresses as they are and unwraps IPv4-mapped ones', () => {
     expect(clientKey('203.0.113.7')).toBe('203.0.113.7');
