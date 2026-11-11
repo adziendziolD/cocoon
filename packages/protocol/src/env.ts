@@ -172,12 +172,13 @@ export function parseDotenv(content: string): DotenvResult {
     const raw = lines[i]!;
     const text = raw.trim();
     if (!text || text.startsWith('#')) continue;
-    const match = /^(?:export\s+)?([^=\s]+)\s*=\s*(.*)$/.exec(raw.trimStart());
+    const match = /^(?:export\s+)?([^=\s]+)\s*=([\s\S]*)$/.exec(raw.trimStart());
     if (!match) {
       errors.push({ line: i + 1, message: 'expected NAME=value' });
       continue;
     }
-    const [, name = '', rest = ''] = match;
+    const [, name = '', afterEquals = ''] = match;
+    const rest = afterEquals.trimStart();
     if (!ENV_NAME.test(name)) {
       errors.push({ line: i + 1, message: `invalid variable name "${name.slice(0, 40)}"` });
       continue;

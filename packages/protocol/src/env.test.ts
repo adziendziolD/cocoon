@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { defaultBaseUrlEnv, isReservedEnvName, normalizeProxyHost, proxyHostUrl, normalizeRepoUrl, parseDotenv, renderDotenv, validEnvFilePath } from './env.ts';
 
 describe('parseDotenv', () => {
+  it('stays fast on lines with many spaces and line separators', () => {
+    const started = Date.now();
+    parseDotenv(`!=${' '.repeat(50_000)}\u2028x`);
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it('trims whitespace after the equals sign', () => {
+    expect(parseDotenv('A =   b').vars).toEqual([{ name: 'A', value: 'b' }]);
+  });
+
   it('parses plain, exported, quoted and commented values', () => {
     const { vars, errors } = parseDotenv(
       [
