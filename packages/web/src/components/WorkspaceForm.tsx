@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { DEFAULT_REVIEW_PROMPT, WORKSPACE_KEY, type MethodParams, type NetworkMode, type Workspace } from '@cocoon/protocol';
+import { DEFAULT_REVIEW_PROMPT, MAX_FIX_ROUNDS, WORKSPACE_KEY, type MethodParams, type NetworkMode, type Workspace } from '@cocoon/protocol';
 import { Boxes, Check, Layers, Workflow as WorkflowIcon, Bot, Square } from 'lucide-react';
 import { qk } from '../api/keys';
 import { useSettings } from '../api/queries';
@@ -25,7 +25,7 @@ export interface WorkspaceDraft {
   name: string;
   /** '' = derived from the name by the server. */
   key: string;
-  review: { enabled: boolean; agentKinds: string[]; prompt: string; agentPushes: boolean; baseBranch: string };
+  review: { enabled: boolean; agentKinds: string[]; prompt: string; agentPushes: boolean; baseBranch: string; maxFixRounds: number };
   description: string;
   color: string;
   /** Repositories for the workspace's sandboxes (the older single `repo` shows up as the first row). */
@@ -52,6 +52,7 @@ export function toWorkspaceDraft(w?: Workspace, index = 0): WorkspaceDraft {
       prompt: w?.review?.prompt ?? '',
       agentPushes: w?.review?.agentPushes ?? false,
       baseBranch: w?.review?.baseBranch ?? '',
+      maxFixRounds: w?.review?.maxFixRounds ?? 0,
     },
     description: w?.description ?? '',
     color: w?.color ?? WORKSPACE_COLORS[index % WORKSPACE_COLORS.length]!,
@@ -82,6 +83,7 @@ export function workspaceParams(d: WorkspaceDraft, isAdmin: boolean): MethodPara
       prompt: d.review.prompt.trim() || undefined,
       agentPushes: d.review.agentPushes,
       baseBranch: d.review.baseBranch.trim() || undefined,
+      maxFixRounds: Math.min(MAX_FIX_ROUNDS, Math.max(0, Math.trunc(d.review.maxFixRounds) || 0)),
     },
     description: d.description.trim(),
     color: d.color,
@@ -292,6 +294,9 @@ function ReviewSection({ value: d, onChange, error }: { value: WorkspaceDraft; o
           </Field>
           <Toggle checked={r.agentPushes} onChange={(agentPushes) => set({ agentPushes })} label={t('workspaceForm.reviewPushes')} description={t('workspaceForm.reviewPushesHint')} />
           {r.agentPushes && <Callout tone="warning">{t('workspaceForm.reviewTokenWarning')}</Callout>}
+          <Field label={t('workspaceForm.reviewFixRounds')} hint={t('workspaceForm.reviewFixRoundsHint')} className="max-w-xs">
+            <Input type="number" min={0} max={MAX_FIX_ROUNDS} value={r.maxFixRounds} onChange={(e) => set({ maxFixRounds: Number(e.target.value) })} />
+          </Field>
           <Field label={t('workspaceForm.reviewBase')} optional hint={t('workspaceForm.reviewBaseHint')} className="max-w-xs">
             <Input value={r.baseBranch} onChange={(e) => set({ baseBranch: e.target.value })} placeholder="main" className="font-mono" />
           </Field>

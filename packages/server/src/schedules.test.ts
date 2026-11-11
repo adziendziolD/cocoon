@@ -37,7 +37,7 @@ function setup(start = '2026-10-16T10:00:00Z') {
     deleted: [],
     create(params, origin = {}) {
       const at = now.toISOString();
-      const task = { id: `ts_${++n}`, workspaceId: params.workspaceId, handle: `S-${n}`, title: params.title, description: params.description ?? '', status: 'backlog', priority: 'normal', order: n, dependsOn: [], stage: 0, runs: [], attention: false, reviews: [], pullRequests: [], createdAt: at, updatedAt: at, agentKind: params.agentKind, workflowId: params.workflowId ?? undefined, ...origin } as Task;
+      const task = { id: `ts_${++n}`, workspaceId: params.workspaceId, handle: `S-${n}`, title: params.title, description: params.description ?? '', status: 'backlog', priority: 'normal', order: n, dependsOn: [], stage: 0, runs: [], attention: false, reviews: [], fixRounds: 0, pullRequests: [], createdAt: at, updatedAt: at, agentKind: params.agentKind, workflowId: params.workflowId ?? undefined, ...origin } as Task;
       store.putTask(task);
       return task;
     },

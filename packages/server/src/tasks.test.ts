@@ -34,10 +34,19 @@ function engine() {
   // Tests can hold back spawning an agent and reading a result file to provoke the races of slow starts.
   let spawnGate: Promise<void> = Promise.resolve();
   let shGate: Promise<void> = Promise.resolve();
-  const hold = (which: 'spawn' | 'sh') => {
+  let checkGate: Promise<void> = Promise.resolve();
+  // Loop tests: results of the requirement check (first in, first out; default = met), and what the agents were sent.
+  const checkResults: ({ exitCode: number; output: string } | Error)[] = [];
+  const checked: string[] = [];
+  const spawned: { id: string; kind: string; prompt?: string }[] = [];
+  const sent: string[] = [];
+  // What shell commands in the sandbox print: the verdict file of a review agent in the review tests.
+  let shOutput = '';
+  const hold = (which: 'spawn' | 'sh' | 'check') => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     if (which === 'spawn') spawnGate = gate;
+    else if (which === 'check') checkGate = gate;
     else shGate = gate;
     return release;
   };
@@ -51,14 +60,15 @@ function engine() {
     delete: async (id: string) => store.deleteSandbox(id),
     sh: async () => {
       await shGate;
-      return '';
+      return shOutput;
     },
   } as unknown as SandboxManager;
-  const files = { checkoutBranch: async () => undefined, diff: async () => ({ files: [] }) } as unknown as FilesService;
+  const files = { checkoutBranch: async () => undefined, diff: async () => ({ files: [] }), publish: async () => ({ pushed: [] }) } as unknown as FilesService;
   const agents = {
-    spawn: async (p: { sandboxId: string; kind: string }) => {
+    spawn: async (p: { sandboxId: string; kind: string; prompt?: string }) => {
       await spawnGate;
       const agent = { id: `ag_${++agentNo}`, sandboxId: p.sandboxId, kind: p.kind, status: 'working' } as Agent;
+      spawned.push({ id: agent.id, kind: p.kind, prompt: p.prompt });
       store.putAgent(agent);
       return agent;
     },
@@ -66,6 +76,16 @@ function engine() {
       killed.push(id);
     },
     read: async () => '',
+    sendInput: async (p: { text: string }) => {
+      sent.push(p.text);
+    },
+    runCheck: async (_sandboxId: string, command: string) => {
+      checked.push(command);
+      await checkGate;
+      const next = checkResults.shift() ?? { exitCode: 0, output: '' };
+      if (next instanceof Error) throw next;
+      return next;
+    },
   } as unknown as AgentManager;
   const notifier = { notify: () => undefined } as unknown as Notifier;
   const tasks = new TaskService(store, bus, settings, workspaces, sandboxes, files, agents, notifier, () => undefined);
@@ -75,7 +95,10 @@ function engine() {
     bus.publish({ type: 'agent.updated', agent });
   };
   const status = (taskId: string) => store.task(taskId)?.status;
-  return { store, tasks, settings, workspaces, ws, report, status, killed, hold };
+  const verdict = (value: 'approved' | 'changes_requested' | 'missing', summary = 'Add a test for the empty case') => {
+    shOutput = value === 'missing' ? '' : JSON.stringify({ verdict: value, summary });
+  };
+  return { store, tasks, settings, workspaces, ws, report, status, killed, hold, verdict, checkResults, checked, spawned, sent };
 }
 
 /** Starts a task and waits until its agent is spawned. */
@@ -330,5 +353,234 @@ describe('TaskService: dependencies', () => {
     expect(e.store.task(a.id)?.dependsOn).toEqual([]);
     // Other shapes stay allowed: diamonds and chains.
     expect(() => e.tasks.update({ taskId: c.id, dependsOn: [a.id, b.id] })).not.toThrow();
+  });
+});
+
+describe('TaskService: review-fix loop', () => {
+  /** A task whose working agent is done and approved, so that the (single) review agent is running. */
+  async function reviewing(e: ReturnType<typeof engine>, maxFixRounds: number) {
+    e.workspaces.update({ workspaceId: e.ws.id, review: { enabled: true, agentKinds: ['shell'], agentPushes: false, maxFixRounds } });
+    const task = await running(e);
+    e.report(task.agentId!, 'done');
+    await e.tasks.approve(task.id);
+    await vi.waitFor(() => expect(e.store.task(task.id)?.runs).toHaveLength(2));
+    return task.id;
+  }
+  /** The agent of the task's latest run reports "done" and the task follows. */
+  const finishLatest = (e: ReturnType<typeof engine>, taskId: string) => e.report(e.store.task(taskId)!.agentId!, 'done');
+
+  it('sends the findings to a new working agent, reviews again and finishes when the review approves', async () => {
+    const e = engine();
+    const id = await reviewing(e, 2);
+    const reviewer = e.store.task(id)!.agentId!;
+
+    e.verdict('changes_requested');
+    finishLatest(e, id);
+    await vi.waitFor(() => expect(e.store.task(id)?.runs).toHaveLength(3));
+    let task = e.store.task(id)!;
+    expect(task).toMatchObject({ status: 'running', fixRounds: 1, autoReview: true, reviewStep: undefined });
+    expect(task.agentId).not.toBe(reviewer);
+    expect(e.killed).toContain(reviewer);
+
+    // The fixing agent is done: the review starts again without anybody approving.
+    e.verdict('approved');
+    finishLatest(e, id);
+    await vi.waitFor(() => expect(e.store.task(id)?.runs).toHaveLength(4));
+    task = e.store.task(id)!;
+    expect(task).toMatchObject({ status: 'running', reviewStep: 0, autoReview: undefined, reviews: [] });
+
+    finishLatest(e, id);
+    await vi.waitFor(() => expect(e.status(id)).toBe('done'));
+  });
+
+  it('stops after the maximum number of rounds and hands the task to you', async () => {
+    const e = engine();
+    const id = await reviewing(e, 1);
+
+    e.verdict('changes_requested', 'First finding');
+    finishLatest(e, id);
+    await vi.waitFor(() => expect(e.store.task(id)?.runs).toHaveLength(3));
+    finishLatest(e, id);
+    await vi.waitFor(() => expect(e.store.task(id)?.runs).toHaveLength(4));
+
+    e.verdict('changes_requested', 'Second finding');
+    finishLatest(e, id);
+    await vi.waitFor(() => expect(e.status(id)).toBe('review'));
+    expect(e.store.task(id)).toMatchObject({ fixRounds: 1, noteKey: 'note.reviewFixExhausted', autoReview: undefined });
+    expect(e.store.task(id)?.runs).toHaveLength(4);
+  });
+
+  it('does not loop when the maximum is 0 (default) or when the review left no verdict', async () => {
+    const off = engine();
+    const offId = await reviewing(off, 0);
+    off.verdict('changes_requested');
+    finishLatest(off, offId);
+    await vi.waitFor(() => expect(off.status(offId)).toBe('review'));
+    expect(off.store.task(offId)).toMatchObject({ fixRounds: 0, noteKey: 'note.reviewChanges' });
+
+    const missing = engine();
+    const missingId = await reviewing(missing, 3);
+    missing.verdict('missing');
+    finishLatest(missing, missingId);
+    await vi.waitFor(() => expect(missing.status(missingId)).toBe('review'));
+    expect(missing.store.task(missingId)).toMatchObject({ fixRounds: 0, noteKey: 'note.reviewNoResult' });
+  });
+
+  it('gives a manual approval a fresh round budget and lets your feedback end the automatic loop', async () => {
+    const e = engine();
+    const id = await reviewing(e, 1);
+    e.verdict('changes_requested');
+    finishLatest(e, id);
+    await vi.waitFor(() => expect(e.store.task(id)?.runs).toHaveLength(3));
+
+    // Your own feedback takes over: when the agent is done, the task waits for you instead of reviewing by itself.
+    await e.tasks.reject(id, 'Please also update the docs');
+    expect(e.store.task(id)?.autoReview).toBeUndefined();
+    finishLatest(e, id);
+    await vi.waitFor(() => expect(e.status(id)).toBe('review'));
+
+    await e.tasks.approve(id);
+    expect(e.store.task(id)).toMatchObject({ status: 'running', reviewStep: 0, fixRounds: 0 });
+  });
+});
+
+describe('TaskService: iteration loop', () => {
+  type LoopInput = { requirement: string; maxIterations: number; maxMinutes?: number; mode?: 'fresh' | 'continue' };
+  const loopWorkflow = (loop: LoopInput, extraStage = false) => ({
+    label: 'Loop',
+    stages: [
+      { name: 'Build', agentKind: 'claude-code', prompt: '{{task}}{{feedback}}', approval: false, loop },
+      ...(extraStage ? [{ name: 'Docs', agentKind: 'claude-code', prompt: '{{task}}', approval: false }] : []),
+    ],
+  });
+  const fail = (output: string) => ({ exitCode: 1, output });
+
+  /** A running task whose first stage loops until `pnpm test` passes. */
+  async function looping(e: ReturnType<typeof engine>, loop: Partial<LoopInput> = {}, extraStage = false) {
+    e.settings.update({ workflows: { loop: loopWorkflow({ requirement: 'pnpm test', maxIterations: 3, mode: 'fresh', ...loop }, extraStage) } });
+    const task = e.tasks.create({ workspaceId: e.ws.id, title: 'Fix tests', workflowId: 'loop' });
+    e.tasks.start(task.id);
+    await vi.waitFor(() => expect(e.store.task(task.id)?.agentId).toBeDefined());
+    return task.id;
+  }
+  const agentOf = (e: ReturnType<typeof engine>, id: string) => e.store.task(id)!.agentId!;
+  /** The latest agent reports "done" and the requirement check gets `result`. */
+  const finishWith = (e: ReturnType<typeof engine>, id: string, result: { exitCode: number; output: string } | Error) => {
+    e.checkResults.push(result);
+    e.report(agentOf(e, id), 'done');
+  };
+
+  it('tells the agent how it is judged and starts another agent with the output until the requirement is met', async () => {
+    const e = engine();
+    const id = await looping(e);
+    expect(e.spawned[0]?.prompt).toContain('Done criterion');
+    expect(e.spawned[0]?.prompt).toContain('`pnpm test`');
+    expect(e.store.task(id)).toMatchObject({ loopIteration: 1, noteKey: 'note.loopIteration' });
+
+    finishWith(e, id, fail('2 tests failed: parser'));
+    await vi.waitFor(() => expect(e.spawned).toHaveLength(2));
+    expect(e.spawned[1]?.prompt).toContain('The requirement is not met yet');
+    expect(e.spawned[1]?.prompt).toContain('2 tests failed: parser');
+    await vi.waitFor(() => expect(e.store.task(id)).toMatchObject({ status: 'running', loopIteration: 2 }));
+
+    finishWith(e, id, fail('1 test failed: parser'));
+    await vi.waitFor(() => expect(e.spawned).toHaveLength(3));
+
+    // Met: a single-stage workflow ends in review like any other task.
+    finishWith(e, id, { exitCode: 0, output: 'ok' });
+    await vi.waitFor(() => expect(e.status(id)).toBe('review'));
+    expect(e.store.task(id)).toMatchObject({ noteKey: undefined, loopLastFailure: undefined });
+    expect(e.checked).toEqual(['pnpm test', 'pnpm test', 'pnpm test']);
+  });
+
+  it('goes on with the next stage once the requirement is met', async () => {
+    const e = engine();
+    const id = await looping(e, {}, true);
+    finishWith(e, id, { exitCode: 0, output: '' });
+    await vi.waitFor(() => expect(e.store.task(id)).toMatchObject({ status: 'running', stage: 1 }));
+    // The second stage has no loop: no check, no loop state.
+    expect(e.store.task(id)?.loopIteration).toBeUndefined();
+    e.report(agentOf(e, id), 'done');
+    await vi.waitFor(() => expect(e.status(id)).toBe('review'));
+    expect(e.checked).toHaveLength(1);
+  });
+
+  it('stops at the maximum number of iterations and hands the task to you with the last output', async () => {
+    const e = engine();
+    const id = await looping(e, { maxIterations: 2 });
+    finishWith(e, id, fail('first failure'));
+    await vi.waitFor(() => expect(e.spawned).toHaveLength(2));
+    finishWith(e, id, fail('second failure'));
+    await vi.waitFor(() => expect(e.status(id)).toBe('review'));
+    expect(e.store.task(id)).toMatchObject({ noteKey: 'note.loopExhausted', noteParams: { iterations: 2, output: 'second failure' } });
+    expect(e.spawned).toHaveLength(2);
+  });
+
+  it('stops when the check fails with the same output twice in a row', async () => {
+    const e = engine();
+    const id = await looping(e, { maxIterations: 5 });
+    finishWith(e, id, fail('same failure'));
+    await vi.waitFor(() => expect(e.spawned).toHaveLength(2));
+    finishWith(e, id, fail('same failure'));
+    await vi.waitFor(() => expect(e.status(id)).toBe('review'));
+    expect(e.store.task(id)).toMatchObject({ noteKey: 'note.loopStuck' });
+    expect(e.spawned).toHaveLength(2);
+  });
+
+  it('stops when the time limit is over', async () => {
+    const e = engine();
+    const id = await looping(e, { maxIterations: 5, maxMinutes: 10 });
+    e.store.task(id)!.loopStartedAt = new Date(Date.now() - 60 * 60_000).toISOString();
+    finishWith(e, id, fail('still failing'));
+    await vi.waitFor(() => expect(e.status(id)).toBe('review'));
+    expect(e.store.task(id)).toMatchObject({ noteKey: 'note.loopTimeout', noteParams: { minutes: 10 } });
+  });
+
+  it('sends the output to the same agent in continue mode', async () => {
+    const e = engine();
+    const id = await looping(e, { mode: 'continue' });
+    const agent = agentOf(e, id);
+    finishWith(e, id, fail('lint error in a.ts'));
+    await vi.waitFor(() => expect(e.sent).toHaveLength(1));
+    expect(e.sent[0]).toContain('lint error in a.ts');
+    await vi.waitFor(() => expect(e.store.task(id)).toMatchObject({ status: 'running', loopIteration: 2 }));
+    expect(agentOf(e, id)).toBe(agent);
+    expect(e.spawned).toHaveLength(1);
+    expect(e.store.task(id)?.runs.at(-1)?.outcome).toBe('running');
+
+    // The same agent finishes again and this time the requirement is met.
+    finishWith(e, id, { exitCode: 0, output: '' });
+    await vi.waitFor(() => expect(e.status(id)).toBe('review'));
+  });
+
+  it('hands the task to you when the requirement cannot be checked', async () => {
+    const e = engine();
+    const id = await looping(e);
+    finishWith(e, id, new Error('sandbox is gone'));
+    await vi.waitFor(() => expect(e.status(id)).toBe('review'));
+    expect(e.store.task(id)).toMatchObject({ noteKey: 'note.loopCheckError', noteParams: { error: 'sandbox is gone' } });
+  });
+
+  it('does not continue the loop when the task is stopped while the check runs', async () => {
+    const e = engine();
+    const id = await looping(e);
+    const release = e.hold('check');
+    finishWith(e, id, fail('failure'));
+    await vi.waitFor(() => expect(e.checked).toHaveLength(1));
+    e.tasks.stop(id);
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(e.status(id)).toBe('backlog');
+    expect(e.spawned).toHaveLength(1);
+  });
+
+  it('gives a rejection a fresh budget: feedback goes to the agent and the loop starts counting again', async () => {
+    const e = engine();
+    const id = await looping(e, { maxIterations: 1 });
+    finishWith(e, id, fail('failure'));
+    await vi.waitFor(() => expect(e.status(id)).toBe('review'));
+    await e.tasks.reject(id, 'Try the other approach');
+    await vi.waitFor(() => expect(e.status(id)).toBe('running'));
+    expect(e.store.task(id)?.loopIteration).toBe(1);
   });
 });

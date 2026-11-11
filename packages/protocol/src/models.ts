@@ -452,6 +452,26 @@ export const PROVIDER_PRESETS: Record<string, { provider: ApiProvider; descripti
  * Prompt templates may use {{task.title}}, {{task.description}}, {{task}} (both), {{previous.output}}
  * (last screen of the previous stage's agent), {{diff}} (changed files) and {{feedback}} (review feedback).
  */
+/** Upper limit for a stage loop: every iteration is a full agent run. */
+export const MAX_LOOP_ITERATIONS = 20;
+
+/**
+ * Iteration loop of a stage: after the agent says it is done, CoCoon runs `requirement` in the task's sandbox. Exit code 0
+ * ends the loop and the workflow continues; otherwise the agent gets the output and runs again, until the requirement is
+ * met or a limit is hit (iterations, time, or the same failure twice in a row), then the task waits for you in review.
+ */
+export const StageLoop = z.object({
+  /** Shell command (run in the workspace folder, e.g. "pnpm test"). Exit code 0 = requirement met. */
+  requirement: z.string().trim().min(1).max(2000),
+  /** Hard limit of agent runs (the first one counts), so a loop can never run forever. */
+  maxIterations: z.number().int().min(1).max(MAX_LOOP_ITERATIONS),
+  /** Optional time limit for the whole loop, in minutes. */
+  maxMinutes: z.number().int().min(1).max(1440).optional(),
+  /** fresh: every iteration is a new agent (clean context, state lives in the files); continue: the same agent gets the output. */
+  mode: z.enum(['fresh', 'continue']).default('fresh'),
+});
+export type StageLoop = z.infer<typeof StageLoop>;
+
 export const WorkflowStage = z.object({
   name: LocalizedText,
   /** Agent type (key of settings.agents). */
@@ -459,6 +479,8 @@ export const WorkflowStage = z.object({
   prompt: z.string().min(1),
   /** Wait for a human approval after this stage before continuing (the last stage always ends in review). */
   approval: z.boolean().default(false),
+  /** Repeat the stage until a requirement is met (see StageLoop). */
+  loop: StageLoop.optional(),
 });
 export type WorkflowStage = z.infer<typeof WorkflowStage>;
 

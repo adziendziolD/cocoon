@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto';
 import { GIT_CREDENTIAL_HELPER_SCRIPT } from './sandbox/git-auth.ts';
-import { DEFAULT_REVIEW_PROMPT, localize, parseReport, reportInstructions, type Agent, type Language, type MethodParams, type ReviewResult, type Settings, type Task, type TaskStatus, type WorkflowStage, type Workspace } from '@cocoon/protocol';
+import { DEFAULT_REVIEW_PROMPT, localize, parseReport, reportInstructions, type Agent, type Language, type MethodParams, type ReviewResult, type Settings, type StageLoop, type Task, type TaskStatus, type WorkflowStage, type Workspace } from '@cocoon/protocol';
 import type { AgentManager } from './agents/manager.ts';
 import { CocoonError, notFound } from './errors.ts';
 import type { EventBus } from './events.ts';
@@ -15,6 +16,12 @@ import { applyPatch, withHandle, type WorkspaceService } from './workspaces.ts';
 
 const SCHEDULE_INTERVAL_MS = 5000;
 const PREVIOUS_OUTPUT_LINES = 80;
+/** A requirement command that runs longer than this is stopped and counts as failed. */
+const LOOP_CHECK_SECONDS = 900;
+/** How much of a failed check the agent gets (lines / characters from the end) and how much goes into the task note. */
+const LOOP_FEEDBACK_LINES = 80;
+const LOOP_FEEDBACK_CHARS = 6000;
+const LOOP_NOTE_CHARS = 400;
 const PRIORITY_RANK = { high: 0, normal: 1, low: 2 } as const;
 
 /**
@@ -106,6 +113,7 @@ export class TaskService {
       runs: [],
       attention: false,
       reviews: [],
+      fixRounds: 0,
       pullRequests: [],
       issue: origin.issue,
       scheduleId: origin.scheduleId,
@@ -141,6 +149,8 @@ export class TaskService {
       if (status === 'backlog' || status === 'queued') {
         // Moving back means starting over with the first stage next time.
         task.stage = 0;
+        task.fixRounds = 0;
+        task.autoReview = undefined;
         clearNote(task);
       }
       if (patch.order === undefined) task.order = this.nextOrder(task.workspaceId, status);
@@ -173,6 +183,8 @@ export class TaskService {
     const open = task.dependsOn.map((id) => this.store.task(id)).filter((dep): dep is Task => !!dep && dep.status !== 'done');
     if (open.length) throw new CocoonError('conflict', t('error.taskDependencies', { titles: open.map((d) => `„${d.title}“`).join(', ') }));
     if (task.status === 'done' || task.status === 'failed') task.stage = 0;
+    task.fixRounds = 0;
+    task.autoReview = undefined;
     // A task in review or failed may still have a live agent: do not leave it running next to the new one.
     this.stopAgent(task);
     this.launch(task);
@@ -191,6 +203,8 @@ export class TaskService {
       // Code review first; pushing and the pull request follow when all review agents approve.
       task.reviewStep = 0;
       task.reviews = [];
+      task.fixRounds = 0;
+      task.autoReview = undefined;
       this.launchReview(task);
     } else {
       // Fails (task stays in review) if the work cannot be pushed, e.g. without a GitHub token.
@@ -349,9 +363,22 @@ export class TaskService {
       const stages = this.stagesOrFail(task);
       if (!stages) return;
       task.stage = stages.length - 1;
+      const rounds = task.fixRounds ?? 0;
+      const maxRounds = review?.maxFixRounds ?? 0;
+      if (result.verdict === 'changes_requested' && rounds < maxRounds) {
+        // Review-fix loop: a fresh working agent gets the findings, then the review starts again (see finishStage).
+        // A missing verdict does not loop: nothing is known about what to fix.
+        task.fixRounds = rounds + 1;
+        task.autoReview = true;
+        this.stopTaskAgents(task);
+        this.launch(task, fixFeedback(result));
+        return;
+      }
       task.status = 'review';
       task.attention = false;
-      setNote(task, result.verdict === 'missing' ? 'note.reviewNoResult' : 'note.reviewChanges', { summary: result.summary ?? '' });
+      const exhausted = result.verdict === 'changes_requested' && maxRounds > 0;
+      const noteKey = result.verdict === 'missing' ? 'note.reviewNoResult' : exhausted ? 'note.reviewFixExhausted' : 'note.reviewChanges';
+      setNote(task, noteKey, { summary: result.summary ?? '', rounds });
       task.order = this.nextOrder(task.workspaceId, 'review');
       this.save(task);
       this.notifier.notify('task.review', 'notify.taskReview', { title: task.title }, `/tasks?task=${task.id}`);
@@ -436,6 +463,9 @@ export class TaskService {
     if (task.status !== 'review' && task.status !== 'running') {
       throw new CocoonError('conflict', t('error.taskNotInReview', { title: task.title }));
     }
+    // Your feedback replaces the automatic loops: a requirement check in progress is outdated, and the task waits for you again when the agent is done.
+    this.invalidate(task.id);
+    task.autoReview = undefined;
     if (task.reviewStep !== undefined) {
       // Feedback during the code review goes to the working agent, not the reviewer.
       if (task.status === 'running') this.stopAgent(task);
@@ -448,6 +478,7 @@ export class TaskService {
     if (agent && agent.status !== 'exited') {
       // The agent is still there: continue the conversation with the feedback.
       await this.agents.sendInput({ agentId: agent.id, text: feedback, submit: true });
+      if (task.loopIteration !== undefined) this.restartLoopBudget(task);
       const run = task.runs.at(-1);
       if (run) {
         run.outcome = 'running';
@@ -475,6 +506,7 @@ export class TaskService {
     task.status = 'review';
     task.attention = false;
     task.reviewStep = undefined;
+    task.autoReview = undefined;
     setNote(task, 'note.markedFinished');
     task.order = this.nextOrder(task.workspaceId, 'review');
     this.save(task);
@@ -488,6 +520,8 @@ export class TaskService {
     task.reviewStep = undefined;
     task.status = 'backlog';
     task.stage = 0;
+    task.fixRounds = 0;
+    task.autoReview = undefined;
     task.attention = false;
     clearNote(task);
     task.order = this.nextOrder(task.workspaceId, 'backlog');
@@ -606,12 +640,28 @@ export class TaskService {
     if (task.reviewStep !== undefined) return this.background(this.finishReview(task), `finishing the review of task ${task.id}`);
     const stages = this.stagesOrFail(task);
     if (!stages) return;
+    const loop = stages[task.stage]?.loop;
+    if (loop) return this.background(this.checkLoop(task, loop), `checking the requirement of task ${task.id}`);
+    this.advance(task, stages);
+  }
+
+  /** The stage is done (and its requirement met, if it has one): next stage, automatic review, or waiting for you. */
+  private advance(task: Task, stages: WorkflowStage[]): void {
     const stage = stages[task.stage];
     const last = task.stage >= stages.length - 1;
     if (!last && stage && !stage.approval) {
       task.stage += 1;
       this.launch(task);
       return;
+    }
+    if (last && task.autoReview) {
+      // Review-fix loop: the working agent fixed the findings, so the review runs again without waiting for you.
+      task.autoReview = undefined;
+      if (this.reviewConfig(task)) {
+        task.reviewStep = 0;
+        task.reviews = [];
+        return this.launchReview(task);
+      }
     }
     if (task.scheduleId && last) return this.background(this.finishScheduledRun(task), `finishing scheduled task ${task.id}`);
     task.status = 'review';
@@ -665,6 +715,121 @@ export class TaskService {
     this.notifier.notify('task.review', 'notify.scheduledReview', { title: current.title, summary }, `/tasks?task=${current.id}`);
   }
 
+  // ── iteration loop ─────────────────────────────────────────────────────────
+
+  /** Loop bookkeeping when a stage starts: the first iteration starts the clock, a stage without a loop carries no loop state. */
+  private trackLoop(task: Task, loop: StageLoop | undefined, iteration: number): void {
+    if (!loop) {
+      task.loopIteration = undefined;
+      task.loopStartedAt = undefined;
+      task.loopLastFailure = undefined;
+      return;
+    }
+    task.loopIteration = iteration;
+    if (iteration === 1) {
+      task.loopStartedAt = new Date().toISOString();
+      task.loopLastFailure = undefined;
+    }
+  }
+
+  /** Your feedback gives the loop a fresh budget (iterations, time, stuck detection). */
+  private restartLoopBudget(task: Task): void {
+    task.loopIteration = 1;
+    task.loopStartedAt = new Date().toISOString();
+    task.loopLastFailure = undefined;
+  }
+
+  /**
+   * The agent of a looping stage says it is done: run the requirement in the sandbox. Met → the workflow goes on. Not met →
+   * another iteration with the output as feedback, unless a limit is hit (iterations, time) or the check fails with exactly
+   * the same output as the last time (no progress); then the task waits for you in review.
+   */
+  private async checkLoop(snapshot: Task, loop: StageLoop): Promise<void> {
+    const generation = this.generations.get(snapshot.id);
+    const agentId = snapshot.agentId;
+    const iteration = snapshot.loopIteration ?? 1;
+    // Stopped, rejected, deleted or taken over by another agent while the check ran: that decision wins.
+    const current = (): Task | undefined => {
+      const task = this.store.task(snapshot.id);
+      return task && task.status === 'running' && task.agentId === agentId && task.runs.at(-1)?.outcome === 'finished' && this.generations.get(task.id) === generation ? task : undefined;
+    };
+
+    setNote(snapshot, 'note.loopChecking', { n: iteration, max: loop.maxIterations });
+    this.save(snapshot);
+    let result: { exitCode: number; output: string };
+    try {
+      if (!snapshot.sandboxId) throw new Error(t('note.loopNoSandbox'));
+      if (this.store.sandbox(snapshot.sandboxId)?.status === 'stopped') await this.sandboxes.start(snapshot.sandboxId);
+      result = await this.agents.runCheck(snapshot.sandboxId, loop.requirement, LOOP_CHECK_SECONDS);
+    } catch (err) {
+      const task = current();
+      if (task) this.stopLoop(task, 'note.loopCheckError', { error: (err as Error).message });
+      return;
+    }
+    const task = current();
+    if (!task) return;
+
+    if (result.exitCode === 0) {
+      task.loopLastFailure = undefined;
+      clearNote(task);
+      this.save(task);
+      const stages = this.stagesOrFail(task);
+      if (stages) this.advance(task, stages);
+      return;
+    }
+
+    const output = result.exitCode === 124 ? `${result.output}\n(stopped after ${LOOP_CHECK_SECONDS} seconds)` : result.output;
+    const failure = createHash('sha1').update(output).digest('hex');
+    const params = { iterations: iteration, output: summarize(output) };
+    const minutes = (Date.now() - Date.parse(task.loopStartedAt ?? new Date().toISOString())) / 60_000;
+    if (iteration >= loop.maxIterations) return this.stopLoop(task, 'note.loopExhausted', params);
+    if (loop.maxMinutes && minutes >= loop.maxMinutes) return this.stopLoop(task, 'note.loopTimeout', { ...params, minutes: loop.maxMinutes });
+    if (task.loopLastFailure === failure) return this.stopLoop(task, 'note.loopStuck', params);
+
+    task.loopLastFailure = failure;
+    const feedback = loopFeedback(loop, output, iteration + 1);
+    if (loop.mode === 'continue' && (await this.continueAgent(task, feedback, iteration + 1, loop, generation))) return;
+    // Fresh iteration (or the agent is gone): a new agent in the same sandbox gets the output.
+    const latest = current();
+    if (latest) this.launch(latest, feedback, iteration + 1);
+  }
+
+  /** "continue" mode: the finished agent gets the output and works on. False when it cannot (gone), so a new agent is started. */
+  private async continueAgent(task: Task, feedback: string, iteration: number, loop: StageLoop, generation: number | undefined): Promise<boolean> {
+    const agent = task.agentId ? this.store.agent(task.agentId) : undefined;
+    if (!agent || agent.status === 'exited') return false;
+    try {
+      await this.agents.sendInput({ agentId: agent.id, text: feedback, submit: true });
+    } catch {
+      return false;
+    }
+    // Stopped or rejected while the input was sent: that decision wins, the agent is no longer ours to continue.
+    const current = this.store.task(task.id);
+    if (!current || current.status !== 'running' || this.generations.get(task.id) !== generation) return true;
+    const run = current.runs.at(-1);
+    if (run) {
+      run.outcome = 'running';
+      run.finishedAt = undefined;
+    }
+    current.loopIteration = iteration;
+    current.loopLastFailure = task.loopLastFailure;
+    setNote(current, 'note.loopIteration', { n: iteration, max: loop.maxIterations });
+    this.save(current);
+    return true;
+  }
+
+  /** The loop ends without the requirement being met: the task waits for you in review, with the last output. */
+  private stopLoop(task: Task, key: MessageKey, params: Record<string, string | number>): void {
+    task.status = 'review';
+    task.attention = false;
+    task.loopLastFailure = undefined;
+    setNote(task, key, params);
+    task.order = this.nextOrder(task.workspaceId, 'review');
+    this.save(task);
+    this.notifier.notify('task.review', 'notify.loopStopped', { title: task.title, reason: t(key, params, this.settings.get().general.language) }, `/tasks?task=${task.id}`);
+    void this.schedule();
+  }
+
   private fail(task: Task, key: MessageKey, params: Record<string, string | number> = {}): void {
     const run = task.runs.at(-1);
     if (run?.outcome === 'running') {
@@ -683,9 +848,10 @@ export class TaskService {
   }
 
   /** Marks the task running right away and does the slow part (sandbox, agent) in the background. */
-  private launch(task: Task, feedback?: string): void {
+  private launch(task: Task, feedback?: string, iteration = 1): void {
     const stage = this.stages(task)[task.stage];
     if (!stage) throw new CocoonError('bad_request', t('error.unknownWorkflow', { id: task.workflowId ?? '' }));
+    this.trackLoop(task, stage.loop, iteration);
     const lang = currentLanguage();
     task.status = 'running';
     task.attention = false;
@@ -707,6 +873,7 @@ export class TaskService {
         const sandboxId = await this.ensureSandbox(task);
         if (outdated()) return;
         let prompt = await this.renderPrompt(stage, task, sandboxId, previousAgentId, feedback);
+        if (stage.loop && !this.shellLike(stage.agentKind)) prompt += `\n\n${loopInstructions(stage.loop, iteration)}`;
         let env: Record<string, string> | undefined;
         if (task.scheduleId && task.stage === this.stages(task).length - 1) {
           // The last agent of a scheduled run leaves a report (read in finishScheduledRun). Shell agents run the prompt
@@ -733,7 +900,8 @@ export class TaskService {
           return;
         }
         current.agentId = agent.id;
-        clearNote(current);
+        if (stage.loop) setNote(current, 'note.loopIteration', { n: iteration, max: stage.loop.maxIterations });
+        else clearNote(current);
         current.runs.push({
           stage: current.stage,
           stageName: localize(stage.name, lang) ?? '',
@@ -1014,9 +1182,50 @@ function clearNote(task: Task): void {
 export function localizeTask(task: Task, lang: Language): Task {
   const note = task.noteKey && isMessageKey(task.noteKey) ? t(task.noteKey, task.noteParams, lang) : task.note;
   // Tasks saved before reviews/pull requests existed have no such fields.
-  return { ...task, runs: [...task.runs], reviews: task.reviews ?? [], pullRequests: task.pullRequests ?? [], note };
+  return { ...task, runs: [...task.runs], reviews: task.reviews ?? [], fixRounds: task.fixRounds ?? 0, pullRequests: task.pullRequests ?? [], note };
 }
 
+
+/** The last lines of a command's output, capped, for the agent. */
+function tail(output: string): string {
+  const lines = output.trimEnd().split('\n').slice(-LOOP_FEEDBACK_LINES).join('\n');
+  return lines.length > LOOP_FEEDBACK_CHARS ? lines.slice(-LOOP_FEEDBACK_CHARS) : lines;
+}
+
+/** One short line for the task note and notifications. */
+function summarize(output: string): string {
+  const flat = output.trim().split('\n').slice(-6).join(' ⏎ ');
+  return flat.length > LOOP_NOTE_CHARS ? `…${flat.slice(-LOOP_NOTE_CHARS)}` : flat;
+}
+
+/** What the agent of a looping stage is told up front: how it is judged and how many tries there are. */
+function loopInstructions(loop: StageLoop, iteration: number): string {
+  return [
+    `Done criterion: when you finish, CoCoon runs \`${loop.requirement}\` in the workspace folder. Exit code 0 means you are done.`,
+    `Run it yourself before you finish. If it fails, you get another iteration with its output (this is iteration ${iteration} of at most ${loop.maxIterations}).`,
+  ].join('\n');
+}
+
+/** What the agent gets after a failed check. */
+function loopFeedback(loop: StageLoop, output: string, nextIteration: number): string {
+  return [
+    `The requirement is not met yet: \`${loop.requirement}\` failed (next iteration: ${nextIteration} of at most ${loop.maxIterations}). Its output (last lines):`,
+    '```',
+    tail(output) || '(no output)',
+    '```',
+    `Fix the cause and run \`${loop.requirement}\` again yourself before you finish.`,
+  ].join('\n');
+}
+
+/** What the working agent gets when the review-fix loop sends the review findings back to it. */
+function fixFeedback(result: ReviewResult): string {
+  return [
+    `The code review (${result.agentKind}) requested changes:`,
+    result.summary?.trim() || '(no details given – check the changes with `git diff cocoon-baseline`)',
+    '',
+    'Fix these findings and commit your changes. When you are done, the review runs again automatically.',
+  ].join('\n');
+}
 
 /** What a review agent has to do at the end: the verdict file, and pushing + the pull request when it may. */
 function reviewResultInstructions(file: string, publish: boolean, task: Task, baseBranch: string | undefined): string {

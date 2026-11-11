@@ -325,6 +325,14 @@ export const messages = {
   'note.publishedNothing': { de: 'Übernommen: keine Änderungen, Sandbox entfernt', en: 'Accepted: no changes, sandbox removed' },
   'note.reviewing': { de: 'Code-Review läuft ({step}/{total}) …', en: 'Code review running ({step}/{total}) …' },
   'note.reviewChanges': { de: 'Code-Review: Änderungen nötig – {summary}', en: 'Code review: changes requested – {summary}' },
+  'note.reviewFixExhausted': { de: 'Code-Review: Änderungen weiterhin nötig, auch nach {rounds} automatischen Korrekturrunden. {summary}', en: 'Code review: changes still requested after {rounds} automatic fix rounds. {summary}' },
+  'note.loopIteration': { de: 'Durchlauf {n} von {max}', en: 'Iteration {n} of {max}' },
+  'note.loopChecking': { de: 'Prüfe die Anforderung nach Durchlauf {n} von {max} …', en: 'Checking the requirement after iteration {n} of {max} …' },
+  'note.loopExhausted': { de: 'Anforderung nach {iterations} Durchläufen nicht erfüllt. Letzte Ausgabe: {output}', en: 'Requirement not met after {iterations} iterations. Last output: {output}' },
+  'note.loopTimeout': { de: 'Zeitlimit von {minutes} Minuten erreicht, Anforderung nach {iterations} Durchläufen nicht erfüllt. Letzte Ausgabe: {output}', en: 'Time limit of {minutes} minutes reached, requirement not met after {iterations} iterations. Last output: {output}' },
+  'note.loopStuck': { de: 'Kein Fortschritt: Die Prüfung scheitert nach {iterations} Durchläufen mit derselben Ausgabe. Letzte Ausgabe: {output}', en: 'No progress: the check fails with the same output after {iterations} iterations. Last output: {output}' },
+  'note.loopCheckError': { de: 'Die Anforderung konnte nicht geprüft werden: {error}', en: 'The requirement could not be checked: {error}' },
+  'note.loopNoSandbox': { de: 'Die Aufgabe hat keine Sandbox.', en: 'The task has no sandbox.' },
   'note.reviewNoResult': { de: 'Der Review-Agent hat kein Ergebnis hinterlassen. „Freigeben“ startet das Review erneut.', en: 'The review agent left no result. "Approve" runs the review again.' },
   'note.reviewNoToken': { de: 'Der Review-Agent soll selbst hochladen, aber es ist kein GitHub-Token hinterlegt (Einstellungen → Zugangsdaten → GITHUB_TOKEN).', en: 'The review agent is supposed to push, but no GitHub token is stored (Settings → Credentials → GITHUB_TOKEN).' },
   'note.reviewNoSandbox': { de: 'Für das Code-Review fehlt die Sandbox der Aufgabe.', en: 'The task has no sandbox for the code review.' },
@@ -356,6 +364,7 @@ export const messages = {
 
   // notifications (webhook)
   'notify.agentBlocked': { de: '⏳ Agent {kind} in „{sandbox}“ wartet auf deine Entscheidung', en: '⏳ Agent {kind} in "{sandbox}" is waiting for your decision' },
+  'notify.loopStopped': { de: '🔁 Schleife bei Aufgabe „{title}“ gestoppt: {reason}', en: '🔁 Loop of task "{title}" stopped: {reason}' },
   'notify.taskReview': { de: '👀 Aufgabe „{title}“ ist bereit zum Review', en: '👀 Task "{title}" is ready for review' },
   'notify.taskFailed': { de: '❌ Aufgabe „{title}“ ist fehlgeschlagen: {note}', en: '❌ Task "{title}" failed: {note}' },
   'notify.scheduledReview': { de: '🔔 Geplanter Lauf „{title}“ braucht dich: {summary}', en: '🔔 Scheduled run "{title}" needs you: {summary}' },
