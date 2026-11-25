@@ -84,7 +84,7 @@ export class ImageService {
 
   ref(kind: ImageKind): string {
     if (kind === 'proxy') return PROXY_IMAGE;
-    if (kind === 'agents') return this.driver.kind === 'bwrap' ? 'agents' : 'volume:cocoon-agents';
+    if (kind === 'agents') return this.driver.kind === 'bwrap' ? 'agents' : this.driver.kind === 'kubernetes' ? 'pvc:cocoon-agents' : 'volume:cocoon-agents';
     return this.settings.get().sandbox.image;
   }
 

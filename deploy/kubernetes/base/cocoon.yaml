@@ -1,0 +1,106 @@
+# Initial settings (only read on the first start, later edited in the UI): the sandbox image the nodes pull.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cocoon-settings
+  namespace: cocoon
+data:
+  settings.json: |
+    { "sandbox": { "image": "ghcr.io/adziendziold/cocoon-sandbox:slim" } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cocoon
+  namespace: cocoon
+spec:
+  selector:
+    app.kubernetes.io/name: cocoon
+  ports:
+    - { name: http, port: 7420 }
+    # Egress proxy, for sandboxes only (see the NetworkPolicy below).
+    - { name: proxy, port: 7431 }
+    - { name: credentials, port: 7432 }
+---
+# One replica, always: the state is one file on one volume.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cocoon
+  namespace: cocoon
+spec:
+  replicas: 1
+  serviceName: cocoon
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cocoon
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cocoon
+    spec:
+      serviceAccountName: cocoon
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: cocoond
+          image: ghcr.io/adziendziold/cocoon:latest
+          env:
+            - { name: COCOON_K8S_NAMESPACE, value: cocoon-sandboxes }
+            - { name: COCOON_CONFIG, value: /config/settings.json }
+          ports:
+            - { name: http, containerPort: 7420 }
+            - { name: proxy, containerPort: 7431 }
+            - { name: credentials, containerPort: 7432 }
+          # Listens only after the start-up check of the cluster passed (see the pod log if it never gets ready).
+          readinessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: settings, mountPath: /config, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: settings
+          configMap: { name: cocoon-settings }
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests: { storage: 10Gi }
+---
+# The UI and API are open to the cluster (put an Ingress in front); the egress proxy only to sandboxes.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cocoon
+  namespace: cocoon
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cocoon
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - { protocol: TCP, port: 7420 }
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cocoon-sandboxes
+      ports:
+        - { protocol: TCP, port: 7431 }
+        - { protocol: TCP, port: 7432 }

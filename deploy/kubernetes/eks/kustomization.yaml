@@ -1,0 +1,34 @@
+# CoCoon on Amazon EKS. Not applied as it is: replace the three REPLACE values, see docs/KUBERNETES.md.
+#   kubectl apply -k deploy/kubernetes/eks
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../base
+  - storage.yaml
+  - ingress.yaml
+patches:
+  - patch: |
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: cocoon
+        namespace: cocoon
+      spec:
+        template:
+          spec:
+            containers:
+              - name: cocoond
+                env:
+                  - { name: COCOON_K8S_STORAGE_CLASS, value: cocoon-ebs }
+                  - { name: COCOON_K8S_TOOLBOX_STORAGE_CLASS, value: cocoon-efs }
+                  - { name: COCOON_K8S_SANDBOX_NODES, value: cocoon.dev/sandbox=true }
+                  # One proxy (the load balancer) in front: its X-Forwarded-For is believed.
+                  - { name: COCOON_TRUST_PROXY, value: "1" }
+                  - { name: COCOON_PUBLIC_URL, value: https://cocoon.REPLACE.example.com }
+                  - { name: COCOON_PREVIEW_DOMAIN, value: preview.REPLACE.example.com }
+  # New EKS clusters have no default StorageClass.
+  - target: { kind: StatefulSet, name: cocoon, namespace: cocoon }
+    patch: |
+      - op: add
+        path: /spec/volumeClaimTemplates/0/spec/storageClassName
+        value: cocoon-ebs

@@ -1,0 +1,35 @@
+# CoCoon in the kind test cluster (applied by setup.sh): locally built images, a fixed admin token.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../deploy/kubernetes/base
+  - toolbox-volume.yaml
+patches:
+  - patch: |
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: cocoon-settings
+        namespace: cocoon
+      data:
+        settings.json: |
+          { "sandbox": { "image": "cocoon/sandbox:latest" } }
+  - patch: |
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: cocoon
+        namespace: cocoon
+      spec:
+        template:
+          spec:
+            containers:
+              - name: cocoond
+                image: cocoon/cocoond:test
+                imagePullPolicy: Never
+                env:
+                  - { name: COCOON_TOKEN, value: kubernetes-test-token-0123456789 }
+                  - { name: COCOON_TOOLBOX_AUTOINSTALL, value: "0" }
+                  - { name: COCOON_K8S_TOOLBOX_STORAGE_CLASS, value: cocoon-rwx }
+                  - { name: COCOON_K8S_SANDBOX_NODES, value: cocoon.dev/sandbox=true }
+                  - { name: COCOON_K8S_WORKSPACE_SIZE, value: 1Gi }

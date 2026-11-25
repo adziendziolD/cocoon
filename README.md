@@ -225,9 +225,11 @@ CoCoon talks to sandboxes through a small driver interface, so the isolation tec
 | **Docker** | The standard container engine | daemon (~100 MB), root | containers (+ gVisor / Kata runtimes) | Docker Desktop on macOS/Windows |
 | **bubblewrap** | Linux process sandboxes (namespaces, as used by Flatpak and Claude Code's own sandbox) | tiny – no daemon, no images | user/pid/ipc/uts/(net) namespaces, read-only host, no capabilities | Linux only; shares the host kernel and installed tools; **no resource limits and no enforced egress**: sandboxes with network ("Restricted", "Open") share the host's network, so they are refused unless you set `COCOON_BWRAP_HOST_NETWORK=1`; "No network" works without it |
 
+| **Kubernetes** | Every sandbox is a pod with its own volume; cocoond runs in the same cluster | a cluster | containers (+ RuntimeClasses such as gVisor / Kata), NetworkPolicies | needs a network plugin that enforces NetworkPolicies and ReadWriteMany storage; no image builds, no shared ports, no managed services – see [docs/KUBERNETES.md](docs/KUBERNETES.md) |
+
 Selection: `COCOON_DRIVER=auto` (default) uses an explicit `DOCKER_SOCKET`, then a Podman socket, then Docker. It does **not** fall back to
 bubblewrap silently, because bubblewrap cannot enforce egress; choose it with `COCOON_DRIVER=bwrap` (or let `auto` use it with `COCOON_BWRAP_HOST_NETWORK=1`).
-Force one with `COCOON_DRIVER=docker|podman|bwrap`. The UI shows the active backend and its capabilities
+Force one with `COCOON_DRIVER=docker|podman|bwrap`; Kubernetes is only used with `COCOON_DRIVER=kubernetes` (set in its image). The UI shows the active backend and its capabilities
 (*Settings → Sandbox defaults*), and `system.info` reports `driverKind` and `capabilities`.
 
 - **Podman:** enable the API socket – rootless `systemctl --user enable --now podman.socket` (socket under
@@ -967,7 +969,7 @@ Everything is configurable in the UI. Environment variables (all optional, see [
 | `COCOON_SESSION_MAX_HOURS` | `168` | Hours until a user's session ends, however active it is |
 | `COCOON_TRUST_PROXY` | loopback | Number of reverse proxies in front of CoCoon, or their addresses: only then is `X-Forwarded-For` believed, which the sign-in throttle needs to tell clients apart. The default trusts a proxy on the same machine; `0` trusts nobody |
 | `COCOON_CONFIG` | – | JSON with initial settings for the very first start ([example](cocoon.config.example.json)) |
-| `COCOON_DRIVER` | `auto` | Sandbox backend: `auto`, `docker`, `podman`, `bwrap` |
+| `COCOON_DRIVER` | `auto` | Sandbox backend: `auto`, `docker`, `podman`, `bwrap`, `kubernetes` ([settings](docs/KUBERNETES.md)) |
 | `COCOON_INSTANCE` | – | Name suffix for this server's Docker resources (network, proxy, services, toolbox) – lets several servers share one Docker host |
 | `COCOON_TOOLBOX_AUTOINSTALL` | `1` | `0` skips installing the agent CLIs on first start |
 | `COCOON_TOOLBOX_IMAGE` | `docker.io/library/node:24-bookworm-slim` | Docker/Podman: image the agent toolbox is installed with; its Node.js is copied into the toolbox |
@@ -998,6 +1000,7 @@ workdir), `egress` (allowlist, internal-address exceptions `allowPrivate`, crede
   Docker; for rootless Podman enable `podman.socket` for that user and `loginctl enable-linger cocoon`).
 - **TLS:** [`deploy/Caddyfile`](deploy/Caddyfile) – reverse proxy with automatic HTTPS in front of `127.0.0.1:7420`
   (WebSockets work out of the box). Alternatively use a VPN (WireGuard/Tailscale) or an SSH tunnel.
+- **Kubernetes / Amazon EKS:** [`deploy/kubernetes`](deploy/kubernetes) – manifests and what the cluster must provide: [docs/KUBERNETES.md](docs/KUBERNETES.md).
 - Recommended host: Ubuntu 24.04, ≥ 4 cores, ≥ 8 GB RAM, ≥ 40 GB disk. Back up `.data/`.
 
 ## Project structure
@@ -1050,6 +1053,8 @@ pnpm test               # unit tests (Vitest, no Docker/network, < 1 s)
 pnpm test:integration   # integration tests against a real server with Docker (sandboxes, agents, proxy,
                         # API translation, several repositories, shared services, .env injection, every agent CLI
                         # from the toolbox in the slim image; builds the "db" variant for the shared-services test)
+pnpm test:kubernetes    # the Kubernetes backend in a local kind cluster (needs docker, kind, kubectl):
+                        # builds the cocoond image, deploys it and runs the tests against it (tests/kubernetes)
 ```
 
 The integration tests start their own server with `COCOON_INSTANCE=it…` (own port, data folder, Docker network,

@@ -3,8 +3,9 @@ import { existsSync } from 'node:fs';
 import { BwrapDriver } from './bwrap.ts';
 import { DockerDriver } from './docker.ts';
 import type { SandboxDriver } from './driver.ts';
+import { KubernetesDriver, type KubernetesOptions } from './kubernetes.ts';
 
-export type DriverChoice = 'auto' | 'docker' | 'podman' | 'bwrap';
+export type DriverChoice = 'auto' | 'docker' | 'podman' | 'bwrap' | 'kubernetes';
 
 /** Candidate Podman API sockets: rootless, rootful, and Podman machine on macOS/Windows. */
 function podmanSockets(): string[] {
@@ -33,16 +34,18 @@ const dockerSocket = () => ['/var/run/docker.sock', `${process.env.HOME}/.docker
  * Picks the isolation backend. "auto": explicit DOCKER_SOCKET → Podman socket → Docker socket. bubblewrap (Linux) is
  * not picked silently: it cannot enforce egress (sandboxes with network share the host's network), so "auto" only
  * falls back to it when the operator opted in with `bwrapHostNetwork`; COCOON_DRIVER=bwrap chooses it explicitly.
+ * Kubernetes is never picked by "auto" either: it needs a prepared cluster (see docs/KUBERNETES.md).
  */
 export async function selectDriver(
   choice: DriverChoice,
-  opts: { socket?: string; dataDir: string; bwrapHostNetwork?: boolean },
+  opts: { socket?: string; dataDir: string; bwrapHostNetwork?: boolean; kubernetes?: KubernetesOptions },
 ): Promise<SandboxDriver> {
   const bwrap = () => new BwrapDriver(opts.dataDir, { allowHostNetwork: opts.bwrapHostNetwork });
   const candidates: SandboxDriver[] = [];
   if (choice === 'docker') candidates.push(new DockerDriver('docker', opts.socket ?? dockerSocket()));
   else if (choice === 'podman') candidates.push(...(opts.socket ? [opts.socket] : podmanSockets()).map((s) => new DockerDriver('podman', s)));
   else if (choice === 'bwrap') candidates.push(bwrap());
+  else if (choice === 'kubernetes' && opts.kubernetes) candidates.push(new KubernetesDriver(opts.kubernetes));
   else {
     if (opts.socket) candidates.push(new DockerDriver(opts.socket.includes('podman') ? 'podman' : 'docker', opts.socket));
     candidates.push(...podmanSockets().filter((s) => existsSync(s)).map((s) => new DockerDriver('podman', s)));

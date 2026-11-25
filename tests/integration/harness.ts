@@ -6,6 +6,8 @@ const ctx = inject('cocoon');
 /** Integration tests run only when the global setup could start a server (Docker available). */
 export const available = Boolean(ctx);
 export const instance = ctx?.instance ?? '';
+/** The server runs in a Kubernetes cluster (tests/kubernetes), not against Docker on this machine. */
+export const kubernetes = Boolean(ctx?.kubernetes);
 /** Base URL of the test server, e.g. http://127.0.0.1:52586. */
 export const serverUrl = ctx?.url ?? '';
 

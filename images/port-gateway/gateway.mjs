@@ -8,7 +8,7 @@
 import net from 'node:net';
 import { readFileSync, statSync } from 'node:fs';
 
-const MAP_FILE = process.env.PORTS_MAP ?? '/ports/ports.json';
+let MAP_FILE = process.env.PORTS_MAP ?? '/ports/ports.json';
 
 export function parsePorts(spec) {
   const ports = new Set();
@@ -43,7 +43,7 @@ function load() {
   }
 }
 
-function serve(port) {
+function serve(port, bind) {
   const server = net.createServer((client) => {
     load();
     const target = mapping[String(port)];
@@ -69,14 +69,20 @@ function serve(port) {
     client.pipe(upstream).pipe(client);
   });
   server.on('error', (err) => console.error(`port ${port}: ${err.message}`));
-  server.listen(port, '0.0.0.0');
+  server.listen(port, bind);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const ports = parsePorts(process.env.PORTS_LISTEN ?? '7500-7599');
+/** Listens on the ports and follows the mapping file. */
+export function start(spec, bind = '0.0.0.0', mapFile = MAP_FILE) {
+  MAP_FILE = mapFile;
+  const ports = parsePorts(spec);
   load();
   // Bind mounts do not reliably deliver file events on every platform, so poll.
   setInterval(load, 1000).unref();
-  for (const port of ports) serve(port);
-  console.log(`port gateway listening on ${ports.length} ports`);
+  for (const port of ports) serve(port, bind);
+  return ports.length;
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  console.log(`port gateway listening on ${start(process.env.PORTS_LISTEN ?? '7500-7599')} ports`);
 }

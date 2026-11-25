@@ -20,7 +20,7 @@ export function BackendHelp({ className }: { className?: string }) {
   const t = useT();
   const { kind, name } = useBackend();
   const check =
-    kind === 'docker' ? 'docker info' : kind === 'podman' ? 'podman info' : kind === 'bwrap' ? 'bwrap --version && tmux -V' : 'docker info\npodman info\nbwrap --version';
+    kind === 'docker' ? 'docker info' : kind === 'podman' ? 'podman info' : kind === 'bwrap' ? 'bwrap --version && tmux -V' : kind === 'kubernetes' ? 'kubectl logs statefulset/cocoon' : 'docker info\npodman info\nbwrap --version';
   return (
     <Callout
       tone="danger"
@@ -46,7 +46,7 @@ export function BackendHelp({ className }: { className?: string }) {
           {t('onboarding.system.backendHelpBwrap')}
         </Option>
       </ul>
-      <p className="mt-3">{rich(t('onboarding.system.backendHelpSwitch'), { env: code('COCOON_DRIVER=auto|docker|podman|bwrap') })}</p>
+      <p className="mt-3">{rich(t('onboarding.system.backendHelpSwitch'), { env: code('COCOON_DRIVER=auto|docker|podman|bwrap|kubernetes') })}</p>
       <CodeBlock className="mt-3" title={t('onboarding.system.backendTestTitle')} code={check} />
     </Callout>
   );

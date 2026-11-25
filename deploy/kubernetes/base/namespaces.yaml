@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cocoon
+---
+# Sandboxes run here and nowhere else. "restricted": no root, no capabilities, no host access.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cocoon-sandboxes
+  labels:
+    pod-security.kubernetes.io/enforce: restricted

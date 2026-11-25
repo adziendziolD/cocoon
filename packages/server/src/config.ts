@@ -55,8 +55,17 @@ export function loadConfig(env = process.env) {
     publicUrl: env.COCOON_PUBLIC_URL,
     dataDir: resolve(env.COCOON_DATA_DIR ?? resolve(repoRoot, '.data')),
     dockerSocket: env.DOCKER_SOCKET,
-    /** Isolation backend: auto | docker | podman | bwrap. */
-    driver: (env.COCOON_DRIVER ?? 'auto') as 'auto' | 'docker' | 'podman' | 'bwrap',
+    /** Isolation backend: auto | docker | podman | bwrap | kubernetes. */
+    driver: (env.COCOON_DRIVER ?? 'auto') as 'auto' | 'docker' | 'podman' | 'bwrap' | 'kubernetes',
+    /** COCOON_DRIVER=kubernetes (see docs/KUBERNETES.md). */
+    kubernetes: {
+      namespace: env.COCOON_K8S_NAMESPACE || 'cocoon-sandboxes',
+      storageClass: env.COCOON_K8S_STORAGE_CLASS || undefined,
+      workspaceSize: env.COCOON_K8S_WORKSPACE_SIZE || '20Gi',
+      toolboxStorageClass: env.COCOON_K8S_TOOLBOX_STORAGE_CLASS || undefined,
+      sandboxNodes: env.COCOON_K8S_SANDBOX_NODES || undefined,
+      service: env.COCOON_K8S_SERVICE || 'cocoon',
+    },
     /** bubblewrap cannot enforce egress: only with this opt-in may its sandboxes use "egress"/"open" (shared host network) or be picked by "auto". */
     bwrapHostNetwork: env.COCOON_BWRAP_HOST_NETWORK === '1',
     /** Ports of the egress proxy process (bubblewrap driver): forward proxy, credential proxy = port + 1. */

@@ -8,7 +8,7 @@ import type { TestProject } from 'vitest/node';
 
 declare module 'vitest' {
   export interface ProvidedContext {
-    cocoon: { url: string; token: string; instance: string; log: string } | null;
+    cocoon: { url: string; token: string; instance: string; log: string; kubernetes?: boolean } | null;
   }
 }
 
@@ -38,7 +38,7 @@ async function freePort(): Promise<number> {
   });
 }
 
-async function rpc(url: string, token: string, method: string, params: unknown = {}) {
+export async function rpc(url: string, token: string, method: string, params: unknown = {}) {
   const res = await fetch(`${url}/v1/rpc/${method}`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
@@ -50,7 +50,7 @@ async function rpc(url: string, token: string, method: string, params: unknown =
 }
 
 /** Starts an image build / toolbox install and waits until it is done. */
-async function build(url: string, token: string, params: { kind: string; tools?: string[] }) {
+export async function build(url: string, token: string, params: { kind: string; tools?: string[] }) {
   const { buildId } = await rpc(url, token, 'image.build', params);
   const started = Date.now();
   await new Promise((r) => setTimeout(r, 1000));

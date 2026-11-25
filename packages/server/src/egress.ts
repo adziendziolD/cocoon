@@ -7,6 +7,7 @@ import { PROXY_IMAGE, type ImageService } from './images.ts';
 import { authHeaderFor, providerRoute, providerUrls, translatedRoute, type ProviderService } from './providers.ts';
 import { DockerDriver, EGRESS_NETWORK, ignoreStatus, INTERNAL_NETWORK, statusOf } from './sandbox/docker.ts';
 import type { SandboxDriver } from './sandbox/driver.ts';
+import { KubernetesDriver } from './sandbox/kubernetes.ts';
 import type { SecretsService } from './secrets.ts';
 import type { SettingsService } from './settings.ts';
 import type { SandboxRecord, Store } from './store.ts';
@@ -221,7 +222,11 @@ class ContainerProxyRunner implements ProxyRunner {
   }
 }
 
-/** bubblewrap sandboxes share the host network: the proxy is a local process bound to 127.0.0.1. */
+/**
+ * The proxy as a local process. bubblewrap sandboxes share the host network, so it binds to 127.0.0.1. On Kubernetes it
+ * runs in the cocoond pod and listens on all addresses; sandboxes reach it at `host`, the cluster IP of cocoond's Service
+ * (an address, because restricted sandboxes have no DNS).
+ */
 class ProcessProxyRunner implements ProxyRunner {
   private child?: ChildProcess;
   private stopped = false;
@@ -231,6 +236,8 @@ class ProcessProxyRunner implements ProxyRunner {
     private readonly dir: string,
     private readonly port: number,
     private readonly log: (msg: string, err?: unknown) => void,
+    private readonly host: () => string = () => '127.0.0.1',
+    private readonly bind = '127.0.0.1',
   ) {
     process.once('exit', () => {
       this.stopped = true;
@@ -252,10 +259,11 @@ class ProcessProxyRunner implements ProxyRunner {
   }
 
   endpoints(token: string): ProxyEndpoints {
+    const host = this.host();
     return {
-      forward: `http://cocoon:${token}@127.0.0.1:${this.port}`,
-      credentialBase: `http://127.0.0.1:${this.port + 1}/t/${token}`,
-      noProxy: 'localhost,127.0.0.1',
+      forward: `http://cocoon:${token}@${host}:${this.port}`,
+      credentialBase: `http://${host}:${this.port + 1}/t/${token}`,
+      noProxy: [...new Set(['localhost', '127.0.0.1', host])].join(','),
     };
   }
 
@@ -269,7 +277,7 @@ class ProcessProxyRunner implements ProxyRunner {
 
   private spawn(): void {
     const child = spawn(process.execPath, [this.script], {
-      env: { POLICY_DIR: this.dir, FORWARD_PORT: String(this.port), CREDENTIAL_PORT: String(this.port + 1), BIND_HOST: '127.0.0.1' },
+      env: { POLICY_DIR: this.dir, FORWARD_PORT: String(this.port), CREDENTIAL_PORT: String(this.port + 1), BIND_HOST: this.bind },
       stdio: ['ignore', 'ignore', 'pipe'],
     });
     child.stderr?.on('data', (chunk: Buffer) => this.log(`egress proxy: ${chunk.toString().trim()}`));
@@ -309,7 +317,9 @@ export class EgressManager {
     this.runner =
       driver instanceof DockerDriver
         ? new ContainerProxyRunner(driver, this.dir, images)
-        : new ProcessProxyRunner(opts.proxyScript, this.dir, opts.processPort, log);
+        : driver instanceof KubernetesDriver
+          ? new ProcessProxyRunner(opts.proxyScript, this.dir, opts.processPort, log, () => driver.controlHost, '0.0.0.0')
+          : new ProcessProxyRunner(opts.proxyScript, this.dir, opts.processPort, log);
     bus.subscribe((event) => {
       if (event.type === 'sandbox.updated' || event.type === 'sandbox.deleted' || event.type === 'settings.updated') this.writePolicy();
     });
