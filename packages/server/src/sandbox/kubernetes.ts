@@ -131,7 +131,8 @@ export function sandboxStatefulSet(spec: SandboxSpec, opts: KubernetesOptions): 
   const name = sandboxName(spec.sandboxId);
   const labels = { ...MANAGED, [SANDBOX_LABEL]: spec.sandboxId, [NETWORK_LABEL]: spec.network };
   const { cpus, memoryMb } = spec.resources;
-  const limits: Record<string, string> = {};
+  // Local disk (everything outside the volume and /tmp): past this the pod is evicted instead of filling its node.
+  const limits: Record<string, string> = { 'ephemeral-storage': '10Gi' };
   if (cpus) limits.cpu = `${Math.round(cpus * 1000)}m`;
   if (memoryMb) limits.memory = `${memoryMb}Mi`;
   return {
@@ -150,11 +151,11 @@ export function sandboxStatefulSet(spec: SandboxSpec, opts: KubernetesOptions): 
           runtimeClassName: spec.runtime ?? undefined,
           initContainers: [
             {
-              // Folders of the volume, and on first start the home directory of the image.
+              // Folders of the volume, and on first start the home directory of the image (home.new: a copy that was interrupted).
               name: 'volume',
               image: spec.image,
               imagePullPolicy: 'IfNotPresent',
-              command: ['sh', '-c', `cd /data && mkdir -p workspace cocoon && { [ -d home ] || { mkdir home.new && { cp -a ${HOME}/. home.new/ 2>/dev/null || true; } && mv home.new home; }; }`],
+              command: ['sh', '-c', `cd /data && mkdir -p workspace cocoon && { [ -d home ] || { rm -rf home.new && mkdir home.new && { cp -a ${HOME}/. home.new/ 2>/dev/null || true; } && mv home.new home; }; }`],
               securityContext: CONTAINER_SECURITY,
               volumeMounts: [{ name: 'data', mountPath: '/data' }],
             },
@@ -168,7 +169,7 @@ export function sandboxStatefulSet(spec: SandboxSpec, opts: KubernetesOptions): 
               workingDir: spec.workdir,
               env: Object.entries({ PATH: SANDBOX_PATH, ...spec.env }).map(([key, value]) => ({ name: key, value })),
               // Low requests: sandboxes idle most of the time, the limits are what counts.
-              resources: { limits, requests: { cpu: '50m', memory: `${Math.min(memoryMb ?? 256, 256)}Mi` } },
+              resources: { limits, requests: { cpu: '50m', memory: `${Math.min(memoryMb ?? 256, 256)}Mi`, 'ephemeral-storage': '100Mi' } },
               securityContext: CONTAINER_SECURITY,
               volumeMounts: [
                 { name: 'data', mountPath: spec.workdir, subPath: 'workspace' },
@@ -331,7 +332,13 @@ export class KubernetesDriver implements SandboxDriver {
         spec: { accessModes: ['ReadWriteOnce'], storageClassName: this.opts.storageClass, resources: { requests: { storage: this.opts.workspaceSize } } },
       },
     });
-    await this.apps.createNamespacedStatefulSet({ namespace: this.namespace, body });
+    try {
+      await this.apps.createNamespacedStatefulSet({ namespace: this.namespace, body });
+    } catch (err) {
+      // Nobody knows the handle yet: the volume would stay forever.
+      await this.core.deleteNamespacedPersistentVolumeClaim({ name, namespace: this.namespace }).catch(() => undefined);
+      throw err;
+    }
     return { handle: name };
   }
 
@@ -435,7 +442,7 @@ export class KubernetesDriver implements SandboxDriver {
     if (probe.exitCode !== 0) throw new CocoonError('not_found', t('error.pathNotFound', { path }));
     const stderr = collect();
     const out = new PassThrough();
-    const { exited, close } = await this.run(handle, ['tar', '-c', '-C', posix.dirname(path), posix.basename(path)], { stdout: out, stderr: stderr.sink, keepOpen: true });
+    const { exited, close } = await this.run(handle, ['tar', '-c', '-C', posix.dirname(path), posix.basename(path)], { stdout: out, stderr: stderr.sink });
     // An error instead of a clean end if tar fails: otherwise a truncated archive would look complete.
     void exited.then((code) => (code === 0 ? out.end() : out.destroy(new Error(`tar: ${stderr.text().trim() || `exit code ${code}`}`))));
     out.on('close', close);
@@ -496,7 +503,7 @@ export class KubernetesDriver implements SandboxDriver {
   private async run(
     handle: string,
     command: string[],
-    io: { stdout?: PassThrough; stderr?: PassThrough; stdin?: PassThrough | string; tty?: boolean; keepOpen?: boolean },
+    io: { stdout?: PassThrough; stderr?: PassThrough; stdin?: PassThrough | string; tty?: boolean },
   ): Promise<{ exited: Promise<number>; close: () => void }> {
     let stdin: PassThrough | null = null;
     if (typeof io.stdin === 'string') {
