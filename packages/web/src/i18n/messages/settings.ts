@@ -160,6 +160,7 @@ export const de = {
   'backend.active': 'aktiv',
   'backend.docker.description': 'Der bewährte Standard für Container. Läuft als Hintergrunddienst.',
   'backend.podman.description': 'Wie Docker, aber ohne Hintergrunddienst und ohne Root-Rechte.',
+  'backend.kubernetes.description': 'Jede Sandbox ist ein Pod mit eigenem Volume im Cluster. Images kommen aus einer Registry und werden nicht hier gebaut.',
   'backend.bwrap.description':
     'Sehr leichtgewichtig (nur Linux): keine Images, Sandboxes starten sofort. Teilt sich dafür die Programme und den Kernel des Servers.',
   'backend.noResourceLimits': 'CPU- und Arbeitsspeicher-Limits werden mit dieser Technik nicht durchgesetzt.',
@@ -379,6 +380,7 @@ export const en: Messages<typeof de> = {
   'backend.active': 'active',
   'backend.docker.description': 'The proven standard for containers. Runs as a background service.',
   'backend.podman.description': 'Like Docker, but without a background service and without root rights.',
+  'backend.kubernetes.description': 'Every sandbox is a pod with its own volume in the cluster. Images come from a registry and are not built here.',
   'backend.bwrap.description': 'Very lightweight (Linux only): no images, sandboxes start instantly. In return it shares the server’s tools and kernel.',
   'backend.noResourceLimits': 'CPU and memory limits are not enforced with this technology.',
   'backend.noResourceLimitsShort': 'Note: these limits are not enforced with the current sandbox technology.',

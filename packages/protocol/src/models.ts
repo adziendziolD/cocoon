@@ -693,7 +693,7 @@ export type SandboxVariant = z.infer<typeof SandboxVariant>;
 
 
 /** Isolation backend of the server. */
-export const DriverKind = z.enum(['docker', 'podman', 'bwrap']);
+export const DriverKind = z.enum(['docker', 'podman', 'bwrap', 'kubernetes']);
 export type DriverKind = z.infer<typeof DriverKind>;
 
 export const DriverCapabilities = z.object({

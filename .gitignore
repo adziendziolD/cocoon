@@ -5,3 +5,4 @@ dist/
 *.log
 .cocoon.log
 .DS_Store
+tests/kubernetes/.kubeconfig

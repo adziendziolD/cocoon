@@ -27,7 +27,7 @@ const CATEGORIES: Array<ServiceKindInfo['category']> = ['database', 'mock'];
 /** Whether CoCoon can run containers for managed services (not with bubblewrap). */
 function useManagedSupported() {
   const backend = useBackend();
-  return { supported: backend.kind !== 'bwrap' && backend.capabilities.images !== false, name: backend.name ?? '' };
+  return { supported: backend.kind !== 'bwrap' && backend.kind !== 'kubernetes' && backend.capabilities.images !== false, name: backend.name ?? '' };
 }
 
 export function ServicesSettings() {

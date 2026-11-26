@@ -1,7 +1,7 @@
 import { request } from 'node:http';
 import { connect } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { available, createSandbox, rpc, serverUrl, sh, waitFor } from './harness.ts';
+import { available, createSandbox, kubernetes, rpc, serverUrl, sh, waitFor } from './harness.ts';
 
 /** A tiny server in the sandbox: HTTP answers with the Host it saw, upgrades echo raw bytes (like a WebSocket would). */
 const SERVER = `
@@ -108,7 +108,8 @@ describe.runIf(available)('port forwarding', () => {
     expect(reply).toContain('ping');
   });
 
-  it('shares a port on the host network and closes it again', async () => {
+  // Kubernetes has previews only: a shared port would need a Service of its own.
+  it.skipIf(kubernetes)('shares a port on the host network and closes it again', async () => {
     const shared = await rpc('ports.open', { sandboxId: id, port: 5173, mode: 'shared' });
     expect(shared.opened.mode).toBe('shared');
     expect(shared.opened.url).toMatch(/^http:\/\/127\.0\.0\.1:1755\d$/);

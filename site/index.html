@@ -102,9 +102,13 @@
     .arch .box { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; }
     .arch .box b { display: block; margin-bottom: 4px; }
     .arch .box span { color: var(--muted); font-size: 14px; }
+    .arch .box b span { color: inherit; font-size: inherit; }
     .arch .box.core { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: linear-gradient(180deg, var(--accent-soft), var(--surface)); }
     .arch .down { text-align: center; color: var(--subtle); font-size: 13px; }
     @media (max-width: 760px) { .arch .row { grid-template-columns: 1fr; } }
+    .arch .zone { display: grid; gap: 14px; padding: 16px; border: 1px dashed color-mix(in srgb, var(--accent) 40%, var(--line)); border-radius: 18px; }
+    .arch .zone > .tag { font-size: 12.5px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--subtle); }
+    .arch .zone > .tag code { text-transform: none; letter-spacing: 0; color: var(--accent); font-size: 13px; }
 
     .quick { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: start; }
     @media (max-width: 900px) { .quick { grid-template-columns: 1fr; } }
@@ -139,6 +143,7 @@
       <nav class="links">
         <a class="hide-sm" href="#features"><span lang="en">Features</span><span lang="de">Funktionen</span></a>
         <a class="hide-sm" href="#screenshots">Screenshots</a>
+        <a class="hide-sm" href="#kubernetes">Kubernetes</a>
         <a class="hide-sm" href="#quickstart">Quickstart</a>
         <a href="https://github.com/adziendziolD/cocoon">GitHub</a>
         <a class="hide-sm" href="#support">Support</a>
@@ -251,7 +256,7 @@
           <div class="text">
             <div class="eyebrow"><span lang="en">Security</span><span lang="de">Sicherheit</span></div>
             <h2><span lang="en">Isolated by default</span><span lang="de">Standardmäßig isoliert</span></h2>
-            <p class="sub"><span lang="en">Each sandbox is a hardened container (or a bubblewrap process sandbox). Internet access is restricted to an allowlist, and AI provider keys do not enter the sandbox.</span><span lang="de">Jede Sandbox ist ein gehärteter Container (oder eine bubblewrap-Prozess-Sandbox). Internetzugang nur über eine Freigabeliste, und KI-Anbieter-Keys kommen nicht in die Sandbox.</span></p>
+            <p class="sub"><span lang="en">Each sandbox is a hardened container, a Kubernetes pod or a bubblewrap process sandbox. Internet access is restricted to an allowlist, and AI provider keys do not enter the sandbox.</span><span lang="de">Jede Sandbox ist ein gehärteter Container, ein Kubernetes-Pod oder eine bubblewrap-Prozess-Sandbox. Internetzugang nur über eine Freigabeliste, und KI-Anbieter-Keys kommen nicht in die Sandbox.</span></p>
             <ul>
               <li><span lang="en"><b>Egress proxy</b>: blocked connections are logged and can be allowed with one click</span><span lang="de"><b>Egress-Proxy</b>: blockierte Verbindungen werden protokolliert und lassen sich mit einem Klick erlauben</span></li>
               <li><span lang="en"><b>Credential proxy</b>: agents only see placeholders, the real key is added on the way out</span><span lang="de"><b>Credential-Proxy</b>: Agenten sehen nur Platzhalter, der echte Key kommt erst auf dem Weg nach draußen dazu</span></li>
@@ -312,8 +317,8 @@
         </div>
         <div class="grid">
           <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z" /><path d="m3 8 9 5 9-5M12 13v8" /></svg></div>
-            <h3><span lang="en">Docker, Podman or bubblewrap</span><span lang="de">Docker, Podman oder bubblewrap</span></h3>
-            <p><span lang="en">Picked automatically. Rootless Podman without a daemon, or lightweight Linux process sandboxes that start in ~0.3 s.</span><span lang="de">Wird automatisch gewählt. Rootless Podman ohne Daemon oder leichte Linux-Prozess-Sandboxes, die in ~0,3 s starten.</span></p></div>
+            <h3><span lang="en">Docker, Podman, bubblewrap or Kubernetes</span><span lang="de">Docker, Podman, bubblewrap oder Kubernetes</span></h3>
+            <p><span lang="en">Picked automatically on one server: rootless Podman without a daemon, or lightweight Linux process sandboxes that start in ~0.3 s. Or run it <a href="#kubernetes">in your cluster</a>.</span><span lang="de">Auf einem Server automatisch gewählt: rootless Podman ohne Daemon oder leichte Linux-Prozess-Sandboxes, die in ~0,3 s starten. Oder <a href="#kubernetes">in deinem Cluster</a>.</span></p></div>
           <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8" /><rect x="4" y="8" width="16" height="12" rx="2" /><path d="M2 14h2M20 14h2M15 13v2M9 13v2" /></svg></div>
             <h3>MCP, CLI & API</h3>
             <p><span lang="en">Let Claude Code on your laptop orchestrate CoCoon via MCP, script it with the CLI or use the typed HTTP/WebSocket API.</span><span lang="de">Lass Claude Code auf deinem Laptop CoCoon per MCP steuern, skripte es mit der CLI oder nutze die typisierte HTTP-/WebSocket-API.</span></p></div>
@@ -380,6 +385,75 @@
             <div class="box"><b><span lang="en">Egress & credential proxy</span><span lang="de">Egress- & Credential-Proxy</span></b><span lang="en">allowlist, API keys, API translation</span><span lang="de">Freigabeliste, API-Keys, API-Übersetzung</span></div>
             <div class="box"><b><span lang="en">Shared services</span><span lang="de">Gemeinsame Dienste</span></b><span lang="en">PostgreSQL, MySQL, MongoDB, Redis, mocks</span><span lang="de">PostgreSQL, MySQL, MongoDB, Redis, Mocks</span></div>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Kubernetes -->
+    <section id="kubernetes">
+      <div class="wrap">
+        <div class="center">
+          <div class="eyebrow">Kubernetes</div>
+          <h2><span lang="en">Or in your cluster</span><span lang="de">Oder in deinem Cluster</span></h2>
+          <p class="sub"><span lang="en">On Kubernetes and Amazon EKS every sandbox is a pod with its own volume. NetworkPolicies decide what it can reach, and sandboxes get their own nodes.</span><span lang="de">Auf Kubernetes und Amazon EKS ist jede Sandbox ein Pod mit eigenem Volume. NetworkPolicies legen fest, was er erreicht, und Sandboxes bekommen eigene Nodes.</span></p>
+        </div>
+        <div class="arch">
+          <div class="row" style="--n: 3">
+            <div class="box"><b>Browser</b><span lang="en">Web UI, live terminals, previews</span><span lang="de">Web-Oberfläche, Live-Terminals, Previews</span></div>
+            <div class="box"><b>CLI · MCP · API</b><span lang="en">scripts, CI, other agents</span><span lang="de">Skripte, CI, andere Agenten</span></div>
+            <div class="box"><b><span lang="en">Registry</span><span lang="de">Registry</span></b><span lang="en">cocoond and sandbox images, pulled by the nodes</span><span lang="de">cocoond- und Sandbox-Images, von den Nodes geladen</span></div>
+          </div>
+          <div class="down"><span lang="en">↓ Ingress · HTTPS · one wildcard host for previews ↓</span><span lang="de">↓ Ingress · HTTPS · ein Wildcard-Host für Previews ↓</span></div>
+          <div class="zone">
+            <div class="tag"><span lang="en">Namespace</span><span lang="de">Namespace</span> <code>cocoon</code> · <span lang="en">system nodes</span><span lang="de">System-Nodes</span></div>
+            <div class="row" style="--n: 3">
+              <div class="box core"><b>cocoond</b><span lang="en">one pod: sandboxes, agents, tasks, previews. Its rights end at the sandbox namespace</span><span lang="de">ein Pod: Sandboxes, Agenten, Aufgaben, Previews. Seine Rechte enden am Sandbox-Namespace</span></div>
+              <div class="box"><b><span lang="en">Egress & credential proxy</span><span lang="de">Egress- & Credential-Proxy</span></b><span lang="en">runs in the cocoond pod: allowlist, API keys, API translation</span><span lang="de">läuft im cocoond-Pod: Freigabeliste, API-Keys, API-Übersetzung</span></div>
+              <div class="box"><b><span lang="en">Data volume</span><span lang="de">Daten-Volume</span></b><span lang="en">settings, tasks and secrets on block storage</span><span lang="de">Einstellungen, Aufgaben und Secrets auf Block-Storage</span></div>
+            </div>
+          </div>
+          <div class="down"><span lang="en">↓ Kubernetes API: pods, exec, volumes · ↑ sandboxes reach only the proxy</span><span lang="de">↓ Kubernetes-API: Pods, Exec, Volumes · ↑ Sandboxes erreichen nur den Proxy</span></div>
+          <div class="zone">
+            <div class="tag"><span lang="en">Namespace</span><span lang="de">Namespace</span> <code>cocoon-sandboxes</code> · <span lang="en">sandbox nodes · no root, no cluster token</span><span lang="de">Sandbox-Nodes · kein Root, kein Cluster-Token</span></div>
+            <div class="row" style="--n: 3">
+              <div class="box"><b><span lang="en">Pod · no network</span><span lang="de">Pod · kein Netzwerk</span></b><span lang="en">a NetworkPolicy denies everything, in and out</span><span lang="de">eine NetworkPolicy sperrt alles, rein und raus</span></div>
+              <div class="box"><b><span lang="en">Pod · restricted</span><span lang="de">Pod · eingeschränkt</span></b><span lang="en">reaches the egress proxy and nothing else</span><span lang="de">erreicht den Egress-Proxy und sonst nichts</span></div>
+              <div class="box"><b><span lang="en">Pod · open</span><span lang="de">Pod · offen</span></b><span lang="en">reaches the internet, but not the cluster, its nodes or cloud metadata</span><span lang="de">erreicht das Internet, aber nicht Cluster, Nodes oder Cloud-Metadaten</span></div>
+            </div>
+            <div class="row" style="--n: 2">
+              <div class="box"><b><span lang="en">One volume per sandbox</span><span lang="de">Ein Volume pro Sandbox</span></b><span lang="en">workspace and home survive a stop; a stopped sandbox uses no node</span><span lang="de">Workspace und Home überleben einen Stopp; eine gestoppte Sandbox belegt keinen Node</span></div>
+              <div class="box"><b><span lang="en">Agent toolbox</span><span lang="de">Agent-Toolbox</span></b><span lang="en">one shared volume with the agent CLIs, read-only in every sandbox</span><span lang="de">ein gemeinsames Volume mit den Agent-CLIs, in jeder Sandbox nur lesbar</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="gallery" style="grid-template-columns: 1fr; max-width: 920px; margin: 56px auto 0">
+          <figure><div class="frame" data-zoom="assets/kubernetes.webp"><img src="assets/kubernetes.webp" loading="lazy" width="1800" height="1125" alt="Sandbox settings with Kubernetes as the active sandbox technology" /></div>
+            <figcaption class="center"><span lang="en"><b>Same UI, other backend</b> – the settings show which sandbox technology is in use.</span><span lang="de"><b>Gleiche Oberfläche, anderes Backend</b> – die Einstellungen zeigen, welche Sandbox-Technik läuft.</span></figcaption></figure>
+        </div>
+        <div class="quick" style="margin-top: 56px">
+          <div>
+            <h3><span lang="en">What the cluster needs</span><span lang="de">Was der Cluster braucht</span></h3>
+            <p class="sub" style="font-size: 16px"><span lang="en">CoCoon checks this at every start and tells you what is missing instead of running unprotected.</span><span lang="de">CoCoon prüft das bei jedem Start und sagt dir, was fehlt, statt ungeschützt zu laufen.</span></p>
+            <ol class="steps">
+              <li><span lang="en"><b>A network plugin that enforces NetworkPolicies</b> – Calico or Cilium; on EKS the VPC CNI with network policies turned on.</span><span lang="de"><b>Ein Netzwerk-Plugin, das NetworkPolicies durchsetzt</b> – Calico oder Cilium; auf EKS das VPC CNI mit eingeschalteten Network Policies.</span></li>
+              <li><span lang="en"><b>Shared storage (ReadWriteMany)</b> for the agent toolbox – NFS, CephFS or Longhorn; on EKS EFS.</span><span lang="de"><b>Geteilter Storage (ReadWriteMany)</b> für die Agent-Toolbox – NFS, CephFS oder Longhorn; auf EKS EFS.</span></li>
+              <li><span lang="en"><b>Block storage</b> for the sandbox volumes, and optionally an Ingress controller and a node group for sandboxes.</span><span lang="de"><b>Block-Storage</b> für die Sandbox-Volumes, dazu optional ein Ingress-Controller und eine Node-Gruppe für Sandboxes.</span></li>
+            </ol>
+            <p style="margin-top: 26px"><a class="btn" href="https://github.com/adziendziolD/cocoon/blob/main/docs/KUBERNETES.md"><span lang="en">Kubernetes guide</span><span lang="de">Kubernetes-Anleitung</span> →</a></p>
+          </div>
+          <pre class="term"><span class="c"># plain Kubernetes</span>
+<span class="p">$</span> kubectl apply -k deploy/kubernetes/base
+<span class="c"># Amazon EKS: EBS, EFS, load balancer</span>
+<span class="p">$</span> kubectl apply -k deploy/kubernetes/eks
+
+<span class="p">$</span> kubectl -n cocoon logs cocoon-0
+  <span class="g">CoCoon is running: http://localhost:7420</span>
+  Sandbox backend: kubernetes
+
+<span class="p">$</span> kubectl -n cocoon-sandboxes get pods
+  NAME                       READY   STATUS
+  cocoon-sb-5c9481cf14d5-0   1/1     Running
+  cocoon-sb-bed5ad86b85e-0   1/1     Running</pre>
         </div>
       </div>
     </section>

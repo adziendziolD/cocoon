@@ -1,0 +1,27 @@
+# One load balancer for the UI and all previews (p<port>-<sandbox>.preview.…). Needs the AWS Load Balancer Controller,
+# an ACM certificate for both names and DNS records for them pointing to the load balancer.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cocoon
+  namespace: cocoon
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    # Terminals and agent output are WebSockets that can be quiet for a long time.
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=3600
+spec:
+  ingressClassName: alb
+  rules:
+    - host: cocoon.REPLACE.example.com
+      http: &cocoon
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: cocoon
+                port: { name: http }
+    - host: "*.preview.REPLACE.example.com"
+      http: *cocoon

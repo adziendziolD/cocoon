@@ -364,7 +364,7 @@ export class DockerDriver implements SandboxDriver {
   }
 }
 
-function collect() {
+export function collect() {
   const chunks: Buffer[] = [];
   let size = 0;
   const sink = new PassThrough();

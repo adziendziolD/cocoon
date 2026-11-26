@@ -5,7 +5,7 @@ import type { TFunction } from '../i18n';
 /** Assumed while system.info is loading, so no warnings flash up before we know better. */
 const FULL_CAPABILITIES: DriverCapabilities = { images: true, resourceLimits: true, enforcedEgress: true, runtimes: true };
 
-const BACKEND_LABEL: Record<DriverKind, string> = { docker: 'Docker', podman: 'Podman', bwrap: 'bubblewrap' };
+const BACKEND_LABEL: Record<DriverKind, string> = { docker: 'Docker', podman: 'Podman', bwrap: 'bubblewrap', kubernetes: 'Kubernetes' };
 
 /** Display name of a sandbox backend ("Docker", "Podman", "bubblewrap"). */
 export function backendLabel(kind: DriverKind | undefined, fallback?: string): string {

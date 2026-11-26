@@ -31,7 +31,12 @@ import { WorkspaceService as WorkspacesService } from './workspaces.ts';
 const config = loadConfig();
 let driver: Awaited<ReturnType<typeof selectDriver>>;
 try {
-  driver = await selectDriver(config.driver, { socket: config.dockerSocket, dataDir: config.dataDir, bwrapHostNetwork: config.bwrapHostNetwork });
+  driver = await selectDriver(config.driver, {
+    socket: config.dockerSocket,
+    dataDir: config.dataDir,
+    bwrapHostNetwork: config.bwrapHostNetwork,
+    kubernetes: { ...config.kubernetes, controlLabels: { 'app.kubernetes.io/name': 'cocoon' }, proxyPorts: [config.proxyPort, config.proxyPort + 1], probeImage: config.toolboxImage },
+  });
 } catch (err) {
   console.error(t('console.driverDown', { error: (err as Error).message }));
   process.exit(1);

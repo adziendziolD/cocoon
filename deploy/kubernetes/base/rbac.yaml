@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cocoon
+  namespace: cocoon
+---
+# Everything cocoond does with sandboxes, limited to the sandbox namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cocoon
+  namespace: cocoon-sandboxes
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [create, get, list, delete, deletecollection]
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create, get]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [create, get, delete]
+  - apiGroups: [apps]
+    resources: [statefulsets]
+    verbs: [create, get, delete]
+  - apiGroups: [apps]
+    resources: [statefulsets/scale]
+    verbs: [get, update]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [create, get, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cocoon
+  namespace: cocoon-sandboxes
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cocoon
+subjects:
+  - kind: ServiceAccount
+    name: cocoon
+    namespace: cocoon
+---
+# The cluster IP of its own Service: the address sandboxes reach the egress proxy at.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cocoon
+  namespace: cocoon
+rules:
+  - apiGroups: [""]
+    resources: [services]
+    resourceNames: [cocoon]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cocoon
+  namespace: cocoon
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cocoon
+subjects:
+  - kind: ServiceAccount
+    name: cocoon
+    namespace: cocoon
+---
+# Optional: lists the RuntimeClasses (gVisor, Kata) so they can be chosen for sandboxes. Without it none is offered.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cocoon-runtimeclasses
+rules:
+  - apiGroups: [node.k8s.io]
+    resources: [runtimeclasses]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cocoon-runtimeclasses
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cocoon-runtimeclasses
+subjects:
+  - kind: ServiceAccount
+    name: cocoon
+    namespace: cocoon

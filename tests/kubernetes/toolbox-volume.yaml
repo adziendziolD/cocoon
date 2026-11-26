@@ -1,0 +1,12 @@
+# kind has no storage with ReadWriteMany: a folder of the sandbox node stands in for it (setup.sh creates it).
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: cocoon-toolbox
+spec:
+  storageClassName: cocoon-rwx
+  accessModes: [ReadWriteMany]
+  capacity:
+    storage: 5Gi
+  hostPath:
+    path: /var/cocoon-toolbox

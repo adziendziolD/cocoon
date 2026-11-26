@@ -1,0 +1,46 @@
+# Example cluster for eksctl (eksctl create cluster -f cluster.yaml): two node groups and the add-ons CoCoon needs.
+# A template, not tested against AWS: check region, sizes and versions before use.
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+metadata:
+  name: cocoon
+  region: eu-central-1
+
+iam:
+  withOIDC: true
+
+addons:
+  - name: vpc-cni
+    # Off by default: without it NetworkPolicies are ignored and cocoond refuses to start. "strict": a new pod has no
+    # network until its policies are in place (otherwise it is open for the first seconds).
+    configurationValues: '{"enableNetworkPolicy":"true","env":{"NETWORK_POLICY_ENFORCING_MODE":"strict"}}'
+  - name: coredns
+  - name: kube-proxy
+  - name: eks-pod-identity-agent
+  - name: aws-ebs-csi-driver
+    useDefaultPodIdentityAssociations: true
+  - name: aws-efs-csi-driver
+    useDefaultPodIdentityAssociations: true
+
+managedNodeGroups:
+  # cocoond, CoreDNS, controllers.
+  - name: system
+    instanceType: t3.large
+    desiredCapacity: 2
+    privateNetworking: true
+  # Sandboxes only. One zone, because a sandbox's volume (EBS) cannot follow its pod to another zone.
+  - name: sandboxes
+    instanceType: m6i.2xlarge
+    minSize: 1
+    maxSize: 6
+    desiredCapacity: 1
+    availabilityZones: [eu-central-1a]
+    privateNetworking: true
+    labels:
+      cocoon.dev/sandbox: "true"
+    taints:
+      - key: cocoon.dev/sandbox
+        value: "true"
+        effect: NoSchedule
+    # Pods must not get the node's IAM role from the instance metadata service.
+    disablePodIMDS: true

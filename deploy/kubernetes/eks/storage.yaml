@@ -1,0 +1,25 @@
+# Sandbox volumes and cocoond's data: EBS (ReadWriteOnce). A volume lives in one availability zone, so the sandbox
+# node group stays in one zone (cluster.yaml).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: cocoon-ebs
+provisioner: ebs.csi.aws.com
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  type: gp3
+  encrypted: "true"
+---
+# Agent toolbox: EFS (ReadWriteMany). The file system must exist, with a mount target the nodes can reach on NFS (2049).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: cocoon-efs
+provisioner: efs.csi.aws.com
+parameters:
+  provisioningMode: efs-ap
+  fileSystemId: fs-REPLACE
+  directoryPerms: "755"
+  # The sandbox user: the installer writes as this user, sandboxes read as it.
+  uid: "1000"
+  gid: "1000"

@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { PortMode, SandboxPort } from '@cocoon/protocol';
 import type { ActivityLog } from './activity.ts';
 import { agentNotesScript } from './agents/notes.ts';
@@ -13,6 +14,7 @@ import { scoped } from './instance.ts';
 import { t } from './i18n.ts';
 import { DockerDriver, INTERNAL_NETWORK, statusOf } from './sandbox/docker.ts';
 import type { SandboxDriver } from './sandbox/driver.ts';
+import { KubernetesDriver } from './sandbox/kubernetes.ts';
 import type { SandboxManager } from './sandbox/manager.ts';
 import type { OpenPort, SandboxRecord, Store } from './store.ts';
 
@@ -123,9 +125,10 @@ export class PortService {
     private readonly activity: ActivityLog,
     private readonly log: (msg: string, err?: unknown) => void,
   ) {
-    this.enabled = config.ports.enabled && driver instanceof DockerDriver;
+    this.enabled = config.ports.enabled && (driver instanceof DockerDriver || driver instanceof KubernetesDriver);
     this.previewPorts = parseRange(config.ports.previewRange);
-    this.sharePorts = config.ports.shareBind ? parseRange(config.ports.shareRange) : [];
+    // Kubernetes: sharing a port with the network would need a Service per port; only previews (through cocoond) for now.
+    this.sharePorts = config.ports.shareBind && !(driver instanceof KubernetesDriver) ? parseRange(config.ports.shareRange) : [];
     this.dir = join(store.dataDir, 'ports');
     if (!this.enabled) return;
     mkdirSync(this.dir, { recursive: true, mode: 0o755 });
@@ -371,6 +374,7 @@ export class PortService {
 
   /** Address of a sandbox on a network the gateway is attached to: the internal network, else the default bridge. */
   private async address(record: SandboxRecord): Promise<string | undefined> {
+    if (this.driver instanceof KubernetesDriver) return this.driver.address(record.handle!);
     const docker = (this.driver as DockerDriver).docker;
     const networks = (await docker.getContainer(record.handle!).inspect()).NetworkSettings.Networks;
     return networks[INTERNAL_NETWORK]?.IPAddress || Object.values(networks).find((n) => n.IPAddress)?.IPAddress || undefined;
@@ -390,6 +394,12 @@ export class PortService {
 
   /** Creates (or recreates after a config change) the gateway container that publishes the port ranges. */
   private async ensureGateway(): Promise<void> {
+    if (this.driver instanceof KubernetesDriver) {
+      // cocoond reaches pod addresses itself: the gateway runs in this process, for cocoond only.
+      const gateway = (await import(pathToFileURL(join(this.config.imagesDir, 'port-gateway', 'gateway.mjs')).href)) as { start(spec: string, bind: string, mapFile: string): number };
+      gateway.start(this.config.ports.previewRange, '127.0.0.1', join(this.dir, 'ports.json'));
+      return;
+    }
     const driver = this.driver as DockerDriver;
     const docker = driver.docker;
     const script = join(this.config.imagesDir, 'port-gateway', 'gateway.mjs');

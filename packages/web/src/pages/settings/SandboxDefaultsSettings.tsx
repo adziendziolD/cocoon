@@ -132,7 +132,7 @@ export function SandboxDefaultsSettings() {
   );
 }
 
-const BACKENDS: DriverKind[] = ['docker', 'podman', 'bwrap'];
+const BACKENDS: DriverKind[] = ['docker', 'podman', 'bwrap', 'kubernetes'];
 
 /** Which isolation technology the server uses, what it means and how to switch. */
 function BackendCard() {
@@ -176,7 +176,7 @@ function BackendCard() {
               <summary className="cursor-pointer font-medium text-fg-muted hover:text-fg">{t('backend.switchTitle')}</summary>
               <div className="mt-2 space-y-2 text-fg-muted">
                 <p>{rich(t('backend.switchText'), { env: code('COCOON_DRIVER') })}</p>
-                <CodeBlock code={'COCOON_DRIVER=auto     # ' + t('backend.switchAuto') + '\nCOCOON_DRIVER=docker\nCOCOON_DRIVER=podman\nCOCOON_DRIVER=bwrap'} />
+                <CodeBlock code={'COCOON_DRIVER=auto     # ' + t('backend.switchAuto') + '\nCOCOON_DRIVER=docker\nCOCOON_DRIVER=podman\nCOCOON_DRIVER=bwrap\nCOCOON_DRIVER=kubernetes'} />
               </div>
             </details>
           </>

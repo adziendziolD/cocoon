@@ -17,6 +17,7 @@
     "@cocoon/protocol": "workspace:*",
     "@fastify/static": "^10.1.11",
     "@fastify/websocket": "^11.3.7",
+    "@kubernetes/client-node": "^2.0.2",
     "@lydell/node-pty": "1.2.0-beta.18",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "dockerode": "^5.0.1",
