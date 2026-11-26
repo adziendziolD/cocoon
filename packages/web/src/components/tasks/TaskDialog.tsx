@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { profileAdapter, type Sandbox, type Task, type TaskPriority, type Workspace } from '@cocoon/protocol';
 import { Bot, ChevronDown, ChevronRight, Lightbulb, ListPlus, Inbox, Search, Workflow as WorkflowIcon } from 'lucide-react';
@@ -16,6 +16,7 @@ import { Callout } from '../HelpText';
 import { LoadingState } from '../States';
 import { WorkspaceDot } from '../WorkspaceSwitcher';
 import { PriorityIcon, TaskStatusBadge, WorkflowCards } from './TaskBits';
+import { ImageField, removedImages, storedImages, syncImages, useImagePicker, type DraftImage, type SetImages } from './TaskImages';
 import { useStoreTask } from './useTaskActions';
 
 interface Draft {
@@ -32,6 +33,10 @@ interface Draft {
   dependsOn: string[];
   /** '' = a new sandbox for this task (or the workspace's shared one). */
   sandboxId: string;
+  /** Images for the agent (stored ones and newly picked ones). */
+  images: DraftImage[];
+  /** Ids of the stored images the user took out. */
+  removedImages: string[];
 }
 
 /** Sandboxes of a workspace a task can work in (not the private sandbox of another task). */
@@ -76,12 +81,15 @@ export function TaskDialog({
   const [advanced, setAdvanced] = useState(false);
   const [tips, setTips] = useState(false);
   const [depFilter, setDepFilter] = useState('');
+  // Counts the drafts of this dialog: an image still being read when the draft is replaced must not land in the next one.
+  const session = useRef(0);
 
   const profiles = useMemo(() => Object.entries(settings.data?.agents ?? {}), [settings.data]);
   const workflows = useMemo(() => Object.entries(settings.data?.workflows ?? {}), [settings.data]);
   const allProviders = settings.data?.providers ?? {};
 
   useEffect(() => {
+    session.current++;
     if (!open || !settings.data) return;
     setAdvanced(!!task && (!!task.providers?.length || !!task.model));
     setDepFilter('');
@@ -98,6 +106,8 @@ export function TaskDialog({
         model: task.model ?? '',
         dependsOn: [...task.dependsOn],
         sandboxId: task.sandboxId ?? '',
+        images: storedImages(task),
+        removedImages: [],
       });
       return;
     }
@@ -117,6 +127,8 @@ export function TaskDialog({
       model: '',
       dependsOn: [],
       sandboxId: defaultSandbox(sandboxes.data, ws),
+      images: [],
+      removedImages: [],
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, task?.id, workspaceId, !!settings.data]);
@@ -137,7 +149,25 @@ export function TaskDialog({
         // '' clears a chosen sandbox when editing; a new task simply gets none.
         sandboxId: d.sandboxId || (task?.sandboxId ? '' : undefined),
       };
-      return task ? rpc('task.update', { taskId: task.id, ...common }) : rpc('task.create', { workspaceId: d.workspaceId, status: v.status, ...common });
+      if (task) {
+        // Images first: the update can start the task (a dependency taken out), and its agent must find them.
+        await syncImages(task.id, d.images, d.removedImages, (key, attachment) =>
+          setDraft((x) => x && { ...x, images: x.images.map((i) => (i.key === key ? { kind: 'stored', key: attachment.id, attachment } : i)) }),
+        );
+        return rpc('task.update', { taskId: task.id, ...common });
+      }
+      // Images go up once the task exists. Until they are there it waits in the backlog, so auto-run cannot start it without them.
+      const withImages = d.images.length > 0;
+      const created = await rpc('task.create', { workspaceId: d.workspaceId, status: withImages ? 'backlog' : v.status, ...common });
+      if (!withImages) return created;
+      try {
+        await syncImages(created.id, d.images, []);
+        return await (v.status === 'queued' ? rpc('task.update', { taskId: created.id, status: 'queued' }) : rpc('task.get', { taskId: created.id }));
+      } catch (err) {
+        // The dialog stays open to try again: without this the next try would create the task a second time.
+        await rpc('task.delete', { taskId: created.id }).catch(() => undefined);
+        throw err;
+      }
     },
     {
       success: (_r, v) => (task ? t('taskDialog.saved') : v.status === 'queued' ? t('taskDialog.createdQueued') : t('taskDialog.createdBacklog')),
@@ -152,6 +182,13 @@ export function TaskDialog({
 
   const d = draft;
   const set = (patch: Partial<Draft>) => setDraft((x) => (x ? { ...x, ...patch } : x));
+  const setImages: SetImages = (update) =>
+    setDraft((x) => {
+      if (!x) return x;
+      const images = update(x.images);
+      return { ...x, images, removedImages: [...x.removedImages, ...removedImages(x.images, images)] };
+    });
+  const picker = useImagePicker(d?.images ?? [], setImages, session);
   const ws = d ? workspaces.data?.find((w) => w.id === d.workspaceId) : undefined;
   const profile = d ? settings.data?.agents[d.agentKind] : undefined;
   const effectiveProviders = d?.providers ?? profile?.providers ?? [];
@@ -170,7 +207,8 @@ export function TaskDialog({
 
   const titleError = d && d.title.length > 200 ? t('taskDialog.err.titleLong') : undefined;
   const invalid = !d || !d.title.trim() || !!titleError || !d.workspaceId || (d.mode === 'workflow' && !d.workflowId) || (d.mode === 'agent' && !d.agentKind);
-  const submit = (status: 'backlog' | 'queued') => d && !invalid && save.mutate({ draft: d, status });
+  // Also called by Cmd/Ctrl+Enter, which no disabled button stops while a save is running.
+  const submit = (status: 'backlog' | 'queued') => d && !invalid && !save.isPending && save.mutate({ draft: d, status });
 
   return (
     <Dialog
@@ -277,7 +315,11 @@ export function TaskDialog({
               onChange={(e) => set({ description: e.target.value })}
               placeholder={t('taskDialog.descriptionPlaceholder')}
               onKeyDown={(e) => e.key === 'Enter' && (e.metaKey || e.ctrlKey) && submit(initialStatus)}
+              onPaste={picker.onPaste}
             />
+          </Field>
+          <Field label={t('taskImages.label')} optional>
+            <ImageField taskId={task?.id} images={d.images} setImages={setImages} add={picker.add} />
           </Field>
           {tips && (
             <Callout tone="tip" title={t('taskDialog.tipsTitle')}>

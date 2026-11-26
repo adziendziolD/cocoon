@@ -69,8 +69,8 @@ export function isPublicRoute(method: string, routeUrl: string | undefined): boo
 /** Replaces the value of a `token` query parameter, so credentials do not end up in logs. */
 export const redactToken = (url: string | undefined) => url?.replace(/([?&]token=)[^&#]*/gi, '$1[redacted]');
 
-/** WebSocket frames are RPC calls and terminal input, never bulk data (the ws default is 100 MB). */
-export const WS_MAX_PAYLOAD = 8 * 1024 * 1024;
+/** WebSocket frames are RPC calls and terminal input (the ws default is 100 MB). The largest call is task.add_attachment: 14 MB of base64. */
+export const WS_MAX_PAYLOAD = 16 * 1024 * 1024;
 
 /** Closes sockets of a session that ended or a token that was revoked (application close code). */
 const SIGNED_OUT = 4401;

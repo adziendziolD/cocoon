@@ -41,6 +41,7 @@ import { ErrorState, LoadingState } from '../States';
 import { ReportBadge, ScheduledTag } from '../schedules/ScheduleBits';
 import { WorkspaceTag } from '../WorkspaceSwitcher';
 import { PriorityIcon, StageChips, TaskStatusBadge } from './TaskBits';
+import { TaskImageGallery } from './TaskImages';
 import { useOpenInCockpit, useOpenTask, useTaskActions } from './useTaskActions';
 
 /** Slide-over with everything about one task. Opened anywhere via `?task=<id>` (see useOpenTask). */
@@ -263,6 +264,7 @@ function TaskDetail({ task, allTasks, onClose }: { task: Task; allTasks: Task[];
           ) : (
             <p className="text-sm text-fg-muted">{t('taskDrawer.noDescription')}</p>
           )}
+          <TaskImageGallery task={task} />
         </Section>
 
         <Section title={t('taskDrawer.details')}>

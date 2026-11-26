@@ -1,4 +1,4 @@
-import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EnvVault } from './env-vault.ts';
 import type { Agent, CockpitLayout, EnvTarget, Sandbox, Schedule, Settings, ServiceKind, SharedService, Task, UserRole, Workspace } from '@cocoon/protocol';
@@ -157,6 +157,9 @@ interface State {
  * Minimal persistent state: one JSON file (mode 0600; secrets and env values are encrypted with env.key), rewritten atomically on every change.
  * Good enough for a single control-plane node; swap for SQLite/Postgres when going multi-node.
  */
+/** Ids used as file names: no path separators or dots. */
+const SAFE_ID = /^[\w-]{1,80}$/;
+
 export class Store {
   private readonly file: string;
   private readonly vault: EnvVault;
@@ -340,9 +343,12 @@ export class Store {
     delete this.state.workspaces[id];
     delete this.state.layouts[id];
     delete this.state.envScopes[`workspace:${id}`];
-    for (const task of this.tasks()) if (task.workspaceId === id) delete this.state.tasks[task.id];
+    const taskIds = this.tasks().filter((task) => task.workspaceId === id).map((task) => task.id);
+    for (const taskId of taskIds) delete this.state.tasks[taskId];
     for (const schedule of this.schedules()) if (schedule.workspaceId === id) delete this.state.schedules[schedule.id];
     this.flush();
+    // After the flush: if writing the state fails, the tasks are still there and must keep their images.
+    for (const taskId of taskIds) this.deleteAttachments(taskId);
   }
 
   tasks(): Task[] {
@@ -361,6 +367,46 @@ export class Store {
   deleteTask(id: string): void {
     delete this.state.tasks[id];
     this.flush();
+    this.deleteAttachments(id);
+  }
+
+  // ── task attachments (files next to state.json, the task only keeps their metadata) ─────────────────────────────
+
+  private attachmentFile(taskId: string, attachmentId: string): string {
+    if (!SAFE_ID.test(taskId) || !SAFE_ID.test(attachmentId)) throw new Error(`invalid attachment id ${taskId}/${attachmentId}`);
+    return join(this.dataDir, 'attachments', taskId, attachmentId);
+  }
+
+  putAttachment(taskId: string, attachmentId: string, content: Buffer): void {
+    const file = this.attachmentFile(taskId, attachmentId);
+    mkdirSync(join(file, '..'), { recursive: true, mode: 0o700 });
+    writeFileSync(file, content, { mode: 0o600 });
+  }
+
+  /** Undefined if the file is gone. */
+  attachment(taskId: string, attachmentId: string): Buffer | undefined {
+    try {
+      return readFileSync(this.attachmentFile(taskId, attachmentId));
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** The state no longer names these files when they are removed: a file that cannot be deleted is left over, not an error. */
+  deleteAttachment(taskId: string, attachmentId: string): void {
+    this.removeFiles(this.attachmentFile(taskId, attachmentId));
+  }
+
+  private deleteAttachments(taskId: string): void {
+    if (SAFE_ID.test(taskId)) this.removeFiles(join(this.dataDir, 'attachments', taskId));
+  }
+
+  private removeFiles(path: string): void {
+    try {
+      rmSync(path, { recursive: true, force: true });
+    } catch (err) {
+      console.error(`cocoon: could not remove ${path} (${(err as Error).message})`);
+    }
   }
 
   schedules(): Schedule[] {

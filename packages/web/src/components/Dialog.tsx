@@ -28,7 +28,10 @@ export function Dialog({ open, onClose, title, description, children, footer, si
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && dismissable) onClose();
+      if (e.key !== 'Escape' || !dismissable) return;
+      // A dialog opened from within a dialog: Escape closes the one on top only (the last one in the document).
+      const dialogs = document.querySelectorAll('[role="dialog"]');
+      if (dialogs[dialogs.length - 1] === panelRef.current) onClose();
     };
     document.addEventListener('keydown', onKey);
     const prev = document.body.style.overflow;

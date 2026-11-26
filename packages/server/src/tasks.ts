@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { GIT_CREDENTIAL_HELPER_SCRIPT } from './sandbox/git-auth.ts';
-import { DEFAULT_REVIEW_PROMPT, localize, parseReport, reportInstructions, type Agent, type Language, type MethodParams, type ReviewResult, type Settings, type StageLoop, type Task, type TaskStatus, type WorkflowStage, type Workspace } from '@cocoon/protocol';
+import { ATTACHMENT_TYPES, DEFAULT_REVIEW_PROMPT, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, localize, parseReport, reportInstructions, type Agent, type Language, type MethodParams, type ReviewResult, type Settings, type StageLoop, type Task, type TaskAttachment, type TaskStatus, type WorkflowStage, type Workspace } from '@cocoon/protocol';
 import type { AgentManager } from './agents/manager.ts';
 import { CocoonError, notFound } from './errors.ts';
 import type { EventBus } from './events.ts';
@@ -78,6 +78,16 @@ export class TaskService {
       .sort((a, b) => a.order - b.order || a.createdAt.localeCompare(b.createdAt));
   }
 
+  /**
+   * The task object the store holds, to change in place. Lifecycle steps that are waiting (publishing, a review) hold this
+   * object and check that it is still the stored one: saving a copy would make them give up or write over the change.
+   */
+  private stored(id: string): Task {
+    const task = this.store.task(id);
+    if (!task) throw notFound('Task', id);
+    return task;
+  }
+
   private record(id: string): Task {
     const task = this.store.task(id);
     if (!task) throw notFound('Task', id);
@@ -100,6 +110,7 @@ export class TaskService {
       number: this.workspaces.allocateTaskNumber(workspace.id),
       title: params.title,
       description: params.description ?? '',
+      attachments: [],
       status,
       priority: params.priority ?? 'normal',
       order: this.nextOrder(workspace.id, status),
@@ -160,12 +171,91 @@ export class TaskService {
     return localizeTask(task, currentLanguage());
   }
 
+  /** Attaches an image; agents started afterwards get it (see renderPrompt). */
+  addAttachment({ taskId, name, content }: MethodParams<'task.add_attachment'>): Task {
+    const task = this.stored(taskId);
+    const attachments = task.attachments ?? [];
+    if (attachments.length >= MAX_ATTACHMENTS) throw new CocoonError('bad_request', t('error.attachmentTooMany', { max: MAX_ATTACHMENTS }));
+    const bytes = Buffer.from(content, 'base64');
+    if (bytes.length > MAX_ATTACHMENT_BYTES) throw new CocoonError('bad_request', t('error.attachmentTooLarge', { mb: MAX_ATTACHMENT_BYTES / 1024 / 1024 }));
+    // The type comes from the content: a file name (and with it the type a browser reports) can be wrong.
+    const type = detectImageType(bytes);
+    if (!type) throw new CocoonError('bad_request', t('error.attachmentNotImage'));
+    const attachment: TaskAttachment = {
+      id: newId('at'),
+      name: attachmentName(name, type, attachments.map((a) => a.name)),
+      type,
+      size: bytes.length,
+      createdAt: new Date().toISOString(),
+    };
+    this.store.putAttachment(task.id, attachment.id, bytes);
+    task.attachments = [...attachments, attachment];
+    this.save(task);
+    return localizeTask(task, currentLanguage());
+  }
+
+  removeAttachment(taskId: string, attachmentId: string): Task {
+    const task = this.stored(taskId);
+    const attachment = task.attachments?.find((a) => a.id === attachmentId);
+    if (!attachment) throw notFound('Attachment', attachmentId);
+    task.attachments = task.attachments!.filter((a) => a.id !== attachmentId);
+    this.save(task);
+    this.store.deleteAttachment(task.id, attachmentId);
+    this.dropSandboxAttachments(task, attachment.name);
+    return localizeTask(task, currentLanguage());
+  }
+
+  attachment(taskId: string, attachmentId: string): TaskAttachment & { content: string } {
+    const task = this.record(taskId);
+    const attachment = task.attachments?.find((a) => a.id === attachmentId);
+    const bytes = attachment && this.store.attachment(task.id, attachment.id);
+    if (!attachment || !bytes) throw notFound('Attachment', attachmentId);
+    return { ...attachment, content: bytes.toString('base64') };
+  }
+
+  /**
+   * Copies the task's images into the sandbox (under .cocoon/, which git ignores) and returns the note for the prompt.
+   * Images whose file is missing are left out.
+   */
+  private async provideAttachments(task: Task, sandboxId: string): Promise<string> {
+    // Read now, not from the task object of the launch: images added while the sandbox was built belong to the agent too.
+    const attachments = this.store.task(task.id)?.attachments ?? [];
+    if (!attachments.length) return '';
+    const workdir = this.store.sandbox(sandboxId)?.workdir ?? '/workspace';
+    const dir = `${workdir}/.cocoon/attachments/${task.id}`;
+    await this.sandboxes.sh(sandboxId, `rm -rf "$DIR" && mkdir -p "$DIR"\n${EXCLUDE_COCOON_SCRIPT}`, { DIR: dir, WORKDIR: workdir });
+    const paths: string[] = [];
+    for (const attachment of attachments) {
+      const bytes = this.store.attachment(task.id, attachment.id);
+      if (!bytes) continue;
+      const path = `${dir}/${attachment.name}`;
+      await this.files.write({ sandboxId, path, content: bytes.toString('base64'), encoding: 'base64' });
+      paths.push(path);
+    }
+    return paths.length ? attachmentInstructions(paths) : '';
+  }
+
+  /**
+   * Removes the task's image copies (or the one called `name`) from its sandbox, in the background.
+   * shortcut: a stopped sandbox keeps its copies, clean up on sandbox start if that matters.
+   */
+  private dropSandboxAttachments(task: Task, name?: string): void {
+    const sandbox = task.sandboxId ? this.store.sandbox(task.sandboxId) : undefined;
+    if (sandbox?.status !== 'running') return;
+    const target = `${sandbox.workdir ?? '/workspace'}/.cocoon/attachments/${task.id}${name ? `/${name}` : ''}`;
+    this.background(
+      this.sandboxes.sh(sandbox.id, 'rm -rf "$TARGET"', { TARGET: target }).then(() => undefined),
+      `removing the images of task ${task.id} from sandbox ${sandbox.id}`,
+    );
+  }
+
   /** `removeSandbox`: also delete the sandbox that was created for this task alone. */
   async delete(taskId: string, { removeSandbox = false } = {}): Promise<void> {
     const task = this.record(taskId);
     this.stopAgent(task);
     const own = task.sandboxId ? this.store.sandbox(task.sandboxId) : undefined;
     if (removeSandbox && own?.taskId === task.id) await this.sandboxes.delete(own.id).catch((err) => this.log(`removing sandbox ${own.id} failed`, err));
+    else if (task.attachments?.length) this.dropSandboxAttachments(task);
     this.store.deleteTask(taskId);
     this.generations.delete(taskId);
     for (const other of this.store.tasks()) {
@@ -995,6 +1085,11 @@ export class TaskService {
     let prompt = stage.prompt.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (match, name: string) => values[name] ?? match);
     // Feedback must reach the agent even if the template has no {{feedback}} placeholder.
     if (feedback && !needs('feedback')) prompt += values.feedback;
+    // Shell agents run the prompt as a command: no images for them.
+    if (!this.shellLike(stage.agentKind)) {
+      const note = await this.provideAttachments(task, sandboxId);
+      if (note) prompt += `\n\n${note}`;
+    }
     return prompt;
   }
 
@@ -1144,15 +1239,48 @@ export class TaskService {
     task.updatedAt = new Date().toISOString();
     this.store.putTask(task);
     this.bus.publish({ type: 'task.updated', task: { ...task, runs: [...task.runs] } });
+    // A finished task needs its images in the sandbox no longer (a restart copies them again).
+    if (task.status === 'done' && task.attachments?.length) this.dropSandboxAttachments(task);
   }
 }
 
 /** Removes an old result file and keeps .cocoon/ out of every repository of the workspace folder ($FILE, $WORKDIR). */
-const FRESH_RESULT_FILE_SCRIPT = `mkdir -p "$(dirname "$FILE")" && rm -f "$FILE"
-for d in "$WORKDIR" "$WORKDIR"/*/; do
+const EXCLUDE_COCOON_SCRIPT = `for d in "$WORKDIR" "$WORKDIR"/*/; do
   [ -d "$d/.git" ] || continue
   grep -qxF '/.cocoon/' "$d/.git/info/exclude" 2>/dev/null || echo '/.cocoon/' >> "$d/.git/info/exclude"
 done`;
+const FRESH_RESULT_FILE_SCRIPT = `mkdir -p "$(dirname "$FILE")" && rm -f "$FILE"
+${EXCLUDE_COCOON_SCRIPT}`;
+
+/** Image type by its first bytes (never by name or declared type, so the agent gets what the extension says). */
+export function detectImageType(bytes: Buffer): keyof typeof ATTACHMENT_TYPES | undefined {
+  if (bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
+  const head = bytes.subarray(0, 12).toString('latin1');
+  if (head.startsWith('GIF87a') || head.startsWith('GIF89a')) return 'image/gif';
+  if (head.startsWith('RIFF') && head.slice(8, 12) === 'WEBP') return 'image/webp';
+  return undefined;
+}
+
+/** Safe, unique file name with the extension of the type, e.g. "Bildschirmfoto 2026-11-13.PNG" → "Bildschirmfoto-2026-11-13.png". */
+export function attachmentName(name: string, type: keyof typeof ATTACHMENT_TYPES, taken: string[]): string {
+  const ext = ATTACHMENT_TYPES[type];
+  const base =
+    (name.split(/[/\\]/).pop() ?? '')
+      .replace(/\.[a-z0-9]{1,5}$/i, '')
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\w.-]+/g, '-')
+      .replace(/^[-.]+|[-.]+$/g, '')
+      .slice(0, 80) || 'image';
+  let candidate = `${base}.${ext}`;
+  for (let n = 2; taken.includes(candidate); n++) candidate = `${base}-${n}.${ext}`;
+  return candidate;
+}
+
+function attachmentInstructions(paths: string[]): string {
+  return `Images attached to this task (screenshots, mockups, …). Look at each of them before you start, e.g. with your tool for reading files or viewing images:\n${paths.map((p) => `- ${p}`).join('\n')}`;
+}
 
 /** Sandbox-name-safe slug, e.g. "Fix login bug!" → "fix-login-bug". */
 function slug(text: string): string {
@@ -1181,8 +1309,8 @@ function clearNote(task: Task): void {
 /** Renders the task note in the given language. */
 export function localizeTask(task: Task, lang: Language): Task {
   const note = task.noteKey && isMessageKey(task.noteKey) ? t(task.noteKey, task.noteParams, lang) : task.note;
-  // Tasks saved before reviews/pull requests existed have no such fields.
-  return { ...task, runs: [...task.runs], reviews: task.reviews ?? [], fixRounds: task.fixRounds ?? 0, pullRequests: task.pullRequests ?? [], note };
+  // Tasks saved before attachments/reviews/pull requests existed have no such fields.
+  return { ...task, runs: [...task.runs], attachments: task.attachments ?? [], reviews: task.reviews ?? [], fixRounds: task.fixRounds ?? 0, pullRequests: task.pullRequests ?? [], note };
 }
 
 

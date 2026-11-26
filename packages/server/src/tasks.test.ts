@@ -11,7 +11,7 @@ import type { SandboxManager } from './sandbox/manager.ts';
 import type { WorkspaceService as FilesService } from './sandbox/workspace.ts';
 import { SettingsService } from './settings.ts';
 import { Store, type SandboxRecord } from './store.ts';
-import { TaskService } from './tasks.ts';
+import { attachmentName, detectImageType, TaskService } from './tasks.ts';
 import { WorkspaceService } from './workspaces.ts';
 
 let dir: string;
@@ -58,12 +58,24 @@ function engine() {
     },
     start: async () => undefined,
     delete: async (id: string) => store.deleteSandbox(id),
-    sh: async () => {
+    sh: async (_id: string, _script: string, env?: Record<string, string>) => {
+      if (env?.TARGET) dropped.push(env.TARGET);
       await shGate;
       return shOutput;
     },
   } as unknown as SandboxManager;
-  const files = { checkoutBranch: async () => undefined, diff: async () => ({ files: [] }), publish: async () => ({ pushed: [] }) } as unknown as FilesService;
+  // Image copies removed from the sandbox again.
+  const dropped: string[] = [];
+  // Files written into the sandbox (the task's images).
+  const written: { path: string; content: string }[] = [];
+  const files = {
+    checkoutBranch: async () => undefined,
+    diff: async () => ({ files: [] }),
+    publish: async () => ({ pushed: [] }),
+    write: async (p: { path: string; content: string }) => {
+      written.push({ path: p.path, content: p.content });
+    },
+  } as unknown as FilesService;
   const agents = {
     spawn: async (p: { sandboxId: string; kind: string; prompt?: string }) => {
       await spawnGate;
@@ -98,7 +110,7 @@ function engine() {
   const verdict = (value: 'approved' | 'changes_requested' | 'missing', summary = 'Add a test for the empty case') => {
     shOutput = value === 'missing' ? '' : JSON.stringify({ verdict: value, summary });
   };
-  return { store, tasks, settings, workspaces, ws, report, status, killed, hold, verdict, checkResults, checked, spawned, sent };
+  return { store, tasks, settings, workspaces, ws, report, status, killed, hold, verdict, checkResults, checked, spawned, sent, written, dropped };
 }
 
 /** Starts a task and waits until its agent is spawned. */
@@ -582,5 +594,94 @@ describe('TaskService: iteration loop', () => {
     await e.tasks.reject(id, 'Try the other approach');
     await vi.waitFor(() => expect(e.status(id)).toBe('running'));
     expect(e.store.task(id)?.loopIteration).toBe(1);
+  });
+});
+
+const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('rest of the image')]);
+
+describe('TaskService: images', () => {
+  it('stores images, copies them into the sandbox and names them in the prompt', async () => {
+    const e = engine();
+    const task = e.tasks.create({ workspaceId: e.ws.id, title: 'Fix the header' });
+    const content = PNG.toString('base64');
+    e.tasks.addAttachment({ taskId: task.id, name: 'Screenshot 1.PNG', content });
+    const withTwo = e.tasks.addAttachment({ taskId: task.id, name: 'Screenshot 1.png', content });
+    expect(withTwo.attachments.map((a) => a.name)).toEqual(['Screenshot-1.png', 'Screenshot-1-2.png']);
+    expect(e.tasks.attachment(task.id, withTwo.attachments[0]!.id).content).toBe(content);
+
+    e.tasks.start(task.id);
+    await vi.waitFor(() => expect(e.spawned).toHaveLength(1));
+    const dir = `/workspace/.cocoon/attachments/${task.id}`;
+    expect(e.written).toEqual([
+      { path: `${dir}/Screenshot-1.png`, content },
+      { path: `${dir}/Screenshot-1-2.png`, content },
+    ]);
+    expect(e.spawned[0]!.prompt).toContain(`- ${dir}/Screenshot-1.png`);
+    expect(e.spawned[0]!.prompt).toContain(`- ${dir}/Screenshot-1-2.png`);
+  });
+
+  it('gives the agent an image added after the start, and takes a removed one out of the sandbox', async () => {
+    const e = engine();
+    const task = e.tasks.create({ workspaceId: e.ws.id, title: 'Fix the header' });
+    e.tasks.start(task.id);
+    // Named .jpg, but a PNG: the content decides.
+    const added = e.tasks.addAttachment({ taskId: task.id, name: 'late.jpg', content: PNG.toString('base64') }).attachments[0]!;
+    expect(added).toMatchObject({ name: 'late.png', type: 'image/png' });
+    await vi.waitFor(() => expect(e.spawned).toHaveLength(1));
+    const path = `/workspace/.cocoon/attachments/${task.id}/late.png`;
+    expect(e.spawned[0]!.prompt).toContain(`- ${path}`);
+    expect(e.status(task.id)).toBe('running');
+
+    e.tasks.removeAttachment(task.id, added.id);
+    expect(e.dropped).toEqual([path]);
+  });
+
+  it('refuses files that are not images, too many and too large images', () => {
+    const e = engine();
+    const task = e.tasks.create({ workspaceId: e.ws.id, title: 'Fix the header' });
+    expect(() => e.tasks.addAttachment({ taskId: task.id, name: 'x.png', content: Buffer.from('<svg/>').toString('base64') })).toThrow();
+    const big = Buffer.concat([PNG, Buffer.alloc(10 * 1024 * 1024)]).toString('base64');
+    expect(() => e.tasks.addAttachment({ taskId: task.id, name: 'x.png', content: big })).toThrow();
+    for (let i = 0; i < 10; i++) e.tasks.addAttachment({ taskId: task.id, name: 'x.png', content: PNG.toString('base64') });
+    expect(() => e.tasks.addAttachment({ taskId: task.id, name: 'x.png', content: PNG.toString('base64') })).toThrow();
+    expect(e.store.task(task.id)!.attachments).toHaveLength(10);
+  });
+
+  it('removes the files with the image, the task and the workspace', () => {
+    const e = engine();
+    const a = e.tasks.create({ workspaceId: e.ws.id, title: 'A' });
+    const b = e.tasks.create({ workspaceId: e.ws.id, title: 'B' });
+    const content = PNG.toString('base64');
+    const first = e.tasks.addAttachment({ taskId: a.id, name: 'a.png', content }).attachments[0]!;
+    const second = e.tasks.addAttachment({ taskId: a.id, name: 'b.png', content }).attachments[1]!;
+    const other = e.tasks.addAttachment({ taskId: b.id, name: 'c.png', content }).attachments[0]!;
+
+    expect(e.tasks.removeAttachment(a.id, first.id).attachments.map((x) => x.id)).toEqual([second.id]);
+    expect(e.store.attachment(a.id, first.id)).toBeUndefined();
+    void e.tasks.delete(a.id);
+    expect(e.store.attachment(a.id, second.id)).toBeUndefined();
+    e.store.deleteWorkspace(e.ws.id);
+    expect(e.store.attachment(b.id, other.id)).toBeUndefined();
+  });
+
+  it('gives shell agents no images', async () => {
+    const e = engine();
+    const task = e.tasks.create({ workspaceId: e.ws.id, title: 'List files', description: 'ls', agentKind: 'shell' });
+    e.tasks.addAttachment({ taskId: task.id, name: 'a.png', content: PNG.toString('base64') });
+    e.tasks.start(task.id);
+    await vi.waitFor(() => expect(e.spawned).toHaveLength(1));
+    expect(e.written).toEqual([]);
+    expect(e.spawned[0]!.prompt).not.toContain('.cocoon/attachments');
+  });
+
+  it('detects image types and builds safe file names', () => {
+    expect(detectImageType(PNG)).toBe('image/png');
+    expect(detectImageType(Buffer.from([0xff, 0xd8, 0xff, 0xe0]))).toBe('image/jpeg');
+    expect(detectImageType(Buffer.from('GIF89a......'))).toBe('image/gif');
+    expect(detectImageType(Buffer.from('RIFF....WEBPVP8 '))).toBe('image/webp');
+    expect(detectImageType(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'))).toBeUndefined();
+    expect(attachmentName('../../etc/passwd', 'image/png', [])).toBe('passwd.png');
+    expect(attachmentName('Übersicht – Entwurf.jpeg', 'image/jpeg', [])).toBe('Ubersicht-Entwurf.jpg');
+    expect(attachmentName('...', 'image/gif', ['image.gif'])).toBe('image-2.gif');
   });
 });

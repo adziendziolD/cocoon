@@ -604,6 +604,11 @@ where untrusted code runs, use a fine-grained token limited to the needed reposi
 `{{diff}}` (changed files) and `{{feedback}}` (review feedback). Stages with `approval` pause in `review` until you approve.
 Built-in: **Plan → Build → Review** (approve the plan before implementation) and **Build → Review**.
 
+**Images** (screenshots, mockups): add up to 10 PNG, JPEG, GIF or WebP files (10 MB each) to a task in the task dialog
+(button, drag and drop, or paste into the description) or with `task.add_attachment`. When an agent of the task starts
+(every stage and the review agents, not shell agents), CoCoon copies them into the sandbox under
+`.cocoon/attachments/<task id>/` (kept out of git) and lists their paths at the end of the prompt.
+
 **Iteration loop** (per workflow stage, *Settings → Workflows → Repeat until a requirement is met*). A stage can repeat until a
 **requirement** holds, for example "all tests pass":
 

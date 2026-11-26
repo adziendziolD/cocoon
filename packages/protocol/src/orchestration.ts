@@ -144,6 +144,25 @@ export const TaskReport = z.object({
 });
 export type TaskReport = z.infer<typeof TaskReport>;
 
+/** Image types a task can carry (what the agent CLIs can look at). */
+export const ATTACHMENT_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' } as const;
+export const AttachmentType = z.enum(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+export type AttachmentType = z.infer<typeof AttachmentType>;
+/** Per image and per task. */
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+export const MAX_ATTACHMENTS = 10;
+
+/** An image attached to a task (screenshot, mockup, …). The file itself is kept by the server and copied into the sandbox when an agent starts. */
+export const TaskAttachment = z.object({
+  id: z.string(),
+  /** File name the agent sees (made unique within the task). */
+  name: z.string().min(1).max(120),
+  type: AttachmentType,
+  size: z.number().int().min(0),
+  createdAt: z.string(),
+});
+export type TaskAttachment = z.infer<typeof TaskAttachment>;
+
 export const Task = z.object({
   id: z.string(),
   workspaceId: z.string(),
@@ -155,6 +174,8 @@ export const Task = z.object({
   branch: z.string().optional(),
   title: z.string().min(1).max(200),
   description: z.string().default(''),
+  /** Images that go to the agent with the task. */
+  attachments: z.array(TaskAttachment).default([]),
   status: TaskStatus,
   priority: TaskPriority.default('normal'),
   /** Position within its column (lower = higher up). */

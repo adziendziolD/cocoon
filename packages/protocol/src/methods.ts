@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { DisplayName, Identity, SetupLink, UserInfo, UserRole, Username } from './auth.ts';
-import { CockpitLayout, GithubIssues, Task, TaskPriority, TaskStatus, Workspace, WORKSPACE_KEY, WorkspaceReview } from './orchestration.ts';
+import { CockpitLayout, GithubIssues, Task, TaskAttachment, TaskPriority, TaskStatus, Workspace, WORKSPACE_KEY, WorkspaceReview } from './orchestration.ts';
 import {
   ActivityEntry,
   Agent,
@@ -716,6 +716,28 @@ export const methods = {
       status: z.enum(['backlog', 'queued']).default('backlog'),
     }),
     result: z.object({ tasks: z.array(Task), skipped: z.number().int() }),
+  },
+  'task.add_attachment': {
+    description:
+      'Attaches an image (PNG, JPEG, GIF or WebP, base64, at most 10 MB, 10 per task) to a task. The type is read from the content. Agents started for the task afterwards find it in the sandbox and get its path in their prompt.',
+    mcp: true,
+    params: TaskRef.extend({
+      name: z.string().trim().min(1).max(200),
+      /** Base64 of the file. */
+      content: z.string().min(1).max(14_000_000),
+    }),
+    result: Task,
+  },
+  'task.remove_attachment': {
+    description: 'Removes an image from a task.',
+    mcp: true,
+    params: TaskRef.extend({ attachmentId: z.string() }),
+    result: Task,
+  },
+  'task.attachment': {
+    description: 'Reads an image attached to a task (base64).',
+    params: TaskRef.extend({ attachmentId: z.string() }),
+    result: TaskAttachment.extend({ content: z.string() }),
   },
   'task.delete': { description: 'Deletes a task (stops its agent).', mcp: true, params: TaskRef, result: Ok },
   'task.start': {

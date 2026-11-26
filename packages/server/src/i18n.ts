@@ -299,6 +299,9 @@ export const messages = {
   'provider.missingKey': { de: 'Kein API-Key hinterlegt ({secret})', en: 'No API key stored ({secret})' },
 
   // tasks & workspaces
+  'error.attachmentTooMany': { de: 'Eine Aufgabe kann höchstens {max} Bilder haben', en: 'A task can have at most {max} images' },
+  'error.attachmentTooLarge': { de: 'Das Bild ist größer als {mb} MB', en: 'The image is larger than {mb} MB' },
+  'error.attachmentNotImage': { de: 'Die Datei ist kein Bild (PNG, JPEG, GIF oder WebP)', en: 'The file is not an image (PNG, JPEG, GIF or WebP)' },
   'error.taskBusy': { de: 'Die Aufgabe „{title}“ wird gerade abgeschlossen', en: 'Task "{title}" is being finished right now' },
   'error.taskDependencyCycle': { de: 'Die Abhängigkeiten würden einen Kreis bilden: die Aufgaben würden gegenseitig aufeinander warten', en: 'These dependencies would form a cycle: the tasks would wait for each other forever' },
   'error.cronNeverFires': { de: 'Der Zeitplan „{cron}“ löst nie aus (zum Beispiel 31. Februar)', en: 'The schedule "{cron}" never fires (for example February 31)' },
