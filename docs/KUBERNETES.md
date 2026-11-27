@@ -81,6 +81,25 @@ covered by the tests.
 | Root in the sandbox for CoCoon's setup | yes | no: everything runs as user 1000, images must have that user with home `/home/agent` |
 | Shared ports, managed services (databases) | yes | not yet; previews work |
 
+## Things to know before production
+
+- **Pin the cocoond image.** The manifests use `ghcr.io/<owner>/cocoon:latest`, which follows every merge to `main`.
+  Set a commit tag (`:<7-digit commit>`) or a digest in your overlay.
+- **"Open" sandboxes are kept out of `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16` and
+  `100.64.0.0/10`.** If your pods, Services or nodes use other addresses, open sandboxes can reach them; the start-up
+  check does not notice this.
+- **DNS for "Open" sandboxes** is allowed to pods labelled `k8s-app: kube-dns` in `kube-system`. With NodeLocal
+  DNSCache or another DNS setup, add your own NetworkPolicy for it.
+- **Another sandbox namespace** (`COCOON_K8S_NAMESPACE`) must also be put into the NetworkPolicy `cocoon` in
+  [`cocoon.yaml`](../deploy/kubernetes/base/cocoon.yaml), or sandboxes cannot reach the egress proxy.
+- **Who can read the sandbox namespace** sees each sandbox's environment, including its egress proxy token (API keys
+  are not in there). Keep read access to `cocoon-sandboxes` as narrow as to `cocoon`.
+- **Limits per sandbox:** 10 Gi of node disk outside its volume (the pod is evicted beyond that; the volume stays) and
+  512 Mi for `/tmp`, which is memory and counts towards the memory limit.
+- **Put the Ingress behind your own access control** where you can (VPN, IP allow-list): UI and previews are otherwise
+  only protected by the login. On EKS: `alb.ingress.kubernetes.io/inbound-cidrs`.
+- Tested on current Kubernetes (kind). Before 1.30 the API server speaks an older exec protocol, which is untested.
+
 ## Test setup
 
 `pnpm test:kubernetes` (or `tests/kubernetes/setup.sh` alone) creates a three-node [kind](https://kind.sigs.k8s.io)

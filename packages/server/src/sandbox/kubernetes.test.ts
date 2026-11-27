@@ -1,4 +1,7 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { execPreamble, networkPolicies, sandboxName, sandboxStatefulSet, type KubernetesOptions } from './kubernetes.ts';
 
@@ -46,10 +49,32 @@ describe('sandbox pod', () => {
   });
 
   it('carries limits, runtime, network label and a read-only toolbox', () => {
-    expect(pod.containers[0]!.resources!.limits).toEqual({ cpu: '1500m', memory: '2048Mi' });
+    expect(pod.containers[0]!.resources!.limits).toEqual({ cpu: '1500m', memory: '2048Mi', 'ephemeral-storage': '10Gi' });
     expect(pod.runtimeClassName).toBe('gvisor');
     expect(set.spec!.template.metadata!.labels!['cocoon.dev/network']).toBe('egress');
     expect(pod.containers[0]!.volumeMounts!.find((m) => m.name === 'toolbox')!.readOnly).toBe(true);
+  });
+});
+
+describe('volume init container', () => {
+  it('builds the home once, also after a copy that was interrupted', () => {
+    const script = sandboxStatefulSet({ sandboxId: 'sb_1', name: 'x', image: 'img', network: 'none', runtime: null, resources: {}, workdir: '/workspace', env: {}, toolbox: false }, opts)
+      .spec!.template.spec!.initContainers![0]!.command![2]!;
+    const dir = mkdtempSync(join(tmpdir(), 'cocoon-vol-'));
+    try {
+      mkdirSync(join(dir, 'home.new'));
+      writeFileSync(join(dir, 'home.new', 'half'), '');
+      const run = () => execFileSync('sh', ['-c', script.replace('cd /data', `cd '${dir}'`)]);
+      run();
+      expect(existsSync(join(dir, 'home.new'))).toBe(false);
+      expect(existsSync(join(dir, 'home', 'half'))).toBe(false);
+      writeFileSync(join(dir, 'home', 'kept'), '');
+      run();
+      expect(existsSync(join(dir, 'home', 'kept'))).toBe(true);
+      expect(existsSync(join(dir, 'workspace'))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
